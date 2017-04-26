@@ -1,6 +1,7 @@
 import copy
 from thespian.actors import *
 from messages import *
+from event_queue import EventQueue
 
 class AbstractTimeActor(Actor):
     """Actor which receives sycnchronization ticks and send timed messages accordingly"""
@@ -114,6 +115,6 @@ class Synchronizer(Actor):
 
     def _sendTicks(self):
         tick = TickMsg(self.current_time)
-        for t in targets:
+        for t in self.targets:
             self.send(t, tick)
         self.current_time += self.delta

@@ -19,8 +19,10 @@ class Overlord(Actor):
             pass
 
     def startSystem(self, message):
+        print("Overlord is started")
+
         G = message.graph
-        (n_packages, pack_delta) = message.packet_distr
+        (n_packages, pack_delta) = message.packets_distr
         (sync_delta, period) = message.emulation_settings
 
         synchronizer = self.createActor(Synchronizer, globalName='synchronizer')
@@ -30,16 +32,23 @@ class Overlord(Actor):
         for n in G:
             routers[n] = self.createActor(SimpleQRouter)
 
+        print("Starting routers")
         for n in G:
             cur_router = routers[n]
-            self.send(cur_router, RouterInitMsg(n, G.neighbors(n), routers))
+            self.send(cur_router, QRouterInitMsg(network_addr=n,
+                                                 neighbors=G.neighbors(n),
+                                                 network=routers,
+                                                 learning_rate=0.1))
 
+        print("Starting pkg sender")
         self.send(pkg_sender, PkgSenderInitMsg(n_packages, pack_delta, sync_delta, routers))
-        self.senf(synchronizer, SynchronizerInitMsg(list(routers.values()) + [pkg_sender], sync_delta, period))
+
+        print("Starting synchronizer")
+        self.send(synchronizer, SynchronizerInitMsg(list(routers.values()) + [pkg_sender], sync_delta, period))
 
     def recordPkg(self, message):
         pkg = message.getContents()
-        print("PACKAGE #{} DONE: path time {}, route: {}".format(id(pkg), message.time - pkg.start_time, pkg.route))
+        print("PACKAGE #{} DONE: path time {}, route: {}".format(pkg.id, message.time - pkg.start_time, pkg.route))
 
 class PkgSender(AbstractTimeActor):
     """Sends series of packages according to given settings"""
@@ -56,6 +65,7 @@ class PkgSender(AbstractTimeActor):
         try:
             while self.pkg_iterator.peek()[1].time <= time:
                 (target, e) = self.pkg_iterator.next()
+                print("PACKAGE #{} SENT".format(e.getContents().id))
                 self.resendEventDelayed(target, e, self.sync_delta)
         except StopIteration:
             pass
@@ -63,8 +73,10 @@ class PkgSender(AbstractTimeActor):
     def _pkgGen(self, network, n_packages, pkg_delta):
         addrs = list(network.keys())
         cur_time = 0
+        pkg_id = 1
         for i in range(0, n_packages):
             [s, d] = random.sample(addrs, 2)
-            pkg = Package(d, cur_time + self.sync_delta, None)
-            yield (network[d], PackageMsg(cur_time, self.myAddress, pkg))
+            pkg = Package(pkg_id, d, cur_time + self.sync_delta, None)
+            yield (network[s], PackageMsg(cur_time, self.myAddress, pkg))
             cur_time += pkg_delta
+            pkg_id += 1

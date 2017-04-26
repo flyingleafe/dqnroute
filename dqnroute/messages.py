@@ -67,9 +67,10 @@ class OverlordInitMsg(InitMsg):
 class SynchronizerInitMsg(InitMsg):
     """Init message for synchronizer"""
 
-    def __init__(self, targets, delta=1., period=dt.timedelta(seconds=1) **kwargs):
+    def __init__(self, targets, delta=1.0, period=dt.timedelta(seconds=1), **kwargs):
         super().__init__(**kwargs)
         self.targets = targets
+        self.delta = delta
         self.period = period
 
 class PkgSenderInitMsg(InitMsg):
@@ -114,8 +115,10 @@ class RewardMsg(ServiceMsg):
         self.estimate = estimate
         self.dst = dst
 
+@total_ordering
 class Package:
-    def __init__(self, dst, start_time, contents):
+    def __init__(self, pkg_id, dst, start_time, contents):
+        self.id = pkg_id
         self.dst = dst
         self.start_time = start_time
         self.route = []
@@ -123,3 +126,9 @@ class Package:
 
     def route_add(self, addr):
         self.route.append(addr)
+
+    def __eq__(self, other):
+        return self.id == other.id
+
+    def __lt__(self, other):
+        return self.id < other.id

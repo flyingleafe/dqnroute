@@ -1,4 +1,5 @@
 import sys
+import signal
 import networkx as nx
 import datetime as dt
 
@@ -6,7 +7,13 @@ from thespian.actors import *
 from overlord import Overlord
 from messages import OverlordInitMsg
 
+def sigint_handler(signal, frame):
+    print("Ctrl-C is hit, shutting down actor system...")
+    ActorSystem().shutdown()
+
 def main():
+    signal.signal(signal.SIGINT, sigint_handler)
+
     n = int(next(sys.stdin))
     edges = []
     for i in range(0, n):

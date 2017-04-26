@@ -23,7 +23,7 @@ class EventQueue:
     def _earlier_than(self, time, k, es):
         if k >= len(self._heap):
             return
-        if self._heap[k] <= time:
+        if self._heap[k].time <= time:
             es.append(self._heap[k])
             self._earlier_than(time, 2*k + 1, es)
             self._earlier_than(time, 2*k + 2, es)

@@ -34,6 +34,7 @@ class Router(TimeActor):
             self.receivePackage(event)
             pkg = event.getContents()
             pkg.route_add(self.addr)
+            print("ROUTER #{} ROUTES PACKAGE TO {}".format(self.addr, pkg.dst))
             if pkg.dst == self.addr:
                 self.reportPkgDone(event)
             else:
@@ -76,15 +77,15 @@ class SimpleQRouter(Router):
         pkg = pkg_event.getContents()
         d = pkg.dst
         best_estimate = 0 if self.addr == d else dict_min(self.Q[d])[1]
-        self.sendServiceMsg(pkg_event.sender, RewardMsg(id(pkg), self.current_time, best_estimate, dst))
+        self.sendServiceMsg(pkg_event.sender, RewardMsg(pkg.id, self.current_time, best_estimate, d))
 
     def routePackage(self, pkg_event):
         pkg = pkg_event.getContents()
         d = pkg.dst
         best_neighbor = dict_min(self.Q[d])[0]
         target = self.network[best_neighbor]
-        self.routed_pkgs_times[id(pkg)] = self.current_time
-        self.resendEventDelayed(target, pkg_event, delay)
+        self.routed_pkgs_times[pkg.id] = self.current_time
+        self.resendEventDelayed(target, pkg_event, 1.0)
 
     def receiveServiceMsg(self, message, sender):
         if isinstance(message, RewardMsg):
