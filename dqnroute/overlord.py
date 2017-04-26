@@ -13,6 +13,8 @@ class Overlord(Actor):
     def receiveMessage(self, message, sender):
         if isinstance(message, OverlordInitMsg):
             self.startSystem(message)
+        elif isinstance(message, PackageMsg):
+            self.recordPkg(message)
         else:
             pass
 
@@ -35,7 +37,13 @@ class Overlord(Actor):
         self.send(pkg_sender, PkgSenderInitMsg(n_packages, pack_delta, sync_delta, routers))
         self.senf(synchronizer, SynchronizerInitMsg(list(routers.values()) + [pkg_sender], sync_delta, period))
 
+    def recordPkg(self, message):
+        pkg = message.getContents()
+        print("PACKAGE #{} DONE: path time {}, route: {}".format(id(pkg), message.time - pkg.start_time, pkg.route))
+
 class PkgSender(AbstractTimeActor):
+    """Sends series of packages according to given settings"""
+
     def __init__(self):
         self.pkg_iterator = None
         self.sync_delta = None

@@ -1,5 +1,6 @@
 import sys
 import networkx as nx
+import datetime as dt
 
 from thespian.actors import *
 from overlord import Overlord
@@ -13,14 +14,18 @@ def main():
 
     package_info = tuple(next(sys.stdin).split())
     n_packages = int(package_info[0])
-    delta = float(package_info[1])
+    pkg_delta = float(package_info[1])
+
+    emulation_settings = tuple(next(sys.stdin).split())
+    sync_delta = float(emulation_settings[0])
+    period = dt.timedelta(milliseconds=int(emulation_settings[1]))
 
     G = nx.Graph()
     G.add_edges_from(edges)
 
     actorSys = ActorSystem('multiprocQueueBase')
     overlord = actorSys.createActor(Overlord, globalName='overlord')
-    actorSys.tell(overlord, OverlordInitMsg(G, (n_packages, delta)))
+    actorSys.tell(overlord, OverlordInitMsg(G, (n_packages, pkg_delta), (sync_delta, period)))
 
     # answer = actorSys.ask(hello, 'hi', 1)
     # print(answer['b'])

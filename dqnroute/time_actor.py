@@ -49,6 +49,7 @@ class TimeActor(AbstractTimeActor):
     """
 
     def __init__(self):
+        self.current_time = 0
         self.incomingEvents = EventQueue()
         self.outgoingEvents = {}
 
@@ -67,7 +68,7 @@ class TimeActor(AbstractTimeActor):
         """
         Handling events in the sequence they should be evaluated
         """
-
+        self.current_time = time
         events = []
         for e in self.incomingEvents.earlier_than(time):
             events.append((e, None))
@@ -77,6 +78,7 @@ class TimeActor(AbstractTimeActor):
         events.sort()
 
         for (e, tag) in events:
+            self.current_time = e.time
             if tag is None:
                 self.incomingEvents.pop()
                 self.processEvent(e)

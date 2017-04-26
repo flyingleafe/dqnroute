@@ -7,7 +7,7 @@ class Message:
     def __init__(self, contents):
         self.contents = contents
 
-    def get_contents(self):
+    def getContents(self):
         return self.contents
 
 # Message classes for events layer
@@ -52,42 +52,51 @@ class ServiceMsg(Message):
 
 class InitMsg(Message):
     """Base class for init message (to distinguish it from every other)"""
+    def __init__(self, **kwargs):
+        super().__init__(kwargs)
 
 class OverlordInitMsg(InitMsg):
     """Init message for overlord"""
 
     def __init__(self, graph, packets_distr, emulation_settings, **kwargs):
+        super().__init__(**kwargs)
         self.graph = graph
         self.packets_distr = packets_distr
         self.emulation_settings = emulation_settings
-        super().__init__(kwargs)
 
 class SynchronizerInitMsg(InitMsg):
     """Init message for synchronizer"""
 
     def __init__(self, targets, delta=1., period=dt.timedelta(seconds=1) **kwargs):
+        super().__init__(**kwargs)
         self.targets = targets
         self.period = period
-        super().__init__(kwargs)
 
 class PkgSenderInitMsg(InitMsg):
     """Init message for package sender"""
 
     def __init__(self, n_packages, pkg_delta, sync_delta, network, **kwargs):
+        super().__init__(**kwargs)
         self.n_packages = n_packages
         self.pkg_delta = pkg_delta
         self.sync_delta = sync_delta
         self.network = network
-        super().__init__(kwargs)
 
 class RouterInitMsg(InitMsg):
     """Init message for router"""
 
-    def __init__(self, n, neighbors, network, **kwargs):
-        self.network_addr = n
+    def __init__(self, network_addr, neighbors, network, **kwargs):
+        super().__init__(**kwargs)
+        self.network_addr = network_addr
         self.neighbors = neighbors
         self.network = network
-        super().__init__(kwargs)
+
+class QRouterInitMsg(RouterInitMsg):
+    """Init message for QRouter"""
+
+    def __init__(self, learning_rate, **kwargs):
+        super().__init__(**kwargs)
+        self.learning_rate = learning_rate
 
 # Routing messages
 # ===
@@ -98,7 +107,12 @@ class PackageMsg(EventMsg):
     pass
 
 class RewardMsg(ServiceMsg):
-    pass
+    def __init__(self, pkg_id, cur_time, estimate, dst, **kwargs):
+        super().__init__(kwargs)
+        self.pkg_id = pkg_id
+        self.cur_time = cur_time
+        self.estimate = estimate
+        self.dst = dst
 
 class Package:
     def __init__(self, dst, start_time, contents):
