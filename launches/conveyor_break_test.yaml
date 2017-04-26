@@ -1,0 +1,75 @@
+configuration:
+  - sections:
+      0: {length: 0, upstream_neighbor: 1}
+      1: {length: 5, upstream_neighbor: 2, adjacent_neighbor: 30}
+      2: {length: 5, upstream_neighbor: 3, adjacent_neighbor: 11}
+      3: {length: 5, upstream_neighbor: 4}
+      4: {length: 5, upstream_neighbor: 5}
+  - sections:
+      5: {length: 5, upstream_neighbor: 6, adjacent_neighbor: 15}
+      6: {length: 5, upstream_neighbor: 7}
+      7: {length: 5, upstream_neighbor: 8}
+      8: {length: 0}
+  - sections:
+      9: {length: 0, upstream_neighbor: 10}
+      10: {length: 5, upstream_neighbor: 11}
+      11: {length: 5, upstream_neighbor: 12}
+      12: {length: 5, upstream_neighbor: 23, adjacent_neighbor: 23}
+      13: {length: 5, upstream_neighbor: 14, adjacent_neighbor: 4}
+  - section:
+      14: {length: 5, upstream_neighbor: 15}
+      15: {length: 5, upstream_neighbor: 16}
+      16: {length: 5, upstream_neighbor: 17, adjacent_neighbor: 26}
+      17: {length: 5, upstream_neighbor: 18, adjacent_neighbor: 8}
+      18: {length: 0}
+  - sections:
+      19: {length: 0, upstream_neighbor: 20}
+      20: {length: 5, upstream_neighbor: 21, adjacent_neighbor: 28}
+      21: {length: 5, upstream_neighbor: 22, adjacent_neighbor: 12}
+      22: {length: 5, upstream_neighbor: 23}
+      23: {length: 5, upstream_neighbor: 24}
+  - sections:
+      24: {length: 5, upstream_neighbor: 25, adjacent_neighbor: 16}
+      25: {length: 5, upstream_neighbor: 26}
+      26: {length: 5, upstream_neighbor: 27}
+      27: {length: 0}
+  - sections:
+      28: {length: 20, upstream_neighbor: 29, adjacent_neighbor: 24}
+      29: {length: 20, upstream_neighbor: 27}
+  - sections:
+      30: {length: 20, upstream_neighbor: 31, adjacent_neighbor: 5}
+      31: {length: 20, upstream_neighbor: 7}
+
+settings:
+  bags_distr:
+    seed: 42
+    sequence:
+      - {bags_number: 200, delta: 20} 
+  synchronizer:
+    period:
+      link_state: 20
+      simple_q: 30
+      dqn: 150
+    delta: 10
+  logging:
+    delta: 500
+  router:
+    sources: [0, 1]
+    sinks: [17, 18, 19, 20]
+    speed: 1
+    energy_consumption: 1
+    sec_process_time: 2
+    stop_delay: 40
+    energy_reward_weight: 0.5
+    learning_rate: 0.5
+    nn_type: 'ff_amatrix_flat_add'
+    flat_inputs:
+      work_status: 'graph_size'
+    optimizer: 'rmsprop'
+    scope: 'conveyor_links'
+    ff_activation: 'tanh'
+    layers: [64, 64]
+    pkg_states: False
+    batch_size: 1
+    mem_capacity: 1
+    prioritized_xp: False 

@@ -1,0 +1,43 @@
+network:
+  - {u: 0, v: 1, latency: 10, bandwidth: 1024}
+  - {u: 0, v: 2, latency: 10, bandwidth: 1024}
+  - {u: 1, v: 6, latency: 10, bandwidth: 1024}
+  - {u: 2, v: 6, latency: 10, bandwidth: 1024}
+  - {u: 1, v: 8, latency: 10, bandwidth: 1024}
+  - {u: 8, v: 9, latency: 10, bandwidth: 1024}
+  - {u: 6, v: 7, latency: 10, bandwidth: 1024}
+  - {u: 3, v: 4, latency: 10, bandwidth: 1024}
+  - {u: 4, v: 5, latency: 10, bandwidth: 1024}
+  - {u: 3, v: 7, latency: 10, bandwidth: 1024}
+  - {u: 5, v: 7, latency: 10, bandwidth: 1024}
+  - {u: 5, v: 9, latency: 10, bandwidth: 1024}
+
+settings:
+  pkg_distr:
+    seed: 42
+    sequence:
+      # - {pkg_number: 1000, delta: 10} 
+      - {pkg_number: 100, delta: 20}
+      - {pkg_number: 500, delta: 20, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
+      - {action: 'break_link', pause: 20, u: 6, v: 7}
+      - {pkg_number: 500, delta: 20, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
+      - {action: 'restore_link', pause: 20, u: 6, v: 7}
+      - {pkg_number: 500, delta: 20, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
+  synchronizer:
+    period:
+      link_state: 20
+      simple_q: 30
+      dqn: 40
+    delta: 10
+  logging:
+    delta: 500
+  router:
+    learning_rate: 1
+    beta_rate: 0.1
+    gamma_rate: 0.3
+    pkg_process_delay: 5
+    model_file: '../tf_model'
+    batch_size: 1
+    mem_capacity: 1
+    prioritized_xp: False
+

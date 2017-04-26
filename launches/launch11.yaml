@@ -1,0 +1,62 @@
+network:
+  - {u: 13, v: 2, latency: 10, bandwidth: 2048}
+  - {u: 11, v: 0, latency: 10, bandwidth: 2048}
+  - {u: 12, v: 1, latency: 10, bandwidth: 2048}
+  - {u: 2, v: 3, latency: 10, bandwidth: 2048}
+  - {u: 0, v: 3, latency: 10, bandwidth: 2048}
+  - {u: 0, v: 4, latency: 10, bandwidth: 2048}
+  - {u: 0, v: 6, latency: 10, bandwidth: 2048}
+  - {u: 1, v: 3, latency: 10, bandwidth: 2048}
+  - {u: 1, v: 4, latency: 10, bandwidth: 2048}
+  - {u: 1, v: 6, latency: 10, bandwidth: 2048}
+  - {u: 3, v: 14, latency: 10, bandwidth: 2048}
+  - {u: 3, v: 5, latency: 10, bandwidth: 2048}
+  - {u: 4, v: 5, latency: 10, bandwidth: 2048}
+  - {u: 4, v: 9, latency: 10, bandwidth: 2048}
+  - {u: 6, v: 7, latency: 10, bandwidth: 2048}
+  - {u: 7, v: 8, latency: 10, bandwidth: 2048}
+  - {u: 8, v: 9, latency: 10, bandwidth: 2048}
+  - {u: 9, v: 10, latency: 10, bandwidth: 2048}
+  - {u: 10, v: 14, latency: 10, bandwidth: 2048}
+  - {u: 5, v: 14, latency: 10, bandwidth: 2048}
+  - {u: 5, v: 10, latency: 10, bandwidth: 2048} 
+
+settings:
+  pkg_distr:
+    seed: 43
+    sequence:
+      # - {pkg_number: 1000, delta: 10} 
+      - {pkg_number: 1000, delta: 10, sources: [12, 13, 14], dests: [15]}
+  synchronizer:
+    period:
+      dqn: 300
+      link_state: 100
+      simple_q: 100
+    delta: 10
+  logging:
+    delta: 500
+  router:
+    learning_rate: 0.5
+    beta_rate: 0.7
+    gamma_rate: 0.9
+    pkg_process_delay: 10
+    nn_type: 'rnn_amatrix'
+    optimizer: 'rmsprop'
+    ff_activation: 'tanh'
+    layers: [64, 64]
+    batch_size: 1
+    mem_capacity: 1
+    prioritized_xp: False
+  routers_individual:
+    14:
+      pkg_process_delay: 0
+    6:
+      pkg_process_delay: 5
+    7:
+      pkg_process_delay: 5
+    8:
+      pkg_process_delay: 5
+    9:
+      pkg_process_delay: 5
+    10:
+      pkg_process_delay: 5

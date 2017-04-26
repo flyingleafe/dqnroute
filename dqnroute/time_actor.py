@@ -1,13 +1,17 @@
 import copy
+import datetime as dt
+
 from thespian.actors import *
-from messages import *
+from .messages import *
+from .event_queue import EventQueue
 
 class AbstractTimeActor(Actor):
     """Actor which receives sycnchronization ticks and send timed messages accordingly"""
 
     def receiveMessage(self, message, sender):
         if isinstance(message, InitMsg):
-            self.initialize(message, sender)
+            my_id = self.initialize(message, sender)
+            self.send(sender, FinishInitMsg(my_id))
         elif isinstance(message, EventMsg):
             self.handleIncomingEvent(message, sender)
         elif isinstance(message, ServiceMsg):
@@ -50,40 +54,24 @@ class TimeActor(AbstractTimeActor):
 
     def __init__(self):
         self.current_time = 0
-        self.incomingEvents = EventQueue()
-        self.outgoingEvents = {}
-
-    def sendEvent(self, targetAddress, event):
-        tkey = targetAddress.actorAddressString
-        if tkey not in self.outgoingEvents:
-            self.outgoingEvents[tkey] = EventQueue()
-        self.outgoingEvents[tkey].push(event)
-        self.send(targetAddress, event)
+        self.event_queue = EventQueue()
 
     def handleIncomingEvent(self, message, sender):
         message.sender = sender
-        self.incomingEvents.push(message)
+        self.event_queue.push(message)
 
     def handleTick(self, time):
         """
         Handling events in the sequence they should be evaluated
         """
-        self.current_time = time
-        events = []
-        for e in self.incomingEvents.earlier_than(time):
-            events.append((e, None))
-        for (target, queue) in self.outgoingEvents.items():
-            for e in queue.earlier_than(time):
-                events.append((e, target))
-        events.sort()
-
-        for (e, tag) in events:
-            self.current_time = e.time
-            if tag is None:
-                self.incomingEvents.pop()
+        try:
+            while self.event_queue.peek().time <= time:
+                e = self.event_queue.pop()
+                self.current_time = e.time
                 self.processEvent(e)
-            else:
-                self.outgoingEvents[tag].pop()
+        except IndexError:
+            pass
+        self.current_time = time
 
     def processEvent(self, event):
         pass
@@ -96,24 +84,36 @@ class Synchronizer(Actor):
         self.delta = None
         self.current_time = 0
         self.targets = []
+        self.cur_period_n = 0
 
     def receiveMessage(self, message, sender):
         if isinstance(message, SynchronizerInitMsg):
             self.period = message.period
             self.delta = message.delta
             self.targets = message.targets
-            self._delayTick()
+            print("Pause for 5 secs before synchronizer starts...")
+            self._delayTick(dt.timedelta(seconds=5))
         elif isinstance(message, WakeupMessage):
             self._sendTicks()
             self._delayTick()
         else:
             pass
 
-    def _delayTick(self):
-        self.wakeupAfter(self.period)
+    def _getPeriod(self):
+        if type(self.period) == int:
+            return dt.timedelta(milliseconds=self.period)
+        period, tick_th = self.period[self.cur_period_n]
+        if self.current_time >= tick_th and self.cur_period_n < len(self.period) - 1:
+            self.cur_period_n += 1
+        return dt.timedelta(milliseconds=period)
+
+    def _delayTick(self, period=None):
+        if period is None:
+            period = self._getPeriod()
+        self.wakeupAfter(period)
 
     def _sendTicks(self):
         tick = TickMsg(self.current_time)
-        for t in targets:
+        for t in self.targets:
             self.send(t, tick)
         self.current_time += self.delta

@@ -1,20 +1,36 @@
 with import <nixpkgs> {};
-with pkgs.python35Packages;
 
-buildPythonPackage {
+python36Packages.buildPythonPackage {
     name = "thesis-env";
     buildInputs = [
         git
-	emacs
         libzip
 	libpng
 	freetype
-        python35Full
-        python35Packages.virtualenv
- 	python35Packages.setuptools
-	python35Packages.matplotlib
+        python36Full
+        python36Packages.virtualenv
+ 	python36Packages.setuptools
+	python36Packages.matplotlib
+        python36Packages.Keras
+	python36Packages.pandas
+        python36Packages.numpy
+        python36Packages.scipy
+        python36Packages.scikitlearn
+        python36Packages.seaborn
+        python36Packages.jupyter_core
+        python36Packages.jupyter
+        python36Packages.jupyter_client
+        python36Packages.jupyterlab
+        python36Packages.backports_shutil_get_terminal_size
+        python36Packages.ipython
+        python36Packages.ipykernel
+	#python35Packages.tensorflow
+	#python36Packages.networkx
+	python36Packages.h5py
         stdenv
         zlib
+	bazel
+        graphviz
     ];
     # When used as `nix-shell --pure`
     shellHook = ''
