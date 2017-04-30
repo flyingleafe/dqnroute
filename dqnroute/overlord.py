@@ -4,17 +4,29 @@ from thespian.actors import *
 from more_itertools import peekable
 
 from messages import *
+from event_series import EventSeries
 from time_actor import Synchronizer, AbstractTimeActor
 from router import SimpleQRouter
 
 class Overlord(Actor):
     """Elder actor to start system and rule them all"""
 
+    def __init__(self):
+        self.router_counts = {}
+        self.avg_times = EventSeries(10)
+        self.avg_route_lens = EventSeries(10)
+        self.cur_time = 0
+        self.cur_sum_time = 0
+        self.cur_count = 0
+
     def receiveMessage(self, message, sender):
         if isinstance(message, OverlordInitMsg):
             self.startSystem(message)
-        elif isinstance(message, PackageMsg):
+        elif isinstance(message, PkgDoneMsg):
             self.recordPkg(message)
+        elif isinstance(message, ReportRequest):
+            self.reportResults()
+            self.send(sender, ReportDone(None))
         else:
             pass
 
@@ -32,13 +44,15 @@ class Overlord(Actor):
         for n in G:
             routers[n] = self.createActor(SimpleQRouter)
 
+
         print("Starting routers")
         for n in G:
             cur_router = routers[n]
+            neighbors_addrs = G.neighbors(n)
             self.send(cur_router, QRouterInitMsg(network_addr=n,
-                                                 neighbors=G.neighbors(n),
+                                                 neighbors={k: G.get_edge_data(n, k) for k in neighbors_addrs},
                                                  network=routers,
-                                                 learning_rate=0.1))
+                                                 learning_rate=0.2))
 
         print("Starting pkg sender")
         self.send(pkg_sender, PkgSenderInitMsg(n_packages, pack_delta, sync_delta, routers))
@@ -48,7 +62,22 @@ class Overlord(Actor):
 
     def recordPkg(self, message):
         pkg = message.getContents()
-        print("PACKAGE #{} DONE: path time {}, route: {}".format(pkg.id, message.time - pkg.start_time, pkg.route))
+        for k in pkg.route:
+            try:
+                self.router_counts[k] += 1
+            except KeyError:
+                self.router_counts[k] = 1
+
+        travel_time = message.time - pkg.start_time
+        self.avg_times.logEvent(message.time, travel_time)
+        self.avg_route_lens.logEvent(message.time, len(pkg.route))
+        print("PACKAGE #{} DONE: path time {}, route: {}".format(pkg.id, travel_time, pkg.route))
+
+    def reportResults(self):
+        for (n, count) in self.router_counts.items():
+            print(n, count)
+        print(self.avg_times.getSeries())
+        print(self.avg_route_lens.getSeries())
 
 class PkgSender(AbstractTimeActor):
     """Sends series of packages according to given settings"""
@@ -77,6 +106,6 @@ class PkgSender(AbstractTimeActor):
         for i in range(0, n_packages):
             [s, d] = random.sample(addrs, 2)
             pkg = Package(pkg_id, d, cur_time + self.sync_delta, None)
-            yield (network[s], PackageMsg(cur_time, self.myAddress, pkg))
+            yield (network[s], IncomingPkgEvent(cur_time, self.myAddress, pkg))
             cur_time += pkg_delta
             pkg_id += 1

@@ -51,40 +51,24 @@ class TimeActor(AbstractTimeActor):
 
     def __init__(self):
         self.current_time = 0
-        self.incomingEvents = EventQueue()
-        self.outgoingEvents = {}
-
-    def sendEvent(self, targetAddress, event):
-        tkey = targetAddress.actorAddressString
-        if tkey not in self.outgoingEvents:
-            self.outgoingEvents[tkey] = EventQueue()
-        self.outgoingEvents[tkey].push(event)
-        self.send(targetAddress, event)
+        self.event_queue = EventQueue()
 
     def handleIncomingEvent(self, message, sender):
         message.sender = sender
-        self.incomingEvents.push(message)
+        self.event_queue.push(message)
 
     def handleTick(self, time):
         """
         Handling events in the sequence they should be evaluated
         """
-        self.current_time = time
-        events = []
-        for e in self.incomingEvents.earlier_than(time):
-            events.append((e, None))
-        for (target, queue) in self.outgoingEvents.items():
-            for e in queue.earlier_than(time):
-                events.append((e, target))
-        events.sort()
-
-        for (e, tag) in events:
-            self.current_time = e.time
-            if tag is None:
-                self.incomingEvents.pop()
+        try:
+            while self.event_queue.peek().time <= time:
+                e = self.event_queue.pop()
+                self.current_time = e.time
                 self.processEvent(e)
-            else:
-                self.outgoingEvents[tag].pop()
+        except IndexError:
+            pass
+        self.current_time = time
 
     def processEvent(self, event):
         pass

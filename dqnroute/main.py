@@ -5,11 +5,19 @@ import datetime as dt
 
 from thespian.actors import *
 from overlord import Overlord
-from messages import OverlordInitMsg
+from messages import OverlordInitMsg, ReportRequest
 
 def sigint_handler(signal, frame):
-    print("Ctrl-C is hit, shutting down actor system...")
-    ActorSystem().shutdown()
+    actorSys = ActorSystem()
+    print("Ctrl-C is hit, reporting results...")
+    overlord = actorSys.createActor(Overlord, globalName='overlord')
+    actorSys.ask(overlord, ReportRequest(None))
+    print("Shutting down actor system...")
+    actorSys.shutdown()
+
+def parse_edge(s):
+    [a, b, w] = s.split()
+    return (int(a), int(b), float(w))
 
 def main():
     signal.signal(signal.SIGINT, sigint_handler)
@@ -17,7 +25,7 @@ def main():
     n = int(next(sys.stdin))
     edges = []
     for i in range(0, n):
-        edges.append(tuple([int(x) for x in next(sys.stdin).split()]))
+        edges.append(parse_edge(next(sys.stdin)))
 
     package_info = tuple(next(sys.stdin).split())
     n_packages = int(package_info[0])
@@ -28,7 +36,7 @@ def main():
     period = dt.timedelta(milliseconds=int(emulation_settings[1]))
 
     G = nx.Graph()
-    G.add_edges_from(edges)
+    G.add_weighted_edges_from(edges)
 
     actorSys = ActorSystem('multiprocQueueBase')
     overlord = actorSys.createActor(Overlord, globalName='overlord')

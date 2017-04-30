@@ -15,8 +15,9 @@ class Router(TimeActor):
         self.addr = None
         self.network = {}
         self.network_inv = {}
-        self.neighbors = []
-        self.package_id = 0
+        self.neighbors = {}
+        self.pkg_process_delay = 0.2
+        self.queue_time = 0
 
     def initialize(self, message, sender):
         super().initialize(message, sender)
@@ -30,23 +31,33 @@ class Router(TimeActor):
     def processEvent(self, event):
         if not self.isInitialized():
             raise RouterNotInitialized("Router has not been initialized!")
-        if isinstance(event, PackageMsg):
+
+        if isinstance(event, IncomingPkgEvent):
+            self.queue_time = max(self.current_time, self.queue_time) + self.pkg_process_delay
+            new_event = ProcessPkgEvent(self.queue_time, event.sender, event.getContents())
+            self.event_queue.push(new_event)
+        elif isinstance(event, ProcessPkgEvent):
             self.receivePackage(event)
             pkg = event.getContents()
             pkg.route_add(self.addr)
             print("ROUTER #{} ROUTES PACKAGE TO {}".format(self.addr, pkg.dst))
             if pkg.dst == self.addr:
-                self.reportPkgDone(event)
+                self.reportPkgDone(pkg, self.current_time)
             else:
-                self.routePackage(event)
+                best_neighbor = self.routePackage(pkg)
+                target = self.network[best_neighbor]
+                link_weight = self.neighbors[best_neighbor]['weight']
+                finish_time = self.current_time + link_weight
+                self.sendEvent(target, IncomingPkgEvent(finish_time, self.myAddress, pkg))
+                self.event_queue.push(PkgTransferEndEvent(finish_time, self.myAddress, pkg))
         else:
             pass
 
     def isInitialized(self):
         return self.overlord is not None
 
-    def reportPkgDone(self, pkg_event):
-        self.send(self.overlord, pkg_event)
+    def reportPkgDone(self, pkg, time):
+        self.send(self.overlord, PkgDoneMsg(time, self.myAddress, pkg))
 
     def receivePackage(self, pkg_event):
         pass
@@ -67,7 +78,7 @@ class SimpleQRouter(Router):
             self.learning_rate = message.learning_rate
             for n in self.network.keys():
                 self.Q[n] = {}
-                for k in self.neighbors:
+                for (k, data) in self.neighbors.items():
                     if k == n:
                         self.Q[n][k] = 1
                     else:
@@ -79,13 +90,10 @@ class SimpleQRouter(Router):
         best_estimate = 0 if self.addr == d else dict_min(self.Q[d])[1]
         self.sendServiceMsg(pkg_event.sender, RewardMsg(pkg.id, self.current_time, best_estimate, d))
 
-    def routePackage(self, pkg_event):
-        pkg = pkg_event.getContents()
+    def routePackage(self, pkg):
         d = pkg.dst
-        best_neighbor = dict_min(self.Q[d])[0]
-        target = self.network[best_neighbor]
         self.routed_pkgs_times[pkg.id] = self.current_time
-        self.resendEventDelayed(target, pkg_event, 1.0)
+        return dict_min(self.Q[d])[0]
 
     def receiveServiceMsg(self, message, sender):
         if isinstance(message, RewardMsg):

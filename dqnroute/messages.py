@@ -104,7 +104,16 @@ class QRouterInitMsg(RouterInitMsg):
 #
 # These classes represent layer of information on routing level
 
-class PackageMsg(EventMsg):
+class IncomingPkgEvent(EventMsg):
+    pass
+
+class ProcessPkgEvent(EventMsg):
+    pass
+
+class PkgTransferEndEvent(EventMsg):
+    pass
+
+class PkgDoneMsg(EventMsg):
     pass
 
 class RewardMsg(ServiceMsg):
@@ -132,3 +141,14 @@ class Package:
 
     def __lt__(self, other):
         return self.id < other.id
+
+# Finishing job
+# ===
+#
+# These are messages which are sent to/from overlord in the end
+
+class ReportRequest(Message):
+    pass
+
+class ReportDone(Message):
+    pass
