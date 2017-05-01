@@ -1,5 +1,7 @@
 import random
 import networkx as nx
+import datetime as dt
+
 from thespian.actors import *
 from more_itertools import peekable
 
@@ -34,8 +36,8 @@ class Overlord(Actor):
         print("Overlord is started")
 
         G = message.graph
-        (n_packages, pack_delta) = message.packets_distr
-        (sync_delta, period) = message.emulation_settings
+        pkg_distr = message.packets_distr
+        sync_settings = message.emulation_settings
 
         synchronizer = self.createActor(Synchronizer, globalName='synchronizer')
         pkg_sender = self.createActor(PkgSender, globalName='pkg_sender')
@@ -55,10 +57,15 @@ class Overlord(Actor):
                                                  learning_rate=0.2))
 
         print("Starting pkg sender")
-        self.send(pkg_sender, PkgSenderInitMsg(n_packages, pack_delta, sync_delta, routers))
+        self.send(pkg_sender, PkgSenderInitMsg(pkg_distr['pkg_number'],
+                                               pkg_distr['delta'],
+                                               sync_settings['delta'],
+                                               routers))
 
         print("Starting synchronizer")
-        self.send(synchronizer, SynchronizerInitMsg(list(routers.values()) + [pkg_sender], sync_delta, period))
+        self.send(synchronizer, SynchronizerInitMsg(list(routers.values()) + [pkg_sender],
+                                                    sync_settings['delta'],
+                                                    dt.timedelta(milliseconds=sync_settings['period'])))
 
     def recordPkg(self, message):
         pkg = message.getContents()
