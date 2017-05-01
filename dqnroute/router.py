@@ -1,5 +1,6 @@
 from thespian.actors import *
 
+from rl_agent import RLAgent
 from messages import *
 from time_actor import *
 
@@ -65,16 +66,46 @@ class Router(TimeActor):
     def routePackage(self, pkg_event):
         pass
 
-class SimpleQRouter(Router):
+class QRouter(Router, RLAgent):
+    def __init__(self):
+        super().__init__()
+        self.reward_pending = {}
+
+    def receivePackage(self, pkg_event):
+        self.sendServiceMsg(pkg_event.sender, self.mkRewardMsg(pkg_event.getContents()))
+
+    def routePackage(self, pkg):
+        state = self.getState(pkg)
+        self.reward_pending[pkg.id] = state
+        return self.act(state)
+
+    def receiveServiceMsg(self, message, sender):
+        if isinstance(message, RewardMsg):
+            prev_state = 0
+            try:
+                prev_state = self.reward_pending[message.pkg_id]
+            except KeyError:
+                print("Unexpected reward msg!")
+            self.observe(self.mkSample(message, prev_state, sender))
+
+    def mkRewardMsg(self, pkg):
+        pass
+
+    def getState(self, pkg):
+        pass
+
+    def mkSample(self, message, prev_state, sender):
+        pass
+
+class SimpleQRouter(QRouter):
     def __init__(self):
         super().__init__()
         self.Q = {}
-        self.routed_pkgs_times = {}
         self.learning_rate = None
 
     def initialize(self, message, sender):
         super().initialize(message, sender)
-        if isinstance(message, QRouterInitMsg):
+        if isinstance(message, SimpleQRouterInitMsg):
             self.learning_rate = message.learning_rate
             for n in self.network.keys():
                 self.Q[n] = {}
@@ -84,29 +115,31 @@ class SimpleQRouter(Router):
                     else:
                         self.Q[n][k] = len(self.network)
 
-    def receivePackage(self, pkg_event):
-        pkg = pkg_event.getContents()
+    def mkRewardMsg(self, pkg):
         d = pkg.dst
         best_estimate = 0 if self.addr == d else dict_min(self.Q[d])[1]
-        self.sendServiceMsg(pkg_event.sender, RewardMsg(pkg.id, self.current_time, best_estimate, d))
+        return SimpleRewardMsg(pkg.id, self.current_time, best_estimate, d)
 
-    def routePackage(self, pkg):
-        d = pkg.dst
-        self.routed_pkgs_times[pkg.id] = self.current_time
+    def mkSample(self, message, prev_state, sender):
+        if isinstance(message, SimpleRewardMsg):
+            sender_addr = self.network_inv[str(sender)]
+            sent_time = prev_state[0]
+            new_estimate = message.estimate + (message.cur_time - sent_time)
+            return (message.dst, sender_addr, new_estimate)
+        else:
+            raise Exception("Unsupported type of reward msg!")
+
+    def getState(self, pkg):
+        return (self.current_time, pkg.dst)
+
+    def act(self, state):
+        d = state[1]
         return dict_min(self.Q[d])[0]
 
-    def receiveServiceMsg(self, message, sender):
-        if isinstance(message, RewardMsg):
-            sender_addr = self.network_inv[str(sender)]
-            dst = message.dst
-            sent_time = None
-            try:
-                sent_time = self.routed_pkgs_times[message.pkg_id]
-            except KeyError:
-                print("Unexpected reward msg!")
-            new_estimate = message.estimate + (message.cur_time - sent_time)
-            delta = self.learning_rate * (new_estimate - self.Q[dst][sender_addr])
-            self.Q[dst][sender_addr] += delta
+    def observe(self, sample):
+        (dst, sender_addr, new_estimate) = sample
+        delta = self.learning_rate * (new_estimate - self.Q[dst][sender_addr])
+        self.Q[dst][sender_addr] += delta
 
 def dict_min(dct):
     return min(dct.items(), key=lambda x:x[1])

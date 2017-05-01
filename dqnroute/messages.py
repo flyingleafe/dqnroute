@@ -92,7 +92,7 @@ class RouterInitMsg(InitMsg):
         self.neighbors = neighbors
         self.network = network
 
-class QRouterInitMsg(RouterInitMsg):
+class SimpleQRouterInitMsg(RouterInitMsg):
     """Init message for QRouter"""
 
     def __init__(self, learning_rate, **kwargs):
@@ -117,9 +117,13 @@ class PkgDoneMsg(EventMsg):
     pass
 
 class RewardMsg(ServiceMsg):
-    def __init__(self, pkg_id, cur_time, estimate, dst, **kwargs):
+    def __init__(self, pkg_id, **kwargs):
         super().__init__(kwargs)
         self.pkg_id = pkg_id
+
+class SimpleRewardMsg(RewardMsg):
+    def __init__(self, pkg_id, cur_time, estimate, dst, **kwargs):
+        super().__init__(pkg_id, **kwargs)
         self.cur_time = cur_time
         self.estimate = estimate
         self.dst = dst

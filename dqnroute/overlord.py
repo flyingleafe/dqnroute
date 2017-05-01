@@ -51,10 +51,10 @@ class Overlord(Actor):
         for n in G:
             cur_router = routers[n]
             neighbors_addrs = G.neighbors(n)
-            self.send(cur_router, QRouterInitMsg(network_addr=n,
-                                                 neighbors={k: G.get_edge_data(n, k) for k in neighbors_addrs},
-                                                 network=routers,
-                                                 learning_rate=0.2))
+            self.send(cur_router, SimpleQRouterInitMsg(network_addr=n,
+                                                       neighbors={k: G.get_edge_data(n, k) for k in neighbors_addrs},
+                                                       network=routers,
+                                                       learning_rate=0.2))
 
         print("Starting pkg sender")
         self.send(pkg_sender, PkgSenderInitMsg(pkg_distr['pkg_number'],
