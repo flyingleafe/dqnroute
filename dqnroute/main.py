@@ -27,16 +27,16 @@ def main():
         return
 
     sfile = open(sys.argv[1])
-    settings = yaml.safe_load(sfile)
+    run_params = yaml.safe_load(sfile)
     sfile.close()
-    edges = list(map(lambda d: (d['u'], d['v'], d['weight']), settings['network']))
 
     G = nx.Graph()
-    G.add_weighted_edges_from(edges)
+    for e in run_params['network']:
+        G.add_edge(**e)
 
     actorSys = ActorSystem('multiprocQueueBase')
     overlord = actorSys.createActor(Overlord, globalName='overlord')
-    actorSys.tell(overlord, OverlordInitMsg(G, settings['pkg_distr'], settings['synchronizer']))
+    actorSys.tell(overlord, OverlordInitMsg(G, run_params['settings']))
 
     # answer = actorSys.ask(hello, 'hi', 1)
     # print(answer['b'])

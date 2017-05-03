@@ -58,11 +58,10 @@ class InitMsg(Message):
 class OverlordInitMsg(InitMsg):
     """Init message for overlord"""
 
-    def __init__(self, graph, packets_distr, emulation_settings, **kwargs):
+    def __init__(self, graph, settings, **kwargs):
         super().__init__(**kwargs)
         self.graph = graph
-        self.packets_distr = packets_distr
-        self.emulation_settings = emulation_settings
+        self.settings = settings
 
 class SynchronizerInitMsg(InitMsg):
     """Init message for synchronizer"""
@@ -76,10 +75,9 @@ class SynchronizerInitMsg(InitMsg):
 class PkgSenderInitMsg(InitMsg):
     """Init message for package sender"""
 
-    def __init__(self, n_packages, pkg_delta, sync_delta, network, **kwargs):
+    def __init__(self, pkg_distr, sync_delta, network, **kwargs):
         super().__init__(**kwargs)
-        self.n_packages = n_packages
-        self.pkg_delta = pkg_delta
+        self.pkg_distr = pkg_distr
         self.sync_delta = sync_delta
         self.network = network
 
@@ -93,11 +91,14 @@ class RouterInitMsg(InitMsg):
         self.network = network
 
 class SimpleQRouterInitMsg(RouterInitMsg):
-    """Init message for QRouter"""
+    """Init message for SimpleQRouter"""
 
     def __init__(self, learning_rate, **kwargs):
         super().__init__(**kwargs)
         self.learning_rate = learning_rate
+
+class DQNRouterInitMsg(RouterInitMsg):
+    """Init message for DQNRouter"""
 
 # Routing messages
 # ===
@@ -128,10 +129,19 @@ class SimpleRewardMsg(RewardMsg):
         self.estimate = estimate
         self.dst = dst
 
+class DQNRewardMsg(RewardMsg):
+    def __init__(self, pkg_id, pkg_size, cur_time, estimate, dst, **kwargs):
+        super().__init__(pkg_id, **kwargs)
+        self.pkg_size = pkg_size
+        self.cur_time = cur_time
+        self.estimate = estimate
+        self.dst = dst
+
 @total_ordering
 class Package:
-    def __init__(self, pkg_id, dst, start_time, contents):
+    def __init__(self, pkg_id, size, dst, start_time, contents):
         self.id = pkg_id
+        self.size = size
         self.dst = dst
         self.start_time = start_time
         self.route = []

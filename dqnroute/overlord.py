@@ -36,8 +36,9 @@ class Overlord(Actor):
         print("Overlord is started")
 
         G = message.graph
-        pkg_distr = message.packets_distr
-        sync_settings = message.emulation_settings
+        settings = message.settings
+        pkg_distr = settings['pkg_distr']
+        sync_settings = settings['synchronizer']
 
         synchronizer = self.createActor(Synchronizer, globalName='synchronizer')
         pkg_sender = self.createActor(PkgSender, globalName='pkg_sender')
@@ -57,8 +58,7 @@ class Overlord(Actor):
                                                        learning_rate=0.2))
 
         print("Starting pkg sender")
-        self.send(pkg_sender, PkgSenderInitMsg(pkg_distr['pkg_number'],
-                                               pkg_distr['delta'],
+        self.send(pkg_sender, PkgSenderInitMsg(pkg_distr,
                                                sync_settings['delta'],
                                                routers))
 
@@ -95,7 +95,7 @@ class PkgSender(AbstractTimeActor):
 
     def initialize(self, message, sender):
         self.sync_delta = message.sync_delta
-        self.pkg_iterator = peekable(self._pkgGen(message.network, message.n_packages, message.pkg_delta))
+        self.pkg_iterator = peekable(self._pkgGen(message.network, message.pkg_distr))
 
     def handleTick(self, time):
         try:
@@ -106,13 +106,16 @@ class PkgSender(AbstractTimeActor):
         except StopIteration:
             pass
 
-    def _pkgGen(self, network, n_packages, pkg_delta):
+    def _pkgGen(self, network, distr_list):
         addrs = list(network.keys())
         cur_time = 0
         pkg_id = 1
-        for i in range(0, n_packages):
-            [s, d] = random.sample(addrs, 2)
-            pkg = Package(pkg_id, d, cur_time + self.sync_delta, None)
-            yield (network[s], IncomingPkgEvent(cur_time, self.myAddress, pkg))
-            cur_time += pkg_delta
-            pkg_id += 1
+        for distr in distr_list:
+            n_packages = distr['pkg_number']
+            pkg_delta = distr['delta']
+            for i in range(0, n_packages):
+                [s, d] = random.sample(addrs, 2)
+                pkg = Package(pkg_id, 1024, d, cur_time + self.sync_delta, None)
+                yield (network[s], IncomingPkgEvent(cur_time, self.myAddress, pkg))
+                cur_time += pkg_delta
+                pkg_id += 1

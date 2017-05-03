@@ -17,8 +17,9 @@ class Router(TimeActor):
         self.network = {}
         self.network_inv = {}
         self.neighbors = {}
-        self.pkg_process_delay = 0.2
+        self.pkg_process_delay = 3
         self.queue_time = 0
+        self.link_states = {}
 
     def initialize(self, message, sender):
         super().initialize(message, sender)
@@ -28,6 +29,8 @@ class Router(TimeActor):
             self.neighbors = message.neighbors
             self.network = message.network
             self.network_inv = {str(target) : addr for addr, target in message.network.items()}
+            for n in self.neighbors.keys():
+                self.link_states[n] = {'transfer_time': 0, 'alive': True}
 
     def processEvent(self, event):
         if not self.isInitialized():
@@ -47,10 +50,13 @@ class Router(TimeActor):
             else:
                 best_neighbor = self.routePackage(pkg)
                 target = self.network[best_neighbor]
-                link_weight = self.neighbors[best_neighbor]['weight']
-                finish_time = self.current_time + link_weight
+                link_latency = self.neighbors[best_neighbor]['latency']
+                link_bandwidth = self.neighbors[best_neighbor]['bandwidth']
+                transfer_start_time = max(self.current_time, self.link_states[best_neighbor]['transfer_time'])
+                transfer_end_time = transfer_start_time + (pkg.size / link_bandwidth)
+                finish_time = transfer_end_time + link_latency
+                self.link_states[best_neighbor]['transfer_time'] = transfer_end_time
                 self.sendEvent(target, IncomingPkgEvent(finish_time, self.myAddress, pkg))
-                self.event_queue.push(PkgTransferEndEvent(finish_time, self.myAddress, pkg))
         else:
             pass
 
@@ -111,9 +117,9 @@ class SimpleQRouter(QRouter):
                 self.Q[n] = {}
                 for (k, data) in self.neighbors.items():
                     if k == n:
-                        self.Q[n][k] = 1
+                        self.Q[n][k] = 2 * data['latency']
                     else:
-                        self.Q[n][k] = len(self.network)
+                        self.Q[n][k] = 100500
 
     def mkRewardMsg(self, pkg):
         d = pkg.dst
