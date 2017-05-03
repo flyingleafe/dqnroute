@@ -16,3 +16,8 @@ settings:
   synchronizer:
     period: 20
     delta: 5
+  logging:
+    delta: 10
+  router:
+    learning_rate: 0.2
+    pkg_process_delay: 3

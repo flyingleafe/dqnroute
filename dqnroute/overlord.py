@@ -9,14 +9,14 @@ from messages import *
 from event_series import EventSeries
 from time_actor import Synchronizer, AbstractTimeActor
 from router import SimpleQRouter
+from dqn_router import DQNRouter
 
 class Overlord(Actor):
     """Elder actor to start system and rule them all"""
 
     def __init__(self):
         self.router_counts = {}
-        self.avg_times = EventSeries(10)
-        self.avg_route_lens = EventSeries(10)
+        self.times_data = None
         self.cur_time = 0
         self.cur_sum_time = 0
         self.cur_count = 0
@@ -39,23 +39,27 @@ class Overlord(Actor):
         settings = message.settings
         pkg_distr = settings['pkg_distr']
         sync_settings = settings['synchronizer']
+        logging_settings = settings['logging']
+        router_settings = settings['router']
+
+        self.times_data = EventSeries(logging_settings['delta'])
 
         synchronizer = self.createActor(Synchronizer, globalName='synchronizer')
         pkg_sender = self.createActor(PkgSender, globalName='pkg_sender')
 
         routers = {}
         for n in G:
-            routers[n] = self.createActor(SimpleQRouter)
+            routers[n] = self.createActor(DQNRouter)
 
 
         print("Starting routers")
         for n in G:
             cur_router = routers[n]
             neighbors_addrs = G.neighbors(n)
-            self.send(cur_router, SimpleQRouterInitMsg(network_addr=n,
-                                                       neighbors={k: G.get_edge_data(n, k) for k in neighbors_addrs},
-                                                       network=routers,
-                                                       learning_rate=0.2))
+            self.send(cur_router, DQNRouterInitMsg(network_addr=n,
+                                                   neighbors={k: G.get_edge_data(n, k) for k in neighbors_addrs},
+                                                   network=routers,
+                                                   **router_settings))
 
         print("Starting pkg sender")
         self.send(pkg_sender, PkgSenderInitMsg(pkg_distr,
@@ -76,15 +80,13 @@ class Overlord(Actor):
                 self.router_counts[k] = 1
 
         travel_time = message.time - pkg.start_time
-        self.avg_times.logEvent(message.time, travel_time)
-        self.avg_route_lens.logEvent(message.time, len(pkg.route))
+        self.times_data.logEvent(message.time, travel_time)
         print("PACKAGE #{} DONE: path time {}, route: {}".format(pkg.id, travel_time, pkg.route))
 
     def reportResults(self):
         for (n, count) in self.router_counts.items():
             print(n, count)
-        print(self.avg_times.getSeries())
-        print(self.avg_route_lens.getSeries())
+        print(self.times_data.getSeries())
 
 class PkgSender(AbstractTimeActor):
     """Sends series of packages according to given settings"""
@@ -113,8 +115,13 @@ class PkgSender(AbstractTimeActor):
         for distr in distr_list:
             n_packages = distr['pkg_number']
             pkg_delta = distr['delta']
+            sources = distr.get('sources', addrs)
+            dests = distr.get('dests', addrs)
             for i in range(0, n_packages):
-                [s, d] = random.sample(addrs, 2)
+                s, d = 0, 0
+                while s == d:
+                    s = random.choice(sources)
+                    d = random.choice(dests)
                 pkg = Package(pkg_id, 1024, d, cur_time + self.sync_delta, None)
                 yield (network[s], IncomingPkgEvent(cur_time, self.myAddress, pkg))
                 cur_time += pkg_delta

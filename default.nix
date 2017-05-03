@@ -13,6 +13,8 @@ buildPythonPackage {
         python35Packages.virtualenv
  	python35Packages.setuptools
 	python35Packages.matplotlib
+        python35Packages.Keras
+ 	python35Packages.tensorflow
         stdenv
         zlib
     ];

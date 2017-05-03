@@ -17,7 +17,7 @@ class Router(TimeActor):
         self.network = {}
         self.network_inv = {}
         self.neighbors = {}
-        self.pkg_process_delay = 3
+        self.pkg_process_delay = 0
         self.queue_time = 0
         self.link_states = {}
 
@@ -28,6 +28,7 @@ class Router(TimeActor):
             self.addr = message.network_addr
             self.neighbors = message.neighbors
             self.network = message.network
+            self.pkg_process_delay = message.pkg_process_delay
             self.network_inv = {str(target) : addr for addr, target in message.network.items()}
             for n in self.neighbors.keys():
                 self.link_states[n] = {'transfer_time': 0, 'alive': True}
@@ -49,6 +50,7 @@ class Router(TimeActor):
                 self.reportPkgDone(pkg, self.current_time)
             else:
                 best_neighbor = self.routePackage(pkg)
+                print("BEST NEIGHBOR: {}".format(best_neighbor))
                 target = self.network[best_neighbor]
                 link_latency = self.neighbors[best_neighbor]['latency']
                 link_bandwidth = self.neighbors[best_neighbor]['bandwidth']
@@ -103,11 +105,16 @@ class QRouter(Router, RLAgent):
     def mkSample(self, message, prev_state, sender):
         pass
 
+MAX_EPSILON = 1
+MIN_EPSILON = 0.01
+LAMBDA = 0.001
+
 class SimpleQRouter(QRouter):
     def __init__(self):
         super().__init__()
         self.Q = {}
         self.learning_rate = None
+        self.steps = 0
 
     def initialize(self, message, sender):
         super().initialize(message, sender)
@@ -117,7 +124,7 @@ class SimpleQRouter(QRouter):
                 self.Q[n] = {}
                 for (k, data) in self.neighbors.items():
                     if k == n:
-                        self.Q[n][k] = 2 * data['latency']
+                        self.Q[n][k] = 40
                     else:
                         self.Q[n][k] = 100500
 
