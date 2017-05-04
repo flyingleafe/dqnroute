@@ -1,3 +1,5 @@
+import networkx as nx
+
 from thespian.actors import *
 
 from rl_agent import RLAgent
@@ -50,7 +52,6 @@ class Router(TimeActor):
                 self.reportPkgDone(pkg, self.current_time)
             else:
                 best_neighbor = self.routePackage(pkg)
-                print("BEST NEIGHBOR: {}".format(best_neighbor))
                 target = self.network[best_neighbor]
                 link_latency = self.neighbors[best_neighbor]['latency']
                 link_bandwidth = self.neighbors[best_neighbor]['bandwidth']
@@ -73,6 +74,64 @@ class Router(TimeActor):
 
     def routePackage(self, pkg_event):
         pass
+
+class LinkStateRouter(Router):
+    def __init__(self):
+        super().__init__()
+        self.seq_num = 0
+        self.announcements = {}
+        self.network_graph = None
+
+    def initialize(self, message, sender):
+        super().initialize(message, sender)
+        if isinstance(message, LinkStateInitMsg):
+            self.network_graph = nx.Graph()
+            for n in self.network.keys():
+                self.network_graph.add_node(n)
+            for (n, data) in self.neighbors.items():
+                alive = self.link_states[n]['alive']
+                if alive:
+                    self.network_graph.add_edge(self.addr, n, weight=data['latency'])
+                elif self.network_graph.has_edge(self.addr, n):
+                    self.network_graph.remove_edge(self.addr, n)
+            self._announceLinkState()
+
+    def _announceLinkState(self):
+        neighbors_data = dict(self.network_graph.adjacency_iter())[self.addr]
+        announcement = LinkStateAnnouncement(self.seq_num, self.addr, neighbors_data)
+        self.announcements[self.addr] = (self.seq_num, neighbors_data)
+        self._broadcastAnnouncement(announcement, self.myAddress)
+        self.seq_num += 1
+
+    def _broadcastAnnouncement(self, announcement, sender):
+        for n in self.neighbors.keys():
+            if sender != self.network[n]:
+                self.sendServiceMsg(self.network[n], announcement)
+
+    def receiveServiceMsg(self, message, sender):
+        if isinstance(message, LinkStateAnnouncement):
+            from_addr = message.from_addr
+            seq = message.seq_num
+            data = message.neighbors
+            if from_addr not in self.announcements or self.announcements[from_addr][0] < seq:
+                self.announcements[from_addr] = (seq, data)
+                for (m, params) in data.items():
+                    m_data = self.announcements.get(m, (0, {}))[1]
+                    if from_addr in m_data:
+                        self.network_graph.add_edge(from_addr, m, **params)
+                for m in set(self.network.keys()) - set(data.keys()):
+                    if self.network_graph.has_edge(from_addr, m):
+                        self.network_graph.remove_edge(from_addr, m)
+
+                self._broadcastAnnouncement(message, sender)
+
+    def isInitialized(self):
+        return super().isInitialized() and (len(self.announcements) == len(self.network))
+
+    def routePackage(self, pkg):
+        d = pkg.dst
+        path = nx.shortest_path(self.network_graph, self.addr, d)
+        return path[1]
 
 class QRouter(Router, RLAgent):
     def __init__(self):

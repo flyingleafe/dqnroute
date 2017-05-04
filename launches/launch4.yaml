@@ -4,7 +4,7 @@ network:
   - {u: 2, v: 7, latency: 10, bandwidth: 1024}
   - {u: 3, v: 7, latency: 10, bandwidth: 1024}
   - {u: 2, v: 9, latency: 10, bandwidth: 1024}
-  - {u: 9, v: 10, latency: 15, bandwidth: 1024}
+  - {u: 9, v: 10, latency: 10, bandwidth: 1024}
   - {u: 7, v: 8, latency: 10, bandwidth: 1024}
   - {u: 4, v: 5, latency: 10, bandwidth: 1024}
   - {u: 5, v: 6, latency: 10, bandwidth: 1024}
@@ -14,13 +14,13 @@ network:
 
 settings:
   pkg_distr:
-    - {pkg_number: 3000, delta: 5} 
-    - {pkg_number: 100, delta: 20, sources: [1, 2, 3, 9], dests: [4, 5, 6, 10]}
+    # - {pkg_number: 3000, delta: 10} 
+    - {pkg_number: 500, delta: 20, sources: [1, 2, 3, 9], dests: [4, 5, 6, 10]}
   synchronizer:
-    period: 50
+    period: 10
     delta: 5
   logging:
-    delta: 30
+    delta: 50
   router:
     learning_rate: 0.2
     pkg_process_delay: 5

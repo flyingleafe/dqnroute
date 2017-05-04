@@ -8,8 +8,8 @@ from more_itertools import peekable
 from messages import *
 from event_series import EventSeries
 from time_actor import Synchronizer, AbstractTimeActor
-from router import SimpleQRouter
-from dqn_router import DQNRouter
+from router import SimpleQRouter, LinkStateRouter
+# from dqn_router import DQNRouter
 
 class Overlord(Actor):
     """Elder actor to start system and rule them all"""
@@ -49,14 +49,14 @@ class Overlord(Actor):
 
         routers = {}
         for n in G:
-            routers[n] = self.createActor(DQNRouter)
+            routers[n] = self.createActor(LinkStateRouter)
 
 
         print("Starting routers")
         for n in G:
             cur_router = routers[n]
             neighbors_addrs = G.neighbors(n)
-            self.send(cur_router, DQNRouterInitMsg(network_addr=n,
+            self.send(cur_router, LinkStateInitMsg(network_addr=n,
                                                    neighbors={k: G.get_edge_data(n, k) for k in neighbors_addrs},
                                                    network=routers,
                                                    **router_settings))

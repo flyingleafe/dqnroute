@@ -14,9 +14,10 @@ buildPythonPackage {
  	python35Packages.setuptools
 	python35Packages.matplotlib
         python35Packages.Keras
- 	python35Packages.tensorflow
+	python35Packages.pandas
         stdenv
         zlib
+	bazel
     ];
     # When used as `nix-shell --pure`
     shellHook = ''

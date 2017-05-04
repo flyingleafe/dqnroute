@@ -101,6 +101,9 @@ class SimpleQRouterInitMsg(RouterInitMsg):
 class DQNRouterInitMsg(RouterInitMsg):
     """Init message for DQNRouter"""
 
+class LinkStateInitMsg(RouterInitMsg):
+    """Init message for LinkStateRouter"""
+
 # Routing messages
 # ===
 #
@@ -137,6 +140,12 @@ class DQNRewardMsg(RewardMsg):
         self.cur_time = cur_time
         self.estimate = estimate
         self.dst = dst
+
+class LinkStateAnnouncement(ServiceMsg):
+    def __init__(self, seq_num, from_addr, neighbors):
+        self.seq_num = seq_num
+        self.from_addr = from_addr
+        self.neighbors = neighbors
 
 @total_ordering
 class Package:

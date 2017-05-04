@@ -1,4 +1,6 @@
 import copy
+import datetime as dt
+
 from thespian.actors import *
 from messages import *
 from event_queue import EventQueue
@@ -87,15 +89,18 @@ class Synchronizer(Actor):
             self.period = message.period
             self.delta = message.delta
             self.targets = message.targets
-            self._delayTick()
+            print("Pause for 2 secs before synchronizer starts...")
+            self._delayTick(dt.timedelta(seconds=2))
         elif isinstance(message, WakeupMessage):
             self._sendTicks()
             self._delayTick()
         else:
             pass
 
-    def _delayTick(self):
-        self.wakeupAfter(self.period)
+    def _delayTick(self, period=None):
+        if period is None:
+            period = self.period
+        self.wakeupAfter(period)
 
     def _sendTicks(self):
         tick = TickMsg(self.current_time)
