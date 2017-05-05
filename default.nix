@@ -28,6 +28,7 @@ buildPythonPackage {
         python35Packages.ipykernel
 	python35Packages.tensorflow
 	python35Packages.networkx
+	python35Packages.h5py
         stdenv
         zlib
 	bazel
