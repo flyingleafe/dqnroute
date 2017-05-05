@@ -9,6 +9,7 @@ from messages import *
 from event_series import EventSeries
 from time_actor import Synchronizer, AbstractTimeActor
 from router import SimpleQRouter, LinkStateRouter
+from utils import gen_network_actions
 # from dqn_router import DQNRouter
 
 class Overlord(Actor):
@@ -131,21 +132,10 @@ class PkgSender(AbstractTimeActor):
 
     def _pkgGen(self, network, pkg_distr):
         addrs = list(network.keys())
-        cur_time = 0
-        pkg_id = 1
-        distr_list = pkg_distr['sequence']
-        random.seed(pkg_distr.get('seed', None))
-        for distr in distr_list:
-            n_packages = distr['pkg_number']
-            pkg_delta = distr['delta']
-            sources = distr.get('sources', addrs)
-            dests = distr.get('dests', addrs)
-            for i in range(0, n_packages):
-                s, d = 0, 0
-                while s == d:
-                    s = random.choice(sources)
-                    d = random.choice(dests)
-                pkg = Package(pkg_id, 1024, d, cur_time + self.sync_delta, None)
+        for (action, cur_time, params) in gen_network_actions(addrs, pkg_distr):
+            if action == 'send_pkg':
+                pkg_id, s, d, size = params
+                pkg = Package(pkg_id, size, d, cur_time + self.sync_delta, None)
                 yield (network[s], IncomingPkgEvent(cur_time, self.myAddress, pkg))
-                cur_time += pkg_delta
-                pkg_id += 1
+            else:
+                raise Exception('Unexpected action type: ' + action)

@@ -1,4 +1,5 @@
 import sys
+import os
 import signal
 import yaml
 import networkx as nx
@@ -41,6 +42,9 @@ def main():
     G = nx.Graph()
     for e in run_params['network']:
         G.add_edge(**e)
+
+    if args.logfile is not None:
+        os.remove(args.logfile)
 
     actorSys = ActorSystem('multiprocQueueBase')
     overlord = actorSys.createActor(Overlord, globalName='overlord')
