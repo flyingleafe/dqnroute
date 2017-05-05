@@ -11,8 +11,9 @@ network:
   - {u: 4, v: 5, latency: 15, bandwidth: 256}
 settings:
   pkg_distr:
-    - {pkg_number: 50000, delta: 2}
-    - {pkg_number: 100000, delta: 1}
+    sequence:
+      - {pkg_number: 50000, delta: 2}
+      - {pkg_number: 100000, delta: 1}
   synchronizer:
     period: 20
     delta: 5

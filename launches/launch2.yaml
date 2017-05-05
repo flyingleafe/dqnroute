@@ -21,7 +21,8 @@ network:
 
 settings:
   pkg_distr:
-    - {pkg_number: 500, delta: 20, sources: [6, 0, 8], dests: [7, 5, 10]}
+    sequence:
+      - {pkg_number: 500, delta: 20, sources: [6, 0, 8], dests: [7, 5, 10]}
   synchronizer:
     period: 20
     delta: 5

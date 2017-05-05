@@ -2,6 +2,7 @@ import sys
 import signal
 import yaml
 import networkx as nx
+import argparse as ap
 
 from thespian.actors import *
 from overlord import Overlord
@@ -22,11 +23,18 @@ def parse_edge(s):
 def main():
     signal.signal(signal.SIGINT, sigint_handler)
 
-    if len(sys.argv) < 2:
-        print("Provide path to settings file")
-        return
+    parser = ap.ArgumentParser(description='Routing emulator')
+    parser.add_argument('settings_file', metavar='settings_file', type=str,
+                        help='Path to run settings file')
+    parser.add_argument('results_file', metavar='results_file', type=str,
+                        help='Path to results .csv')
 
-    sfile = open(sys.argv[1])
+    parser.add_argument('--logfile', dest='logfile', default=None,
+                        help='Path to routing data')
+
+    args = parser.parse_args()
+
+    sfile = open(args.settings_file)
     run_params = yaml.safe_load(sfile)
     sfile.close()
 
@@ -36,7 +44,7 @@ def main():
 
     actorSys = ActorSystem('multiprocQueueBase')
     overlord = actorSys.createActor(Overlord, globalName='overlord')
-    actorSys.tell(overlord, OverlordInitMsg(G, run_params['settings']))
+    actorSys.tell(overlord, OverlordInitMsg(G, run_params['settings'], args.results_file, args.logfile))
 
     # answer = actorSys.ask(hello, 'hi', 1)
     # print(answer['b'])

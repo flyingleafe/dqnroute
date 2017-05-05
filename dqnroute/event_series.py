@@ -2,7 +2,7 @@ import pandas as pd
 
 class EventSeries:
     def __init__(self, period):
-        self.records = pd.DataFrame(columns=['count', 'avg', 'min', 'max'])
+        self.records = pd.DataFrame(columns=['time', 'count', 'avg', 'min', 'max'])
         self.period = period
         self.last_event_time = 0
         self.current_val = 0
@@ -22,9 +22,9 @@ class EventSeries:
             self.cur_max = max(self.cur_max, value)
             self.cur_min = min(self.cur_min, value)
         else:
-            self.records.loc[len(self.records)] = [self.current_count, self._curAvg(), self.cur_min, self.cur_max]
+            self.records.loc[len(self.records)] = [last_period * self.period, self.current_count, self._curAvg(), self.cur_min, self.cur_max]
             for i in range(0, cur_period - last_period - 1):
-                self.records.loc[len(self.records)] = [0, 0, 0, 0]
+                self.records.loc[len(self.records)] = [(last_period + i + 1) * self.period, 0, 0, 0, 0]
             self.current_val = value
             self.current_count = 1
             self.cur_min = value

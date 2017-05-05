@@ -1,10 +1,12 @@
 import networkx as nx
+import numpy as np
 
 from thespian.actors import *
 
 from rl_agent import RLAgent
 from messages import *
 from time_actor import *
+from utils import mk_current_neural_state
 
 class RouterNotInitialized(Exception):
     """
@@ -46,7 +48,7 @@ class Router(TimeActor):
         elif isinstance(event, ProcessPkgEvent):
             self.receivePackage(event)
             pkg = event.getContents()
-            pkg.route_add(self.addr)
+            pkg.route_add(self._currentStateData(pkg), self._currentStateCols())
             print("ROUTER #{} ROUTES PACKAGE TO {}".format(self.addr, pkg.dst))
             if pkg.dst == self.addr:
                 self.reportPkgDone(pkg, self.current_time)
@@ -75,12 +77,22 @@ class Router(TimeActor):
     def routePackage(self, pkg_event):
         pass
 
+    def _nodesList(self):
+        return sorted(list(self.network.keys()))
+
+    def _currentStateData(self, pkg):
+        pass
+
+    def _currentStateCols(self):
+        pass
+
 class LinkStateRouter(Router):
     def __init__(self):
         super().__init__()
         self.seq_num = 0
         self.announcements = {}
         self.network_graph = None
+        self._cur_state_cols = []
 
     def initialize(self, message, sender):
         super().initialize(message, sender)
@@ -95,6 +107,7 @@ class LinkStateRouter(Router):
                 elif self.network_graph.has_edge(self.addr, n):
                     self.network_graph.remove_edge(self.addr, n)
             self._announceLinkState()
+            self._cur_state_cols = self._mkStateCols()
 
     def _announceLinkState(self):
         neighbors_data = dict(self.network_graph.adjacency_iter())[self.addr]
@@ -130,8 +143,26 @@ class LinkStateRouter(Router):
 
     def routePackage(self, pkg):
         d = pkg.dst
-        path = nx.shortest_path(self.network_graph, self.addr, d)
+        path = nx.dijkstra_path(self.network_graph, self.addr, d)
         return path[1]
+
+    def _currentStateData(self, pkg):
+        return mk_current_neural_state(self.network_graph, self.current_time, pkg, self.addr)
+
+    def _currentStateCols(self):
+        return self._cur_state_cols
+
+    def _mkStateCols(self):
+        n = len(self.network)
+        res = ['time', 'pkg_id', 'cur_node'] + mk_num_list('dst_', n) + \
+              mk_num_list('addr_', n) + \
+              mk_num_list('neighbors_', n)
+
+        for m in range(0, n):
+            s = 'amatrix_'+str(m)+'_'
+            res += mk_num_list(s, n)
+        res += mk_num_list('predict_', n)
+        return res
 
 class QRouter(Router, RLAgent):
     def __init__(self):
@@ -213,5 +244,20 @@ class SimpleQRouter(QRouter):
         delta = self.learning_rate * (new_estimate - self.Q[dst][sender_addr])
         self.Q[dst][sender_addr] += delta
 
+    def _currentStateData(self, pkg):
+        return [self.current_time, pkg.id]
+
+    def _currentStateCols(self):
+        return ['time', 'pkg_id']
+
 def dict_min(dct):
     return min(dct.items(), key=lambda x:x[1])
+
+def mk_num_list(s, n):
+    return list(map(lambda k: s+str(k), range(0, n)))
+
+def mk_unary_arr(n, *pts):
+    res = np.zeros(n)
+    for p in pts:
+        res[p] = 1
+    return res

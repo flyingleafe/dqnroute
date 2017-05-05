@@ -1,5 +1,6 @@
 from functools import total_ordering
 import datetime as dt
+import pandas as pd
 
 class Message:
     """Base class for all messages used in the system"""
@@ -58,10 +59,12 @@ class InitMsg(Message):
 class OverlordInitMsg(InitMsg):
     """Init message for overlord"""
 
-    def __init__(self, graph, settings, **kwargs):
+    def __init__(self, graph, settings, results_file, logfile, **kwargs):
         super().__init__(**kwargs)
         self.graph = graph
         self.settings = settings
+        self.results_file = results_file
+        self.logfile = logfile
 
 class SynchronizerInitMsg(InitMsg):
     """Init message for synchronizer"""
@@ -154,11 +157,13 @@ class Package:
         self.size = size
         self.dst = dst
         self.start_time = start_time
-        self.route = []
+        self.route = None
         self.contents = contents
 
-    def route_add(self, addr):
-        self.route.append(addr)
+    def route_add(self, data, cols):
+        if self.route is None:
+            self.route = pd.DataFrame(columns=cols)
+        self.route.loc[len(self.route)] = data
 
     def __eq__(self, other):
         return self.id == other.id

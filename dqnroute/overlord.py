@@ -20,6 +20,8 @@ class Overlord(Actor):
         self.cur_time = 0
         self.cur_sum_time = 0
         self.cur_count = 0
+        self.results_file = None
+        self.log_file = None
 
     def receiveMessage(self, message, sender):
         if isinstance(message, OverlordInitMsg):
@@ -37,10 +39,22 @@ class Overlord(Actor):
 
         G = message.graph
         settings = message.settings
+        results_file = message.results_file
+        log_file = message.logfile
+
         pkg_distr = settings['pkg_distr']
         sync_settings = settings['synchronizer']
         logging_settings = settings['logging']
         router_settings = settings['router']
+
+        if results_file is not None:
+            self.results_file = open(results_file, 'w')
+
+        if log_file is not None:
+            self.log_file = open(log_file, 'a')
+            router_settings['full_log'] = True
+        else:
+            router_settings['full_log'] = False
 
         self.times_data = EventSeries(logging_settings['delta'])
 
@@ -50,7 +64,6 @@ class Overlord(Actor):
         routers = {}
         for n in G:
             routers[n] = self.createActor(LinkStateRouter)
-
 
         print("Starting routers")
         for n in G:
@@ -73,7 +86,8 @@ class Overlord(Actor):
 
     def recordPkg(self, message):
         pkg = message.getContents()
-        for k in pkg.route:
+        for (idx, row) in pkg.route.iterrows():
+            k = int(row['cur_node'])
             try:
                 self.router_counts[k] += 1
             except KeyError:
@@ -81,12 +95,19 @@ class Overlord(Actor):
 
         travel_time = message.time - pkg.start_time
         self.times_data.logEvent(message.time, travel_time)
-        print("PACKAGE #{} DONE: path time {}, route: {}".format(pkg.id, travel_time, pkg.route))
+        print("PACKAGE #{} DONE: path time {}, route len: {}".format(pkg.id, travel_time, len(pkg.route)))
+        if self.log_file is not None:
+            pkg.route.to_csv(self.log_file, header=False, index=False)
 
     def reportResults(self):
         for (n, count) in self.router_counts.items():
             print(n, count)
-        print(self.times_data.getSeries())
+        results_df = self.times_data.getSeries()
+        if self.results_file is not None:
+            results_df.to_csv(self.results_file)
+            self.results_file.close()
+        if self.log_file is not None:
+            self.log_file.close()
 
 class PkgSender(AbstractTimeActor):
     """Sends series of packages according to given settings"""
@@ -108,10 +129,12 @@ class PkgSender(AbstractTimeActor):
         except StopIteration:
             pass
 
-    def _pkgGen(self, network, distr_list):
+    def _pkgGen(self, network, pkg_distr):
         addrs = list(network.keys())
         cur_time = 0
         pkg_id = 1
+        distr_list = pkg_distr['sequence']
+        random.seed(pkg_distr.get('seed', None))
         for distr in distr_list:
             n_packages = distr['pkg_number']
             pkg_delta = distr['delta']
