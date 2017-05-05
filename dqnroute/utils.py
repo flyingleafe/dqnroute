@@ -6,6 +6,7 @@ def mk_current_neural_state(G, time, pkg, node_addr):
     n = len(G.nodes())
     k = node_addr
     d = pkg.dst
+    neighbors = G.neighbors(k)
     dlen = 3 + 4*n + n*n
     data = np.zeros(dlen)
     data[0] = time
@@ -16,8 +17,8 @@ def mk_current_neural_state(G, time, pkg, node_addr):
     off += n
     data[off + k] = 1
     off += n
-    for m in G.neighbors(k):
-        data[off + k] = 1
+    for m in neighbors:
+        data[off + m] = 1
     off += n
     for i in range(0, n):
         for j in range(0, n):
@@ -26,7 +27,7 @@ def mk_current_neural_state(G, time, pkg, node_addr):
     off += n*n
     for i in range(off, dlen):
         data[i] = -1000000
-    for m in G.neighbors(k):
+    for m in neighbors:
         data[off + m] = -(nx.dijkstra_path_length(G, m, d) + \
                           G.get_edge_data(k, m)['weight'])
     return data

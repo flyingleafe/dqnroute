@@ -25,7 +25,11 @@ def main():
     for e in run_params['network']:
         G.add_edge(e['u'], e['v'], weight=e['latency'])
 
-    os.remove(args.logfile)
+    try:
+        os.remove(args.logfile)
+    except FileNotFoundError:
+        pass
+
     logfile = open(args.logfile, 'a')
 
     settings = run_params['settings']

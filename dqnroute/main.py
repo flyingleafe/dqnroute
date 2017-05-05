@@ -44,7 +44,10 @@ def main():
         G.add_edge(**e)
 
     if args.logfile is not None:
-        os.remove(args.logfile)
+        try:
+            os.remove(args.logfile)
+        except FileNotFoundError:
+            pass
 
     actorSys = ActorSystem('multiprocQueueBase')
     overlord = actorSys.createActor(Overlord, globalName='overlord')
