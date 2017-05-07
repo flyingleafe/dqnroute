@@ -16,8 +16,8 @@ settings:
   pkg_distr:
     seed: 42
     sequence:
-      - {pkg_number: 100000, delta: 10} 
-      # - {pkg_number: 500, delta: 20, sources: [0, 1, 2, 8], dests: [3, 4, 5, 9]}
+      # - {pkg_number: 1000, delta: 10} 
+      - {pkg_number: 500, delta: 20, sources: [0, 1, 2, 8], dests: [3, 4, 5, 9]}
   synchronizer:
     period: 20
     delta: 10
@@ -26,4 +26,5 @@ settings:
   router:
     learning_rate: 0.2
     pkg_process_delay: 5
+    model_file: 'router_network.h5'
  

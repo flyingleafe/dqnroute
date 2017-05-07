@@ -104,6 +104,10 @@ class SimpleQRouterInitMsg(RouterInitMsg):
 class DQNRouterInitMsg(RouterInitMsg):
     """Init message for DQNRouter"""
 
+    def __init__(self, model_file, **kwargs):
+        super().__init__(**kwargs)
+        self.model_file = model_file
+
 class LinkStateInitMsg(RouterInitMsg):
     """Init message for LinkStateRouter"""
 
@@ -123,6 +127,16 @@ class PkgTransferEndEvent(EventMsg):
 
 class PkgDoneMsg(EventMsg):
     pass
+
+class LinkBreakMsg(EventMsg):
+    def __init__(self, time, sender, neighbor):
+        super().__init__(time, sender, None)
+        self.neighbor = neighbor
+
+class LinkRestoreMsg(EventMsg):
+    def __init__(self, time, sender, neighbor):
+        super().__init__(time, sender, None)
+        self.neighbor = neighbor
 
 class RewardMsg(ServiceMsg):
     def __init__(self, pkg_id, **kwargs):

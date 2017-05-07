@@ -59,6 +59,13 @@ def get_amatrix_cols(n):
         res += mk_num_list(s, n)
     return res
 
+def get_amatrix_triangle_cols(n):
+    res = []
+    for i in range(0, n):
+        for j in range(i+1, n):
+            res.append('amatrix_'+str(i)+'_'+str(j))
+    return res
+
 def get_data_cols(n):
     return meta_cols + get_feature_cols(n) + get_amatrix_cols(n) + get_target_cols(n)
 
@@ -68,15 +75,28 @@ def gen_network_actions(addrs, pkg_distr):
     distr_list = pkg_distr['sequence']
     random.seed(pkg_distr.get('seed', None))
     for distr in distr_list:
-        n_packages = distr['pkg_number']
-        pkg_delta = distr['delta']
-        sources = distr.get('sources', addrs)
-        dests = distr.get('dests', addrs)
-        for i in range(0, n_packages):
-            s, d = 0, 0
-            while s == d:
-                s = random.choice(sources)
-                d = random.choice(dests)
-            yield ('send_pkg', cur_time, (pkg_id, s, d, 1024))
-            cur_time += pkg_delta
-            pkg_id += 1
+        action = distr.get('action', 'send_pkgs')
+        if action == 'send_pkgs':
+            n_packages = distr['pkg_number']
+            pkg_delta = distr['delta']
+            sources = distr.get('sources', addrs)
+            dests = distr.get('dests', addrs)
+            swap = distr.get('swap', 0)
+            for i in range(0, n_packages):
+                s, d = 0, 0
+                while s == d:
+                    s = random.choice(sources)
+                    d = random.choice(dests)
+                if random.random() < swap:
+                    d, s = s, d
+                yield ('send_pkg', cur_time, (pkg_id, s, d, 1024))
+                cur_time += pkg_delta
+                pkg_id += 1
+        elif action == 'break_link' or action == 'restore_link':
+            pause = distr['pause']
+            u = distr['u']
+            v = distr['v']
+            yield (action, cur_time, (u, v))
+            cur_time += pause
+        else:
+            raise Exception('Unexpected action: ' + action)

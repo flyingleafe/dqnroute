@@ -125,7 +125,12 @@ class PkgSender(AbstractTimeActor):
         try:
             while self.pkg_iterator.peek()[1].time <= time:
                 (target, e) = self.pkg_iterator.next()
-                print("PACKAGE #{} SENT".format(e.getContents().id))
+                if isinstance(e, IncomingPkgEvent):
+                    print("PACKAGE #{} SENT".format(e.getContents().id))
+                elif isinstance(e, LinkBreakMsg):
+                    print("LINK END {} BROKE".format(e.neighbor))
+                elif isinstance(e, LinkRestoreMsg):
+                    print("LINK END {} RESTORED".format(e.neighbor))
                 self.resendEventDelayed(target, e, self.sync_delta)
         except StopIteration:
             pass
@@ -137,5 +142,13 @@ class PkgSender(AbstractTimeActor):
                 pkg_id, s, d, size = params
                 pkg = Package(pkg_id, size, d, cur_time + self.sync_delta, None)
                 yield (network[s], IncomingPkgEvent(cur_time, self.myAddress, pkg))
+            elif action == 'break_link':
+                u, v = params
+                yield (network[u], LinkBreakMsg(cur_time, self.myAddress, v))
+                yield (network[v], LinkBreakMsg(cur_time, self.myAddress, u))
+            elif action == 'restore_link':
+                u, v = params
+                yield (network[u], LinkRestoreMsg(cur_time, self.myAddress, v))
+                yield (network[v], LinkRestoreMsg(cur_time, self.myAddress, u))
             else:
                 raise Exception('Unexpected action type: ' + action)

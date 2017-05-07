@@ -54,14 +54,26 @@ class Router(TimeActor):
                 self.reportPkgDone(pkg, self.current_time)
             else:
                 best_neighbor = self.routePackage(pkg)
-                target = self.network[best_neighbor]
-                link_latency = self.neighbors[best_neighbor]['latency']
-                link_bandwidth = self.neighbors[best_neighbor]['bandwidth']
-                transfer_start_time = max(self.current_time, self.link_states[best_neighbor]['transfer_time'])
-                transfer_end_time = transfer_start_time + (pkg.size / link_bandwidth)
-                finish_time = transfer_end_time + link_latency
-                self.link_states[best_neighbor]['transfer_time'] = transfer_end_time
-                self.sendEvent(target, IncomingPkgEvent(finish_time, self.myAddress, pkg))
+                is_alive = self.link_states[best_neighbor]['alive']
+                if is_alive:
+                    target = self.network[best_neighbor]
+                    link_latency = self.neighbors[best_neighbor]['latency']
+                    link_bandwidth = self.neighbors[best_neighbor]['bandwidth']
+                    transfer_start_time = max(self.current_time, self.link_states[best_neighbor]['transfer_time'])
+                    transfer_end_time = transfer_start_time + (pkg.size / link_bandwidth)
+                    finish_time = transfer_end_time + link_latency
+                    self.link_states[best_neighbor]['transfer_time'] = transfer_end_time
+                    self.sendEvent(target, IncomingPkgEvent(finish_time, self.myAddress, pkg))
+                else:
+                    self.sendToBrokenLink(pkg)
+        elif isinstance(message, LinkBreakMsg):
+            n = message.neighbor
+            self.link_states[n]['alive'] = False
+            self.breakLink(n)
+        elif isinstance(message, LinkRestoreMsg):
+            n = message.neighbor
+            self.link_states[n]['alive'] = True
+            self.restoreLink(n)
         else:
             pass
 
@@ -75,6 +87,15 @@ class Router(TimeActor):
         pass
 
     def routePackage(self, pkg_event):
+        pass
+
+    def sendToBrokenLink(self, pkg):
+        pass
+
+    def breakLink(self, v):
+        pass
+
+    def restoreLink(self, v):
         pass
 
     def _nodesList(self):
@@ -92,6 +113,7 @@ class LinkStateRouter(Router):
         self.seq_num = 0
         self.announcements = {}
         self.network_graph = None
+        self.removed_links = {}
         self._cur_state_cols = []
 
     def initialize(self, message, sender):
@@ -122,6 +144,7 @@ class LinkStateRouter(Router):
                 self.sendServiceMsg(self.network[n], announcement)
 
     def receiveServiceMsg(self, message, sender):
+        super().receiveServiceMsg(message, sender)
         if isinstance(message, LinkStateAnnouncement):
             from_addr = message.from_addr
             seq = message.seq_num
@@ -137,6 +160,18 @@ class LinkStateRouter(Router):
                         self.network_graph.remove_edge(from_addr, m)
 
                 self._broadcastAnnouncement(message, sender)
+
+    def breakLink(self, v):
+        u = self.addr
+        self.removed_links[v] = self.network_graph.get_edge_data(u, v)
+        self.network_graph.remove_edge(u, v)
+        self._announceLinkState()
+
+    def restoreLink(self, v):
+        u = self.addr
+        restore_data = self.removed_links[v]
+        self.network_graph.add_edge(u, v, **restore_data)
+        del self.removed_links[v]
 
     def isInitialized(self):
         return super().isInitialized() and (len(self.announcements) == len(self.network))
@@ -178,6 +213,7 @@ class QRouter(Router, RLAgent):
         return self.act(state)
 
     def receiveServiceMsg(self, message, sender):
+        super().receiveServiceMsg(message, sender)
         if isinstance(message, RewardMsg):
             prev_state = 0
             try:
@@ -204,6 +240,7 @@ class SimpleQRouter(QRouter):
         super().__init__()
         self.Q = {}
         self.learning_rate = None
+        self.broken_link_Qs = {}
         self.steps = 0
 
     def initialize(self, message, sender):
@@ -217,6 +254,19 @@ class SimpleQRouter(QRouter):
                         self.Q[n][k] = 40
                     else:
                         self.Q[n][k] = 100500
+
+    def breakLink(self, v):
+        broken_Qs = {}
+        for n in self.network.keys():
+            broken_Qs[n] = self.Q[n][v]
+            self.Q[n][v] = 100500
+        self.broken_link_Qs[v] = broken_Qs
+
+    def restoreLink(self, v):
+        broken_Qs = self.broken_link_Qs[v]
+        for (n, val) in broken_Qs.items():
+            self.Q[n][v] = val
+        del self.broken_link_Qs[v]
 
     def mkRewardMsg(self, pkg):
         d = pkg.dst

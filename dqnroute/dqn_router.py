@@ -2,7 +2,7 @@ import random
 import math
 import numpy as np
 
-from keras.models import Sequential
+from keras.models import Sequential, load_model
 from keras.layers import *
 from keras.optimizers import *
 
@@ -19,21 +19,16 @@ class DQNRouter(QRouter):
     def __init__(self):
         super().__init__()
         self.brain = None
-        self.q_link_states = None
-        self.state_dim = 0
-        self.ZEROS_ARR = None
-        self.epsilon = MAX_EPSILON
-        self.steps = 0
 
-    def _createModel(self, input_dim, output_dim):
-        model = Sequential()
-        model.add(Dense(output_dim=64, activation='relu', input_dim=input_dim))
-        model.add(Dense(output_dim=output_dim, activation='linear'))
+    # def _createModel(self, input_dim, output_dim):
+    #     model = Sequential()
+    #     model.add(Dense(output_dim=64, activation='relu', input_dim=input_dim))
+    #     model.add(Dense(output_dim=output_dim, activation='linear'))
 
-        opt = RMSprop()
-        model.compile(loss='mse', optimizer=opt)
+    #     opt = RMSprop()
+    #     model.compile(loss='mse', optimizer=opt)
 
-        return model
+    #     return model
 
     def _train(self, x, y, epoch=1, verbose=0):
         self.brain.fit(x, y, batch_size=BATCH_SIZE, nb_epoch=epoch, verbose=verbose)
@@ -42,10 +37,7 @@ class DQNRouter(QRouter):
         super().initialize(message, sender)
         if isinstance(message, DQNRouterInitMsg):
             n = len(self.neighbors)
-            self.state_dim = 2*n + len(self.network) + 1
-            self.brain = self._createModel(self.state_dim, n)
-            self.q_link_states = np.zeros(2*n)
-            self.ZEROS_ARR = np.zeros(len(self.network) + 1)
+            self.brain = load_model(message.model_file)
 
     def mkRewardMsg(self, pkg):
         d = pkg.dst

@@ -22,9 +22,13 @@ def main():
     sfile.close()
 
     G = nx.Graph()
+    links_data = {}
     for e in run_params['network']:
-        G.add_edge(e['u'], e['v'], weight=e['latency'])
-
+        u = e['u']
+        v = e['v']
+        w = e['latency']
+        G.add_edge(u, v, weight=w)
+        links_data[(u, v)] = e
     try:
         os.remove(args.logfile)
     except FileNotFoundError:
@@ -49,6 +53,15 @@ def main():
             df.to_csv(logfile, header=False, index=False)
             df.drop(df.index, inplace=True)
             print("pkg #{} done".format(pkg_id))
+        elif action == 'break_link':
+            u, v = params
+            G.remove_edge(u, v)
+            print('removed link ({}, {})'.format(u, v))
+        elif action == 'restore_link':
+            u, v = params
+            w = links_data[(u, v)]['latency']
+            G.add_edge(u, v, weight=w)
+            print('restored link ({}, {})'.format(u, v))
         else:
             raise Exception('Unexpected action type: ' + action)
 
