@@ -59,12 +59,13 @@ class InitMsg(Message):
 class OverlordInitMsg(InitMsg):
     """Init message for overlord"""
 
-    def __init__(self, graph, settings, results_file, logfile, **kwargs):
+    def __init__(self, graph, settings, results_file, logfile, router_type, **kwargs):
         super().__init__(**kwargs)
         self.graph = graph
         self.settings = settings
         self.results_file = results_file
         self.logfile = logfile
+        self.router_type = router_type
 
 class SynchronizerInitMsg(InitMsg):
     """Init message for synchronizer"""

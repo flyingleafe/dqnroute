@@ -30,6 +30,10 @@ def main():
     parser.add_argument('results_file', metavar='results_file', type=str,
                         help='Path to results .csv')
 
+    parser.add_argument('router_type', metavar='router_type',
+                        choices=['simple_q', 'link_state', 'dqn'],
+                        help='Router type')
+
     parser.add_argument('--logfile', dest='logfile', default=None,
                         help='Path to routing data')
 
@@ -51,7 +55,7 @@ def main():
 
     actorSys = ActorSystem('multiprocQueueBase')
     overlord = actorSys.createActor(Overlord, globalName='overlord')
-    actorSys.tell(overlord, OverlordInitMsg(G, run_params['settings'], args.results_file, args.logfile))
+    actorSys.tell(overlord, OverlordInitMsg(G, run_params['settings'], args.results_file, args.logfile, args.router_type))
 
     # answer = actorSys.ask(hello, 'hi', 1)
     # print(answer['b'])

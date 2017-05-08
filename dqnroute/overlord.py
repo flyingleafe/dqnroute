@@ -42,6 +42,7 @@ class Overlord(Actor):
         settings = message.settings
         results_file = message.results_file
         log_file = message.logfile
+        router_type = message.router_type
 
         pkg_distr = settings['pkg_distr']
         sync_settings = settings['synchronizer']
@@ -62,18 +63,31 @@ class Overlord(Actor):
         synchronizer = self.createActor(Synchronizer, globalName='synchronizer')
         pkg_sender = self.createActor(PkgSender, globalName='pkg_sender')
 
+        router_class = None
+        router_init_msg_class = None
+        if router_type == 'link_state':
+            print('Using link-state router algorithm')
+            router_class = LinkStateRouter
+            router_init_msg_class = LinkStateInitMsg
+        elif router_type == 'simple_q':
+            print('Using Simple Q-routing router algorithm')
+            router_class = SimpleQRouter
+            router_init_msg_class = SimpleQRouterInitMsg
+        else:
+            raise Exception('Unknown router type: ' + router_type)
+
         routers = {}
         for n in G:
-            routers[n] = self.createActor(LinkStateRouter)
+            routers[n] = self.createActor(router_class)
 
         print("Starting routers")
         for n in G:
             cur_router = routers[n]
             neighbors_addrs = G.neighbors(n)
-            self.send(cur_router, LinkStateInitMsg(network_addr=n,
-                                                   neighbors={k: G.get_edge_data(n, k) for k in neighbors_addrs},
-                                                   network=routers,
-                                                   **router_settings))
+            self.send(cur_router, router_init_msg_class(network_addr=n,
+                                                        neighbors={k: G.get_edge_data(n, k) for k in neighbors_addrs},
+                                                        network=routers,
+                                                        **router_settings))
 
         print("Starting pkg sender")
         self.send(pkg_sender, PkgSenderInitMsg(pkg_distr,

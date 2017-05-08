@@ -4,7 +4,7 @@ network:
   - {u: 1, v: 6, latency: 10, bandwidth: 1024}
   - {u: 2, v: 6, latency: 10, bandwidth: 1024}
   - {u: 1, v: 8, latency: 10, bandwidth: 1024}
-  - {u: 8, v: 9, latency: 15, bandwidth: 1024}
+  - {u: 8, v: 9, latency: 10, bandwidth: 1024}
   - {u: 6, v: 7, latency: 10, bandwidth: 1024}
   - {u: 3, v: 4, latency: 10, bandwidth: 1024}
   - {u: 4, v: 5, latency: 10, bandwidth: 1024}
