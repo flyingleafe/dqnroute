@@ -3,10 +3,10 @@ import numpy as np
 
 from thespian.actors import *
 
-from rl_agent import RLAgent
+from router_mixins import RLAgent, LinkStateHolder
 from messages import *
 from time_actor import *
-from utils import mk_current_neural_state
+from utils import mk_current_neural_state, get_data_cols
 
 class RouterNotInitialized(Exception):
     """
@@ -24,6 +24,7 @@ class Router(TimeActor):
         self.pkg_process_delay = 0
         self.queue_time = 0
         self.link_states = {}
+        self.full_log = False
 
     def initialize(self, message, sender):
         super().initialize(message, sender)
@@ -34,6 +35,7 @@ class Router(TimeActor):
             self.network = message.network
             self.pkg_process_delay = message.pkg_process_delay
             self.network_inv = {str(target) : addr for addr, target in message.network.items()}
+            self.full_log = message.full_log
             for n in self.neighbors.keys():
                 self.link_states[n] = {'transfer_time': 0, 'alive': True}
 
@@ -48,7 +50,10 @@ class Router(TimeActor):
         elif isinstance(event, ProcessPkgEvent):
             self.receivePackage(event)
             pkg = event.getContents()
-            pkg.route_add(self._currentStateData(pkg), self._currentStateCols())
+            if self.full_log:
+                pkg.route_add(self._currentStateData(pkg), self._currentStateCols())
+            else:
+                pkg.route_add([self.current_time, self.addr], ['time', 'cur_node'])
             print("ROUTER #{} ROUTES PACKAGE TO {}".format(self.addr, pkg.dst))
             if pkg.dst == self.addr:
                 self.reportPkgDone(pkg, self.current_time)
@@ -66,12 +71,12 @@ class Router(TimeActor):
                     self.sendEvent(target, IncomingPkgEvent(finish_time, self.myAddress, pkg))
                 else:
                     self.sendToBrokenLink(pkg)
-        elif isinstance(message, LinkBreakMsg):
-            n = message.neighbor
+        elif isinstance(event, LinkBreakMsg):
+            n = event.neighbor
             self.link_states[n]['alive'] = False
             self.breakLink(n)
-        elif isinstance(message, LinkRestoreMsg):
-            n = message.neighbor
+        elif isinstance(event, LinkRestoreMsg):
+            n = event.neighbor
             self.link_states[n]['alive'] = True
             self.restoreLink(n)
         else:
@@ -107,34 +112,20 @@ class Router(TimeActor):
     def _currentStateCols(self):
         pass
 
-class LinkStateRouter(Router):
+class LinkStateRouter(Router, LinkStateHolder):
     def __init__(self):
+        LinkStateHolder.__init__(self)
         super().__init__()
-        self.seq_num = 0
-        self.announcements = {}
-        self.network_graph = None
-        self.removed_links = {}
-        self._cur_state_cols = []
 
     def initialize(self, message, sender):
         super().initialize(message, sender)
         if isinstance(message, LinkStateInitMsg):
-            self.network_graph = nx.Graph()
-            for n in self.network.keys():
-                self.network_graph.add_node(n)
-            for (n, data) in self.neighbors.items():
-                alive = self.link_states[n]['alive']
-                if alive:
-                    self.network_graph.add_edge(self.addr, n, weight=data['latency'])
-                elif self.network_graph.has_edge(self.addr, n):
-                    self.network_graph.remove_edge(self.addr, n)
+            self.initGraph(self.addr, self.network, self.neighbors, self.link_states)
             self._announceLinkState()
-            self._cur_state_cols = self._mkStateCols()
+            self._cur_state_cols = get_data_cols(len(self.network))
 
     def _announceLinkState(self):
-        neighbors_data = dict(self.network_graph.adjacency_iter())[self.addr]
-        announcement = LinkStateAnnouncement(self.seq_num, self.addr, neighbors_data)
-        self.announcements[self.addr] = (self.seq_num, neighbors_data)
+        announcement = self.mkLSAnnouncement(self.addr)
         self._broadcastAnnouncement(announcement, self.myAddress)
         self.seq_num += 1
 
@@ -146,32 +137,16 @@ class LinkStateRouter(Router):
     def receiveServiceMsg(self, message, sender):
         super().receiveServiceMsg(message, sender)
         if isinstance(message, LinkStateAnnouncement):
-            from_addr = message.from_addr
-            seq = message.seq_num
-            data = message.neighbors
-            if from_addr not in self.announcements or self.announcements[from_addr][0] < seq:
-                self.announcements[from_addr] = (seq, data)
-                for (m, params) in data.items():
-                    m_data = self.announcements.get(m, (0, {}))[1]
-                    if from_addr in m_data:
-                        self.network_graph.add_edge(from_addr, m, **params)
-                for m in set(self.network.keys()) - set(data.keys()):
-                    if self.network_graph.has_edge(from_addr, m):
-                        self.network_graph.remove_edge(from_addr, m)
-
+            if self.processLSAnnouncement(message, self.network.keys()):
                 self._broadcastAnnouncement(message, sender)
 
     def breakLink(self, v):
-        u = self.addr
-        self.removed_links[v] = self.network_graph.get_edge_data(u, v)
-        self.network_graph.remove_edge(u, v)
+        self.lsBreakLink(self.addr, v)
         self._announceLinkState()
 
     def restoreLink(self, v):
-        u = self.addr
-        restore_data = self.removed_links[v]
-        self.network_graph.add_edge(u, v, **restore_data)
-        del self.removed_links[v]
+        self.lsRestoreLink(self.addr, v)
+        self._announceLinkState()
 
     def isInitialized(self):
         return super().isInitialized() and (len(self.announcements) == len(self.network))
@@ -186,18 +161,6 @@ class LinkStateRouter(Router):
 
     def _currentStateCols(self):
         return self._cur_state_cols
-
-    def _mkStateCols(self):
-        n = len(self.network)
-        res = ['time', 'pkg_id', 'cur_node'] + mk_num_list('dst_', n) + \
-              mk_num_list('addr_', n) + \
-              mk_num_list('neighbors_', n)
-
-        for m in range(0, n):
-            s = 'amatrix_'+str(m)+'_'
-            res += mk_num_list(s, n)
-        res += mk_num_list('predict_', n)
-        return res
 
 class QRouter(Router, RLAgent):
     def __init__(self):

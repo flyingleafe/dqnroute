@@ -9,7 +9,7 @@ from keras.optimizers import *
 from messages import *
 from router import *
 
-BATCH_SIZE = 1
+BATCH_SIZE = 32
 
 MAX_EPSILON = 1
 MIN_EPSILON = 0.01
@@ -60,11 +60,13 @@ class DQNRouter(QRouter):
 
     def getState(self, pkg):
         d = pkg.dst
-        size = pkg.size
         res = np.concatenate((self.ZEROS_ARR, self.q_link_states))
         res[d] = 1
         res[len(self.network)] = size
         return (self.current_time, res.reshape((1, self.state_dim)))
+
+    def _getInputs(self, state):
+        pass
 
     def act(self, state):
         if random.random() < self.epsilon:

@@ -87,12 +87,13 @@ class PkgSenderInitMsg(InitMsg):
 class RouterInitMsg(InitMsg):
     """Init message for router"""
 
-    def __init__(self, network_addr, neighbors, network, pkg_process_delay, **kwargs):
+    def __init__(self, network_addr, neighbors, network, pkg_process_delay, full_log, **kwargs):
         super().__init__(**kwargs)
         self.network_addr = network_addr
         self.neighbors = neighbors
         self.network = network
         self.pkg_process_delay = pkg_process_delay
+        self.full_log = full_log
 
 class SimpleQRouterInitMsg(RouterInitMsg):
     """Init message for SimpleQRouter"""

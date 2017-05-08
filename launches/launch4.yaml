@@ -4,7 +4,7 @@ network:
   - {u: 1, v: 6, latency: 10, bandwidth: 1024}
   - {u: 2, v: 6, latency: 10, bandwidth: 1024}
   - {u: 1, v: 8, latency: 10, bandwidth: 1024}
-  - {u: 8, v: 9, latency: 10, bandwidth: 1024}
+  - {u: 8, v: 9, latency: 15, bandwidth: 1024}
   - {u: 6, v: 7, latency: 10, bandwidth: 1024}
   - {u: 3, v: 4, latency: 10, bandwidth: 1024}
   - {u: 4, v: 5, latency: 10, bandwidth: 1024}
@@ -17,12 +17,16 @@ settings:
     seed: 42
     sequence:
       # - {pkg_number: 1000, delta: 10} 
-      - {pkg_number: 500, delta: 20, sources: [0, 1, 2, 8], dests: [3, 4, 5, 9]}
+      - {pkg_number: 500, delta: 20, sources: [0, 1, 2], dests: [3, 4, 5]}
+      - {action: 'break_link', pause: 20, u: 6, v: 7}
+      - {pkg_number: 500, delta: 20, sources: [0, 1, 2], dests: [3, 4, 5]}
+      - {action: 'restore_link', pause: 20, u: 6, v: 7}
+      - {pkg_number: 500, delta: 20, sources: [0, 1, 2], dests: [3, 4, 5]}
   synchronizer:
     period: 20
     delta: 10
   logging:
-    delta: 200
+    delta: 1000
   router:
     learning_rate: 0.2
     pkg_process_delay: 5

@@ -96,7 +96,7 @@ class Overlord(Actor):
 
         travel_time = message.time - pkg.start_time
         self.times_data.logEvent(message.time, travel_time)
-        print("PACKAGE #{} DONE: path time {}, route len: {}".format(pkg.id, travel_time, len(pkg.route)))
+        print("PACKAGE #{} DONE: path time {}, route: {}".format(pkg.id, travel_time, list(pkg.route['cur_node'].astype(int))))
         if self.log_file is not None:
             pkg.route.to_csv(self.log_file, header=False, index=False)
 
