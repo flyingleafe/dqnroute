@@ -56,6 +56,11 @@ class InitMsg(Message):
     def __init__(self, **kwargs):
         super().__init__(kwargs)
 
+class FinishInitMsg(Message):
+    def __init__(self, child_id, **kwargs):
+        super().__init__(kwargs)
+        self.child_id = child_id
+
 class OverlordInitMsg(InitMsg):
     """Init message for overlord"""
 
@@ -95,6 +100,9 @@ class RouterInitMsg(InitMsg):
         self.network = network
         self.pkg_process_delay = pkg_process_delay
         self.full_log = full_log
+
+class RouterFinalizeInitMsg(InitMsg):
+    """Finalize init message for router"""
 
 class SimpleQRouterInitMsg(RouterInitMsg):
     """Init message for SimpleQRouter"""

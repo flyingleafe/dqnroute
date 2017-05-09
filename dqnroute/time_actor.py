@@ -10,7 +10,8 @@ class AbstractTimeActor(Actor):
 
     def receiveMessage(self, message, sender):
         if isinstance(message, InitMsg):
-            self.initialize(message, sender)
+            my_id = self.initialize(message, sender)
+            self.send(sender, FinishInitMsg(my_id))
         elif isinstance(message, EventMsg):
             self.handleIncomingEvent(message, sender)
         elif isinstance(message, ServiceMsg):
@@ -89,8 +90,8 @@ class Synchronizer(Actor):
             self.period = message.period
             self.delta = message.delta
             self.targets = message.targets
-            print("Pause for 2 secs before synchronizer starts...")
-            self._delayTick(dt.timedelta(seconds=2))
+            print("Pause for 5 secs before synchronizer starts...")
+            self._delayTick(dt.timedelta(seconds=5))
         elif isinstance(message, WakeupMessage):
             self._sendTicks()
             self._delayTick()

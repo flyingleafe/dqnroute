@@ -10,7 +10,7 @@ from event_series import EventSeries
 from time_actor import Synchronizer, AbstractTimeActor
 from router import SimpleQRouter, LinkStateRouter
 from utils import gen_network_actions
-# from dqn_router import DQNRouter
+from dqn_router import DQNRouter
 
 class Overlord(Actor):
     """Elder actor to start system and rule them all"""
@@ -23,6 +23,12 @@ class Overlord(Actor):
         self.cur_count = 0
         self.results_file = None
         self.log_file = None
+        self.routers = {}
+        self.answered_inits = {}
+        self.settings = None
+        self.G = None
+        self.router_sequential_init = False
+        self.init_msgs = {}
 
     def receiveMessage(self, message, sender):
         if isinstance(message, OverlordInitMsg):
@@ -32,6 +38,19 @@ class Overlord(Actor):
         elif isinstance(message, ReportRequest):
             self.reportResults()
             self.send(sender, ReportDone(None))
+        elif isinstance(message, FinishInitMsg):
+            if message.child_id is not None:
+                self.answered_inits[message.child_id] = True
+                print("Router {} initialized".format(message.child_id))
+                if len(self.answered_inits) == len(self.routers):
+                    if self.router_sequential_init:
+                        for (n, target) in self.routers.items():
+                            self.send(target, RouterFinalizeInitMsg())
+                        self.init_msgs = {}
+                    self.finishSystemStart()
+                elif self.router_sequential_init:
+                    nxt = message.child_id + 1
+                    self.send(self.routers[nxt], self.init_msgs[nxt])
         else:
             pass
 
@@ -39,13 +58,13 @@ class Overlord(Actor):
         print("Overlord is started")
 
         G = message.graph
+        self.G = G
         settings = message.settings
         results_file = message.results_file
         log_file = message.logfile
         router_type = message.router_type
 
-        pkg_distr = settings['pkg_distr']
-        sync_settings = settings['synchronizer']
+        self.settings = settings
         logging_settings = settings['logging']
         router_settings = settings['router']
 
@@ -60,9 +79,6 @@ class Overlord(Actor):
 
         self.times_data = EventSeries(logging_settings['delta'])
 
-        synchronizer = self.createActor(Synchronizer, globalName='synchronizer')
-        pkg_sender = self.createActor(PkgSender, globalName='pkg_sender')
-
         router_class = None
         router_init_msg_class = None
         if router_type == 'link_state':
@@ -73,29 +89,51 @@ class Overlord(Actor):
             print('Using Simple Q-routing router algorithm')
             router_class = SimpleQRouter
             router_init_msg_class = SimpleQRouterInitMsg
+        elif router_type == 'dqn':
+            print('Using DQN router algorithm')
+            router_class = DQNRouter
+            router_init_msg_class = DQNRouterInitMsg
+            self.router_sequential_init = True
         else:
             raise Exception('Unknown router type: ' + router_type)
 
-        routers = {}
+        self.routers = {}
         for n in G:
-            routers[n] = self.createActor(router_class)
+            self.routers[n] = self.createActor(router_class)
 
         print("Starting routers")
         for n in G:
-            cur_router = routers[n]
+            cur_router = self.routers[n]
             neighbors_addrs = G.neighbors(n)
-            self.send(cur_router, router_init_msg_class(network_addr=n,
-                                                        neighbors={k: G.get_edge_data(n, k) for k in neighbors_addrs},
-                                                        network=routers,
-                                                        **router_settings))
+            msg = router_init_msg_class(network_addr=n,
+                                        neighbors={k: G.get_edge_data(n, k) for k in neighbors_addrs},
+                                        network=self.routers,
+                                        **router_settings)
+            self.init_msgs[n] = msg
+
+        if self.router_sequential_init:
+            self.send(self.routers[0], self.init_msgs[0])
+        else:
+            for (n, target) in self.routers.items():
+                self.send(target, self.init_msgs[n])
+            self.init_msgs = {}
+
+        print("Waiting for routers to initialize...")
+
+    def finishSystemStart(self):
+        pkg_distr = self.settings['pkg_distr']
+        sync_settings = self.settings['synchronizer']
+
+        synchronizer = self.createActor(Synchronizer, globalName='synchronizer')
+        pkg_sender = self.createActor(PkgSender, globalName='pkg_sender')
 
         print("Starting pkg sender")
         self.send(pkg_sender, PkgSenderInitMsg(pkg_distr,
                                                sync_settings['delta'],
-                                               routers))
+                                               self.routers))
 
         print("Starting synchronizer")
-        self.send(synchronizer, SynchronizerInitMsg(list(routers.values()) + [pkg_sender],
+        self.send(synchronizer, SynchronizerInitMsg(list(self.routers.values()) + [pkg_sender],
                                                     sync_settings['delta'],
                                                     dt.timedelta(milliseconds=sync_settings['period'])))
 

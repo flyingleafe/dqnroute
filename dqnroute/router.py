@@ -38,17 +38,15 @@ class Router(TimeActor):
             self.full_log = message.full_log
             for n in self.neighbors.keys():
                 self.link_states[n] = {'transfer_time': 0, 'alive': True}
+            return self.addr
 
     def processEvent(self, event):
         if not self.isInitialized():
             raise RouterNotInitialized("Router has not been initialized!")
 
         if isinstance(event, IncomingPkgEvent):
-            self.queue_time = max(self.current_time, self.queue_time) + self.pkg_process_delay
-            new_event = ProcessPkgEvent(self.queue_time, event.sender, event.getContents())
-            self.event_queue.push(new_event)
+            self._enqueuePkg(event.sender, event.getContents())
         elif isinstance(event, ProcessPkgEvent):
-            self.receivePackage(event)
             pkg = event.getContents()
             if self.full_log:
                 pkg.route_add(self._currentStateData(pkg), self._currentStateCols())
@@ -56,11 +54,13 @@ class Router(TimeActor):
                 pkg.route_add([self.current_time, self.addr], ['time', 'cur_node'])
             print("ROUTER #{} ROUTES PACKAGE TO {}".format(self.addr, pkg.dst))
             if pkg.dst == self.addr:
+                self.receivePackage(event)
                 self.reportPkgDone(pkg, self.current_time)
             else:
                 best_neighbor = self.routePackage(pkg)
                 is_alive = self.link_states[best_neighbor]['alive']
                 if is_alive:
+                    self.receivePackage(event)
                     target = self.network[best_neighbor]
                     link_latency = self.neighbors[best_neighbor]['latency']
                     link_bandwidth = self.neighbors[best_neighbor]['bandwidth']
@@ -70,7 +70,7 @@ class Router(TimeActor):
                     self.link_states[best_neighbor]['transfer_time'] = transfer_end_time
                     self.sendEvent(target, IncomingPkgEvent(finish_time, self.myAddress, pkg))
                 else:
-                    self.sendToBrokenLink(pkg)
+                    self.sendToBrokenLink(event.sender, pkg)
         elif isinstance(event, LinkBreakMsg):
             n = event.neighbor
             self.link_states[n]['alive'] = False
@@ -81,6 +81,11 @@ class Router(TimeActor):
             self.restoreLink(n)
         else:
             pass
+
+    def _enqueuePkg(self, sender, pkg):
+        self.queue_time = max(self.current_time, self.queue_time) + self.pkg_process_delay
+        new_event = ProcessPkgEvent(self.queue_time, sender, pkg)
+        self.event_queue.push(new_event)
 
     def isInitialized(self):
         return self.overlord is not None
@@ -94,8 +99,8 @@ class Router(TimeActor):
     def routePackage(self, pkg_event):
         pass
 
-    def sendToBrokenLink(self, pkg):
-        pass
+    def sendToBrokenLink(self, sender, pkg):
+        self._enqueuePkg(sender, pkg)
 
     def breakLink(self, v):
         pass
@@ -118,11 +123,12 @@ class LinkStateRouter(Router, LinkStateHolder):
         super().__init__()
 
     def initialize(self, message, sender):
-        super().initialize(message, sender)
+        my_id = super().initialize(message, sender)
         if isinstance(message, LinkStateInitMsg):
             self.initGraph(self.addr, self.network, self.neighbors, self.link_states)
             self._announceLinkState()
             self._cur_state_cols = get_data_cols(len(self.network))
+        return my_id
 
     def _announceLinkState(self):
         announcement = self.mkLSAnnouncement(self.addr)
@@ -181,6 +187,7 @@ class QRouter(Router, RLAgent):
             prev_state = 0
             try:
                 prev_state = self.reward_pending[message.pkg_id]
+                del self.reward_pending[message.pkg_id]
             except KeyError:
                 print("Unexpected reward msg!")
             self.observe(self.mkSample(message, prev_state, sender))
@@ -207,16 +214,17 @@ class SimpleQRouter(QRouter):
         self.steps = 0
 
     def initialize(self, message, sender):
-        super().initialize(message, sender)
+        my_id = super().initialize(message, sender)
         if isinstance(message, SimpleQRouterInitMsg):
             self.learning_rate = message.learning_rate
             for n in self.network.keys():
                 self.Q[n] = {}
                 for (k, data) in self.neighbors.items():
                     if k == n:
-                        self.Q[n][k] = 40
+                        self.Q[n][k] = 0
                     else:
-                        self.Q[n][k] = 100500
+                        self.Q[n][k] = 10
+        return my_id
 
     def breakLink(self, v):
         broken_Qs = {}
