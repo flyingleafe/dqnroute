@@ -11,36 +11,44 @@ from messages import *
 from router import *
 from router_mixins import LinkStateHolder
 
-BATCH_SIZE = 1
-
 MAX_EPSILON = 1
 MIN_EPSILON = 0.01
 LAMBDA = 0.01
+
+class Memory:
+    samples = []
+
+    def __init__(self, capacity):
+        self.capacity = capacity
+
+    def add(self, sample):
+        self.samples.append(sample)
+
+        if len(self.samples) > self.capacity:
+            self.samples.pop(0)
+
+    def sample(self, n):
+        n = min(n, len(self.samples))
+        return random.sample(self.samples, n)
 
 class DQNRouter(QRouter, LinkStateHolder):
     def __init__(self):
         super().__init__()
         LinkStateHolder.__init__(self)
+        self.batch_size = 1
         self.brain = None
-
-    # def _createModel(self, input_dim, output_dim):
-    #     model = Sequential()
-    #     model.add(Dense(output_dim=64, activation='relu', input_dim=input_dim))
-    #     model.add(Dense(output_dim=output_dim, activation='linear'))
-
-    #     opt = RMSprop()
-    #     model.compile(loss='mse', optimizer=opt)
-
-    #     return model
+        self.memory = None
 
     def _train(self, x, y, epoch=1, verbose=0):
-        self.brain.fit(x, y, batch_size=BATCH_SIZE, epochs=epoch, verbose=verbose)
+        self.brain.fit(x, y, batch_size=self.batch_size, epochs=epoch, verbose=verbose)
 
     def initialize(self, message, sender):
         my_id = super().initialize(message, sender)
         if isinstance(message, DQNRouterInitMsg):
             model_file = message.model_file.format(self.addr)
             self.brain = load_model(model_file)
+            self.batch_size = message.batch_size
+            self.memory = Memory(message.mem_capacity)
             self.initGraph(self.addr, self.network, self.neighbors, self.link_states)
         elif isinstance(message, RouterFinalizeInitMsg):
             self._announceLinkState()
@@ -115,11 +123,22 @@ class DQNRouter(QRouter, LinkStateHolder):
         return np.argmax(self.brain.predict(s))
 
     def observe(self, sample):
-        (s, a, r) = sample
-        x = reverse_input(s)
-        y = self.brain.predict(x)
-        y[0][a] = r
-        self._train(x, y)
+        self.memory.add(sample)
+        self.replay()
+
+    def replay(self):
+        batch = self.memory.sample(self.batch_size)
+        blen = len(batch)
+        states = stack_batch([l[0] for l in batch])
+        actions = [l[1] for l in batch]
+        values = [l[2] for l in batch]
+
+        preds = self.brain.predict(states)
+        for i in range(blen):
+            a = actions[i]
+            preds[i][a] = values[i]
+
+        self._train(states, preds)
 
 def transpose_arr(arr):
     sh = arr.shape
@@ -134,3 +153,10 @@ def transpose_arr(arr):
 
 def reverse_input(inp):
     return list(map(transpose_arr, inp))
+
+def stack_batch(batch):
+    n = len(batch[0])
+    ss = [None]*n
+    for i in range(n):
+        ss[i] = np.vstack([b[i] for b in batch])
+    return ss

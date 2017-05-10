@@ -30,4 +30,7 @@ settings:
     learning_rate: 0.5
     pkg_process_delay: 5
     model_file: 'router_network_{}.h5'
+    batch_size: 64
+    mem_capacity: 1000
+    double_q: True
  

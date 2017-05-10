@@ -1,5 +1,5 @@
 __pycache__
-logs
+logs*
 .ipynb_checkpoints
 *.h5
 *.png

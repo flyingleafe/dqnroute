@@ -114,9 +114,13 @@ class SimpleQRouterInitMsg(RouterInitMsg):
 class DQNRouterInitMsg(RouterInitMsg):
     """Init message for DQNRouter"""
 
-    def __init__(self, model_file, **kwargs):
+    def __init__(self, model_file, batch_size=1, mem_capacity=1,
+                 double_q=False, **kwargs):
         super().__init__(**kwargs)
         self.model_file = model_file
+        self.mem_capacity = mem_capacity
+        self.batch_size = batch_size
+        self.double_q = False
 
 class LinkStateInitMsg(RouterInitMsg):
     """Init message for LinkStateRouter"""
