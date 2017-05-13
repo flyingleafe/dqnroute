@@ -54,14 +54,14 @@ settings:
       - {pkg_number: 5000, delta: 10} 
       # - {pkg_number: 500, delta: 20, sources: [0, 1, 2, 8], dests: [3, 4, 5, 9]}
   synchronizer:
-    period: 30
+    period: 100
     delta: 10
   logging:
     delta: 200
   router:
     learning_rate: 0.2
     pkg_process_delay: 5
-    model_file: '../tf_model'
+    model_file: null
     batch_size: 1
     mem_capacity: 1
     prioritized_xp: False

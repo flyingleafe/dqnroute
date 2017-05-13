@@ -18,6 +18,7 @@ LAMBDA = 0.01
 
 MAX_TEMP = 10.0
 MIN_TEMP = 1.0
+DECAY_TEMP_STEPS = 60000
 
 class DQNRouter(QRouter, LinkStateHolder):
     def __init__(self):
@@ -28,6 +29,7 @@ class DQNRouter(QRouter, LinkStateHolder):
         self.memory = None
         self.prioritized_xp = False
         self.temp = MIN_TEMP
+        self.steps = 0
         self.err_mavg = None
         self.session = None
         self.outgoing_pkgs_num = {}
@@ -41,9 +43,14 @@ class DQNRouter(QRouter, LinkStateHolder):
         self.session = tf.Session()
         # load model
         self.session.run(init)
-        ckpt = tf.train.get_checkpoint_state(path)
-        print(ckpt)
-        saver.restore(self.session, ckpt.model_checkpoint_path)
+        if path is not None:
+            self.temp = MIN_TEMP
+            ckpt = tf.train.get_checkpoint_state(path)
+            print(ckpt)
+            saver.restore(self.session, ckpt.model_checkpoint_path)
+        else:
+            self.temp = MAX_TEMP
+            print('No pre-trained model loaded')
 
     def _mkFeedDict(self, x, y=None):
         Nb, Ab, Db, Mb = x
@@ -125,7 +132,6 @@ class DQNRouter(QRouter, LinkStateHolder):
     def getState(self, pkg):
         d = pkg.dst
         k = self.addr
-        print(self.outgoing_pkgs_num)
         gstate = np.ravel(nx.to_numpy_matrix(self.network_graph))
         for i, v in enumerate(gstate):
             gstate[i] = 0 if v == 0 else 1
@@ -164,6 +170,9 @@ class DQNRouter(QRouter, LinkStateHolder):
         else:
             self.memory.add(sample)
         self.replay()
+        self.steps += 1
+        if self.temp > MIN_TEMP:
+            self.temp = MAX_TEMP - (self.steps / DECAY_TEMP_STEPS) * (MAX_TEMP - MIN_TEMP)
 
     def replay(self):
         i_batch = self.memory.sample(self.batch_size)
