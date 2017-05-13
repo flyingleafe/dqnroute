@@ -1,5 +1,6 @@
 import networkx as nx
 import numpy as np
+import threading
 
 from thespian.actors import *
 
@@ -52,7 +53,7 @@ class Router(TimeActor):
                 pkg.route_add(self._currentStateData(pkg), self._currentStateCols())
             else:
                 pkg.route_add([self.current_time, self.addr], ['time', 'cur_node'])
-            print("ROUTER #{} ROUTES PACKAGE TO {}".format(self.addr, pkg.dst))
+            print("ROUTER #{} ROUTES PACKAGE {} TO {}".format(self.addr, pkg.id, pkg.dst))
             if pkg.dst == self.addr:
                 self.receivePackage(event)
                 self.reportPkgDone(pkg, self.current_time)
@@ -121,6 +122,7 @@ class LinkStateRouter(Router, LinkStateHolder):
     def __init__(self):
         LinkStateHolder.__init__(self)
         super().__init__()
+        self.outgoing_pkgs_num = {}
 
     def initialize(self, message, sender):
         my_id = super().initialize(message, sender)
@@ -128,6 +130,8 @@ class LinkStateRouter(Router, LinkStateHolder):
             self.initGraph(self.addr, self.network, self.neighbors, self.link_states)
             self._announceLinkState()
             self._cur_state_cols = get_data_cols(len(self.network))
+            for n in self.neighbors.keys():
+                self.outgoing_pkgs_num[n] = 0
         return my_id
 
     def _announceLinkState(self):
@@ -145,6 +149,10 @@ class LinkStateRouter(Router, LinkStateHolder):
         if isinstance(message, LinkStateAnnouncement):
             if self.processLSAnnouncement(message, self.network.keys()):
                 self._broadcastAnnouncement(message, sender)
+        elif isinstance(message, PkgReturnedMsg):
+            n = self.network_inv[str(sender)]
+            if self.outgoing_pkgs_num[n] > 0:
+                self.outgoing_pkgs_num[n] -= 1
 
     def breakLink(self, v):
         self.lsBreakLink(self.addr, v)
@@ -157,13 +165,16 @@ class LinkStateRouter(Router, LinkStateHolder):
     def isInitialized(self):
         return super().isInitialized() and (len(self.announcements) == len(self.network))
 
+    def receivePackage(self, pkg_event):
+        self.sendServiceMsg(pkg_event.sender, PkgReturnedMsg(None))
+
     def routePackage(self, pkg):
         d = pkg.dst
         path = nx.dijkstra_path(self.network_graph, self.addr, d)
         return path[1]
 
     def _currentStateData(self, pkg):
-        return mk_current_neural_state(self.network_graph, self.current_time, pkg, self.addr)
+        return mk_current_neural_state(self.network_graph, self.outgoing_pkgs_num, self.current_time, pkg, self.addr)
 
     def _currentStateCols(self):
         return self._cur_state_cols
@@ -174,7 +185,8 @@ class QRouter(Router, RLAgent):
         self.reward_pending = {}
 
     def receivePackage(self, pkg_event):
-        self.sendServiceMsg(pkg_event.sender, self.mkRewardMsg(pkg_event.getContents()))
+        pkg = pkg_event.getContents()
+        self.sendServiceMsg(pkg_event.sender, self.mkRewardMsg(pkg))
 
     def routePackage(self, pkg):
         state = self.getState(pkg)
@@ -184,12 +196,8 @@ class QRouter(Router, RLAgent):
     def receiveServiceMsg(self, message, sender):
         super().receiveServiceMsg(message, sender)
         if isinstance(message, RewardMsg):
-            prev_state = 0
-            try:
-                prev_state = self.reward_pending[message.pkg_id]
-                del self.reward_pending[message.pkg_id]
-            except KeyError:
-                print("Unexpected reward msg!")
+            prev_state = self.reward_pending[message.pkg_id]
+            del self.reward_pending[message.pkg_id]
             self.observe(self.mkSample(message, prev_state, sender))
 
     def mkRewardMsg(self, pkg):
@@ -206,10 +214,14 @@ MIN_EPSILON = 0.01
 LAMBDA = 0.001
 
 class SimpleQRouter(QRouter):
+    """Original Q-routing algorithm"""
+
     def __init__(self):
         super().__init__()
         self.Q = {}
+        self.U = {}
         self.learning_rate = None
+        self.broken_links = {}
         self.broken_link_Qs = {}
         self.steps = 0
 
@@ -219,29 +231,40 @@ class SimpleQRouter(QRouter):
             self.learning_rate = message.learning_rate
             for n in self.network.keys():
                 self.Q[n] = {}
+                self.U[n] = {}
                 for (k, data) in self.neighbors.items():
                     if k == n:
                         self.Q[n][k] = 0
                     else:
                         self.Q[n][k] = 10
+                    self.U[n][k] = 0
         return my_id
 
     def breakLink(self, v):
-        broken_Qs = {}
-        for n in self.network.keys():
-            broken_Qs[n] = self.Q[n][v]
-            self.Q[n][v] = 100500
-        self.broken_link_Qs[v] = broken_Qs
+        self.broken_links[v] = True
+        # broken_Qs = {}
+        # for n in self.network.keys():
+        #     broken_Qs[n] = self.Q[n][v]
+        #     self.Q[n][v] = 100500
+        # self.broken_link_Qs[v] = broken_Qs
 
     def restoreLink(self, v):
-        broken_Qs = self.broken_link_Qs[v]
-        for (n, val) in broken_Qs.items():
-            self.Q[n][v] = val
-        del self.broken_link_Qs[v]
+        del self.broken_links[v]
+        # broken_Qs = self.broken_link_Qs[v]
+        # for (n, val) in broken_Qs.items():
+        #     self.Q[n][v] = val
+        # del self.broken_link_Qs[v]
+
+    def _mkBestEstimate(self, d):
+        result_q = {}
+        for n in self.neighbors.keys():
+            if n not in self.broken_links:
+                result_q[n] = self.Q[d][n]
+        return dict_min(result_q)
 
     def mkRewardMsg(self, pkg):
         d = pkg.dst
-        best_estimate = 0 if self.addr == d else dict_min(self.Q[d])[1]
+        best_estimate = 0 if self.addr == d else self._mkBestEstimate(d)[1]
         return SimpleRewardMsg(pkg.id, self.current_time, best_estimate, d)
 
     def mkSample(self, message, prev_state, sender):
@@ -258,18 +281,117 @@ class SimpleQRouter(QRouter):
 
     def act(self, state):
         d = state[1]
-        return dict_min(self.Q[d])[0]
+        return self._mkBestEstimate(d)[0]
 
     def observe(self, sample):
         (dst, sender_addr, new_estimate) = sample
         delta = self.learning_rate * (new_estimate - self.Q[dst][sender_addr])
-        self.Q[dst][sender_addr] += delta
+        period = self.current_time - self.U[dst][sender_addr]
+        if period != 0:
+            self.Q[dst][sender_addr] += delta
+            self.U[dst][sender_addr] = self.current_time
+
+    def sendToBrokenLink(self, sender, pkg):
+        super().sendToBrokenLink(sender, pkg)
 
     def _currentStateData(self, pkg):
         return [self.current_time, pkg.id]
 
     def _currentStateCols(self):
         return ['time', 'pkg_id']
+
+
+class PredictiveQRouter(QRouter):
+    """Predictive Q-routing"""
+
+    def __init__(self):
+        super().__init__()
+        self.Q = {}
+        self.B = {}
+        self.R = {}
+        self.U = {}
+        self.learning_rate = None
+        self.broken_links = {}
+        self.steps = 0
+
+    def initialize(self, message, sender):
+        my_id = super().initialize(message, sender)
+        if isinstance(message, PredictiveQRouterInitMsg):
+            self.learning_rate = message.learning_rate
+            self.beta_rate = message.beta_rate
+            self.gamma_rate = message.gamma_rate
+            for n in self.network.keys():
+                self.Q[n] = {}
+                self.B[n] = {}
+                self.R[n] = {}
+                self.U[n] = {}
+                for (k, data) in self.neighbors.items():
+                    if k == n:
+                        self.Q[n][k] = 0
+                        self.B[n][k] = 0
+                    else:
+                        self.Q[n][k] = 5
+                        self.B[n][k] = 5
+                    self.U[n][k] = 0
+                    self.R[n][k] = 0
+        return my_id
+
+    def breakLink(self, v):
+        self.broken_links[v] = True
+
+    def restoreLink(self, v):
+        del self.broken_links[v]
+
+    def _mkBestEstimate(self, d):
+        result_q = {}
+        for y in self.neighbors.keys():
+            if y not in self.broken_links:
+                dt = self.current_time - self.U[d][y]
+                result_q[y] = max(self.Q[d][y] + dt*self.R[d][y], self.B[d][y])
+
+        return dict_min(result_q)
+
+    def mkRewardMsg(self, pkg):
+        d = pkg.dst
+        best_estimate = 0 if self.addr == d else dict_min(self.Q[d])[1]
+        return PredictiveRewardMsg(pkg.id, self.current_time, best_estimate, d)
+
+    def mkSample(self, message, prev_state, sender):
+        if isinstance(message, PredictiveRewardMsg):
+            sender_addr = self.network_inv[str(sender)]
+            sent_time = prev_state[0]
+            new_estimate = message.estimate + (message.cur_time - sent_time)
+            return (message.dst, sender_addr, new_estimate)
+        else:
+            raise Exception("Unsupported type of reward msg!")
+
+    def getState(self, pkg):
+        return (self.current_time, pkg.dst)
+
+    def act(self, state):
+        d = state[1]
+        return self._mkBestEstimate(d)[0]
+
+    def observe(self, sample):
+        (d, y, new_estimate) = sample
+        period = self.current_time - self.U[d][y]
+        if period != 0:
+            delta_q = new_estimate - self.Q[d][y]
+            self.Q[d][y] += self.learning_rate * delta_q
+            self.B[d][y] = min(self.B[d][y], self.Q[d][y])
+            if delta_q < 0:
+                delta_r = delta_q / period
+                self.R[d][y] += self.beta_rate * delta_r
+            elif delta_q > 0:
+                self.R[d][y] *= self.gamma_rate
+            self.U[d][y] = self.current_time
+
+    def _currentStateData(self, pkg):
+        return [self.current_time, pkg.id]
+
+    def _currentStateCols(self):
+        return ['time', 'pkg_id']
+
 
 def dict_min(dct):
     return min(dct.items(), key=lambda x:x[1])

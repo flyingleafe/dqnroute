@@ -24,12 +24,14 @@ settings:
       - {action: 'restore_link', pause: 20, u: 6, v: 7}
       - {pkg_number: 500, delta: 20, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
   synchronizer:
-    period: 20
+    period: 40
     delta: 10
   logging:
     delta: 500
   router:
-    learning_rate: 0.5
+    learning_rate: 1
+    beta_rate: 0.1
+    gamma_rate: 0.3
     pkg_process_delay: 5
     model_file: 'router_network_{}.h5'
  

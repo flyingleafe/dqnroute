@@ -111,6 +111,15 @@ class SimpleQRouterInitMsg(RouterInitMsg):
         super().__init__(**kwargs)
         self.learning_rate = learning_rate
 
+class PredictiveQRouterInitMsg(RouterInitMsg):
+    """Init message for PredictiveQRouter"""
+
+    def __init__(self, learning_rate, beta_rate, gamma_rate, **kwargs):
+        super().__init__(**kwargs)
+        self.learning_rate = learning_rate
+        self.beta_rate = beta_rate
+        self.gamma_rate = gamma_rate
+
 class DQNRouterInitMsg(RouterInitMsg):
     """Init message for DQNRouter"""
 
@@ -153,12 +162,22 @@ class LinkRestoreMsg(EventMsg):
         super().__init__(time, sender, None)
         self.neighbor = neighbor
 
+class PkgReturnedMsg(ServiceMsg):
+    pass
+
 class RewardMsg(ServiceMsg):
     def __init__(self, pkg_id, **kwargs):
         super().__init__(kwargs)
         self.pkg_id = pkg_id
 
 class SimpleRewardMsg(RewardMsg):
+    def __init__(self, pkg_id, cur_time, estimate, dst, **kwargs):
+        super().__init__(pkg_id, **kwargs)
+        self.cur_time = cur_time
+        self.estimate = estimate
+        self.dst = dst
+
+class PredictiveRewardMsg(RewardMsg):
     def __init__(self, pkg_id, cur_time, estimate, dst, **kwargs):
         super().__init__(pkg_id, **kwargs)
         self.cur_time = cur_time

@@ -39,6 +39,7 @@ def main():
     settings = run_params['settings']
     df = pd.DataFrame(columns=get_data_cols(len(G.nodes())))
     s_delta = settings['synchronizer']['delta']
+    outgoing_pkgs_nums = {}
 
     for (action, cur_time, params) in gen_network_actions(G.nodes(), settings['pkg_distr']):
         if action == 'send_pkg':
@@ -47,7 +48,7 @@ def main():
             time = cur_time + s_delta
             pkg = Package(pkg_id, size, d, time, None)
             for (i, n) in enumerate(path):
-                df.loc[len(df)] = mk_current_neural_state(G, time, pkg, n)
+                df.loc[len(df)] = mk_current_neural_state(G, outgoing_pkgs_nums, time, pkg, n)
                 if i < len(path) - 1:
                     time += G.get_edge_data(n, path[i+1])['weight']
             df.to_csv(logfile, header=False, index=False)

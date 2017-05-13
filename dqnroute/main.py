@@ -31,7 +31,7 @@ def main():
                         help='Path to results .csv')
 
     parser.add_argument('router_type', metavar='router_type',
-                        choices=['simple_q', 'link_state', 'dqn'],
+                        choices=['simple_q', 'pred_q', 'link_state', 'dqn'],
                         help='Router type')
 
     parser.add_argument('--logfile', dest='logfile', default=None,

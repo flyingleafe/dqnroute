@@ -8,7 +8,7 @@ from more_itertools import peekable
 from messages import *
 from event_series import EventSeries
 from time_actor import Synchronizer, AbstractTimeActor
-from router import SimpleQRouter, LinkStateRouter
+from router import SimpleQRouter, PredictiveQRouter, LinkStateRouter
 from utils import gen_network_actions
 from dqn_router import DQNRouter
 
@@ -89,6 +89,10 @@ class Overlord(Actor):
             print('Using Simple Q-routing router algorithm')
             router_class = SimpleQRouter
             router_init_msg_class = SimpleQRouterInitMsg
+        elif router_type == 'pred_q':
+            print('Using Predictive Q-routing router algorithm')
+            router_class = PredictiveQRouter
+            router_init_msg_class = PredictiveQRouterInitMsg
         elif router_type == 'dqn':
             print('Using DQN router algorithm')
             router_class = DQNRouter

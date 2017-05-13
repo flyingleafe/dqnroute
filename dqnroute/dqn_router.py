@@ -30,6 +30,7 @@ class DQNRouter(QRouter, LinkStateHolder):
         self.temp = MIN_TEMP
         self.err_mavg = None
         self.session = None
+        self.outgoing_pkgs_num = {}
 
     def _initModel(self, n, path):
         tf.reset_default_graph()
@@ -69,6 +70,9 @@ class DQNRouter(QRouter, LinkStateHolder):
             else:
                 self.memory = Memory(message.mem_capacity)
             self.initGraph(self.addr, self.network, self.neighbors, self.link_states)
+            for n in self.neighbors.keys():
+                self.outgoing_pkgs_num[n] = 0
+
         elif isinstance(message, RouterFinalizeInitMsg):
             self._announceLinkState()
         return my_id
@@ -121,6 +125,7 @@ class DQNRouter(QRouter, LinkStateHolder):
     def getState(self, pkg):
         d = pkg.dst
         k = self.addr
+        print(self.outgoing_pkgs_num)
         gstate = np.ravel(nx.to_numpy_matrix(self.network_graph))
         for i, v in enumerate(gstate):
             gstate[i] = 0 if v == 0 else 1
@@ -145,11 +150,14 @@ class DQNRouter(QRouter, LinkStateHolder):
             # print(s)
             # print(pred)
             res = soft_argmax(pred, self.temp)
+        self.outgoing_pkgs_num[res] += 1
         return res
 
     def observe(self, sample):
+        s, a, r = sample
+        if self.outgoing_pkgs_num[a] > 0:
+            self.outgoing_pkgs_num[a] -= 1
         if self.prioritized_xp:
-            s, a, r = sample
             pred = self._predict(reverse_input(s))[0][a]
             err = abs(r - a)
             self.memory.add(err, sample)

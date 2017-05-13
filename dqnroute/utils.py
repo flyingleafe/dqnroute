@@ -2,12 +2,12 @@ import random
 import networkx as nx
 import numpy as np
 
-def mk_current_neural_state(G, time, pkg, node_addr):
+def mk_current_neural_state(G, out_pkgs, time, pkg, node_addr):
     n = len(G.nodes())
     k = node_addr
     d = pkg.dst
     neighbors = G.neighbors(k)
-    dlen = 3 + 4*n + n*n
+    dlen = 3 + 5*n + n*n
     data = np.zeros(dlen)
     data[0] = time
     data[1] = pkg.id
@@ -19,6 +19,9 @@ def mk_current_neural_state(G, time, pkg, node_addr):
     off += n
     for m in neighbors:
         data[off + m] = 1
+    off += n
+    for (m, count) in out_pkgs.items():
+        data[off + m] = np.log(count + 1)
     off += n
     for i in range(0, n):
         for j in range(0, n):
@@ -46,11 +49,14 @@ def get_dst_cols(n):
 def get_addr_cols(n):
     return mk_num_list('addr_', n)
 
+def get_out_links_cols(n):
+    return mk_num_list('outl_', n)
+
 def get_neighbors_cols(n):
     return mk_num_list('neighbors_', n)
 
 def get_feature_cols(n):
-    return get_dst_cols(n) + get_addr_cols(n) + get_neighbors_cols(n)
+    return get_dst_cols(n) + get_addr_cols(n) + get_neighbors_cols(n) + get_out_links_cols(n)
 
 def get_amatrix_cols(n):
     res = []
