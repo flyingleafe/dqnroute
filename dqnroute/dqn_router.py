@@ -21,6 +21,8 @@ MIN_TEMP = 0.3
 DECAY_TEMP_STEPS = 60000
 
 LOAD_LVL_WEIGHTS = [10, 8, 6, 5, 4, 3, 2, 2, 1, 1]
+LOAD_LVL_LOW_THRESHOLD = 1.0
+LOAD_LVL_HIGH_THRESHOLD = 2.0
 
 class DQNRouter(QRouter, LinkStateHolder):
     def __init__(self):
@@ -36,6 +38,8 @@ class DQNRouter(QRouter, LinkStateHolder):
         self.session = None
         self.outgoing_pkgs_num = {}
         self.load_lvl_mavg = deque([], 10)
+        self.neighbors_advices = {}
+        self.ploho_flag = False
 
     def _initModel(self, n, path):
         tf.reset_default_graph()
@@ -104,6 +108,9 @@ class DQNRouter(QRouter, LinkStateHolder):
         if isinstance(message, LinkStateAnnouncement):
             if self.processLSAnnouncement(message, self.network.keys()):
                 self._broadcastAnnouncement(message, sender)
+        elif isinstance(message, NeighborsAdvice):
+            n = self.network_inv[str(sender)]
+            self.neighbors_advices[n] = (message.time, message.estimations)
 
     def breakLink(self, v):
         self.lsBreakLink(self.addr, v)
@@ -134,17 +141,19 @@ class DQNRouter(QRouter, LinkStateHolder):
         else:
             raise Exception("Unsupported type of reward msg!")
 
+    def _getAmatrix(self):
+        gstate = np.ravel(nx.to_numpy_matrix(self.network_graph))
+        for i, v in enumerate(gstate):
+            gstate[i] = 0 if v == 0 else 1
+        return gstate
+
     def getState(self, pkg):
         d = pkg.dst
         k = self.addr
         out_logs = np.zeros(len(self.network))
         # for (m, count) in self.outgoing_pkgs_num.items():
             # out_logs[m] = np.log(count + 1)
-
-        gstate = np.ravel(nx.to_numpy_matrix(self.network_graph))
-        for i, v in enumerate(gstate):
-            gstate[i] = 0 if v == 0 else 1
-        return (self.current_time, (d, k, out_logs, gstate))
+        return (self.current_time, (d, k, out_logs, self._getAmatrix()))
 
     def _getInputs(self, state):
         n = len(self.network)
@@ -158,14 +167,36 @@ class DQNRouter(QRouter, LinkStateHolder):
         return [neighbors_arr, addr_arr, dst_arr, gstate]
 
     def _tellNeighborsIfFree(self, state):
-        lvl_avg = np.mean(self.load_level_mavg)
+        lvl_avg = np.average(self.load_level_mavg, weights=LOAD_LVL_WEIGHTS)
+        if self.queue_count <= 1 and lvl_avg < LOAD_LVL_LOW_THRESHOLD and self.ploho_flag:
+            self.ploho_flag = False
+            for n in self.neighbors.keys():
+                if self.network_graph.has_edge(self.addr, n):
+                    self._adviceEstimations(n)
+        elif self.queue_count > 2 and lvl_avg > LOAD_LVL_HIGH_THRESHOLD:
+            self.ploho_flag = True
+
+    def _adviceEstimations(self, n):
+        est_inps = []
+        for m in self.network.keys():
+            est_inps.append(self._getInputs((m, n, None, self._getAmatrix())))
+        est_inps = stack_batch(est_inps)
+        preds = self._predict(est_inps)[:, self.addr]
+        self.sendServiceMsg(self.network[n], NeighborsAdvice(preds))
+
+    def _adjustAdvices(self, d, pred):
+        for (n, (time, ests)) in self.neighbors_advices.items():
+            if self.network_graph.has_edge(self.addr, n) and self.current_time - time < 100:
+                pred[n] = min(pred[n], ests[d])
 
     def act(self, state):
         _s = self._getInputs(state[1])
         s = reverse_input(_s)
+        pred = self._predict(s)[0]
+        dst = state[1][0]
+        self._adjustAdvices(d, pred)
         res = -1
         while res not in self.neighbors.keys():
-            pred = self._predict(s)[0]
             # print(s)
             # print(pred)
             res = soft_argmax(pred, self.temp)

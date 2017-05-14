@@ -198,6 +198,11 @@ class LinkStateAnnouncement(ServiceMsg):
         self.from_addr = from_addr
         self.neighbors = neighbors
 
+class NeighborsAdvice(ServiceMsg):
+    def __init__(self, time, estimations):
+        self.time = time
+        self.estimations = estimations
+
 @total_ordering
 class Package:
     def __init__(self, pkg_id, size, dst, start_time, contents):
