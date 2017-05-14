@@ -37,7 +37,7 @@ settings:
     beta_rate: 0.7
     gamma_rate: 0.9
     pkg_process_delay: 5
-    model_file: '../tf_model2'
+    model_file: '../tf_model'
     batch_size: 1
     mem_capacity: 1
     prioritized_xp: False

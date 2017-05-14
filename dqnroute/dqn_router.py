@@ -37,7 +37,7 @@ class DQNRouter(QRouter, LinkStateHolder):
         self.err_mavg = None
         self.session = None
         self.outgoing_pkgs_num = {}
-        self.load_lvl_mavg = deque([], 10)
+        self.load_lvl_mavg = deque([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 10)
         self.neighbors_advices = {}
         self.ploho_flag = False
 
@@ -166,14 +166,16 @@ class DQNRouter(QRouter, LinkStateHolder):
         # return [neighbors_arr, addr_arr, dst_arr, out_logs, gstate]
         return [neighbors_arr, addr_arr, dst_arr, gstate]
 
-    def _tellNeighborsIfFree(self, state):
-        lvl_avg = np.average(self.load_level_mavg, weights=LOAD_LVL_WEIGHTS)
+    def _tellNeighborsIfFree(self):
+        lvl_avg = np.average(self.load_lvl_mavg, weights=LOAD_LVL_WEIGHTS)
         if self.queue_count <= 1 and lvl_avg < LOAD_LVL_LOW_THRESHOLD and self.ploho_flag:
+            print("U {} VSE HOROSHO !!!".format(self.addr))
             self.ploho_flag = False
             for n in self.neighbors.keys():
                 if self.network_graph.has_edge(self.addr, n):
                     self._adviceEstimations(n)
         elif self.queue_count > 2 and lvl_avg > LOAD_LVL_HIGH_THRESHOLD:
+            print("U {} VSE OCHEN HUEVO !!!".format(self.addr))
             self.ploho_flag = True
 
     def _adviceEstimations(self, n):
@@ -182,7 +184,7 @@ class DQNRouter(QRouter, LinkStateHolder):
             est_inps.append(self._getInputs((m, n, None, self._getAmatrix())))
         est_inps = stack_batch(est_inps)
         preds = self._predict(est_inps)[:, self.addr]
-        self.sendServiceMsg(self.network[n], NeighborsAdvice(preds))
+        self.sendServiceMsg(self.network[n], NeighborsAdvice(self.current_time, preds))
 
     def _adjustAdvices(self, d, pred):
         for (n, (time, ests)) in self.neighbors_advices.items():
@@ -194,7 +196,7 @@ class DQNRouter(QRouter, LinkStateHolder):
         s = reverse_input(_s)
         pred = self._predict(s)[0]
         dst = state[1][0]
-        self._adjustAdvices(d, pred)
+        self._adjustAdvices(dst, pred)
         res = -1
         while res not in self.neighbors.keys():
             # print(s)
