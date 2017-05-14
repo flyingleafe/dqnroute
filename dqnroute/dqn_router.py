@@ -17,8 +17,10 @@ MIN_EPSILON = 0.01
 LAMBDA = 0.01
 
 MAX_TEMP = 10.0
-MIN_TEMP = 1.0
+MIN_TEMP = 0.3
 DECAY_TEMP_STEPS = 60000
+
+LOAD_LVL_WEIGHTS = [10, 8, 6, 5, 4, 3, 2, 2, 1, 1]
 
 class DQNRouter(QRouter, LinkStateHolder):
     def __init__(self):
@@ -33,6 +35,7 @@ class DQNRouter(QRouter, LinkStateHolder):
         self.err_mavg = None
         self.session = None
         self.outgoing_pkgs_num = {}
+        self.load_lvl_mavg = deque([], 10)
 
     def _initModel(self, n, path):
         tf.reset_default_graph()
@@ -53,9 +56,10 @@ class DQNRouter(QRouter, LinkStateHolder):
             print('No pre-trained model loaded')
 
     def _mkFeedDict(self, x, y=None):
-        Nb, Ab, Db, Ob, Mb = x
+        Nb, Ab, Db, Mb = x
         feed_dict={self.brain.neighbors_input:Nb, self.brain.addr_input:Ab,
-                   self.brain.dst_input:Db, self.brain.out_links_input:Ob,
+                   self.brain.dst_input:Db,
+                   # self.brain.out_links_input:Ob,
                    self.brain.amatrix_input:Mb}
         if y is not None:
             feed_dict[self.brain.target] = y
@@ -150,7 +154,11 @@ class DQNRouter(QRouter, LinkStateHolder):
         dst_arr = np.zeros(n)
         dst_arr[d] = 1
         neighbors_arr = gstate[k*n : (k+1)*n]
-        return [neighbors_arr, addr_arr, dst_arr, out_logs, gstate]
+        # return [neighbors_arr, addr_arr, dst_arr, out_logs, gstate]
+        return [neighbors_arr, addr_arr, dst_arr, gstate]
+
+    def _tellNeighborsIfFree(self, state):
+        lvl_avg = np.mean(self.load_level_mavg)
 
     def act(self, state):
         _s = self._getInputs(state[1])
@@ -162,6 +170,8 @@ class DQNRouter(QRouter, LinkStateHolder):
             # print(pred)
             res = soft_argmax(pred, self.temp)
         self.outgoing_pkgs_num[res] += 1
+        self.load_lvl_mavg.appendleft(self.queue_count)
+        self._tellNeighborsIfFree()
         return res
 
     def observe(self, sample):

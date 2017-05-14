@@ -56,7 +56,7 @@ def get_neighbors_cols(n):
     return mk_num_list('neighbors_', n)
 
 def get_feature_cols(n):
-    return get_dst_cols(n) + get_addr_cols(n) + get_neighbors_cols(n) + get_out_links_cols(n)
+    return get_dst_cols(n) + get_addr_cols(n) + get_neighbors_cols(n) #+ get_out_links_cols(n)
 
 def get_amatrix_cols(n):
     res = []

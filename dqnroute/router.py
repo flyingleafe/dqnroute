@@ -24,6 +24,7 @@ class Router(TimeActor):
         self.neighbors = {}
         self.pkg_process_delay = 0
         self.queue_time = 0
+        self.queue_count = 0
         self.link_states = {}
         self.full_log = False
 
@@ -48,6 +49,7 @@ class Router(TimeActor):
         if isinstance(event, IncomingPkgEvent):
             self._enqueuePkg(event.sender, event.getContents())
         elif isinstance(event, ProcessPkgEvent):
+            self.queue_count -= 1
             pkg = event.getContents()
             if self.full_log:
                 pkg.route_add(self._currentStateData(pkg), self._currentStateCols())
@@ -87,6 +89,7 @@ class Router(TimeActor):
         self.queue_time = max(self.current_time, self.queue_time) + self.pkg_process_delay
         new_event = ProcessPkgEvent(self.queue_time, sender, pkg)
         self.event_queue.push(new_event)
+        self.queue_count += 1
 
     def isInitialized(self):
         return self.overlord is not None
@@ -286,10 +289,10 @@ class SimpleQRouter(QRouter):
     def observe(self, sample):
         (dst, sender_addr, new_estimate) = sample
         delta = self.learning_rate * (new_estimate - self.Q[dst][sender_addr])
-        period = self.current_time - self.U[dst][sender_addr]
-        if period != 0:
-            self.Q[dst][sender_addr] += delta
-            self.U[dst][sender_addr] = self.current_time
+        # period = self.current_time - self.U[dst][sender_addr]
+        # if period != 0:
+        self.Q[dst][sender_addr] += delta
+            # self.U[dst][sender_addr] = self.current_time
 
     def sendToBrokenLink(self, sender, pkg):
         super().sendToBrokenLink(sender, pkg)
