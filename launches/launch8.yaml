@@ -39,5 +39,8 @@ settings:
   router:
     learning_rate: 0.5
     pkg_process_delay: 5
-    model_file: 'router_network_{}.h5'
+    model_file: '../tf_model2'
+    batch_size: 1
+    mem_capacity: 1
+    prioritized_xp: False
  

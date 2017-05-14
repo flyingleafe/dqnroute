@@ -8,9 +8,11 @@ class Qnetwork():
         self.neighbors_input = tf.placeholder(shape=(None,n),dtype=tf.float32)
         self.addr_input = tf.placeholder(shape=(None, n), dtype=tf.float32)
         self.dst_input = tf.placeholder(shape=(None,n), dtype=tf.float32)
+        self.out_links_input = tf.placeholder(shape=(None,n), dtype=tf.float32)
         self.amatrix_input = tf.placeholder(shape=(None, n*n), dtype=tf.float32)
 
-        self.all_inps = tf.concat([self.neighbors_input, self.addr_input, self.dst_input, self.amatrix_input], 1)
+        self.all_inps = tf.concat([self.neighbors_input, self.addr_input, self.dst_input,
+                                   self.out_links_input, self.amatrix_input], 1)
         layer1 = slim.fully_connected(inputs=self.all_inps, num_outputs=64, scope=myScope+'_dense1')
 
         layer2 = slim.fully_connected(inputs=layer1, num_outputs=64, scope=myScope+'_dense2')

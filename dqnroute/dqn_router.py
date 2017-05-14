@@ -53,9 +53,10 @@ class DQNRouter(QRouter, LinkStateHolder):
             print('No pre-trained model loaded')
 
     def _mkFeedDict(self, x, y=None):
-        Nb, Ab, Db, Mb = x
+        Nb, Ab, Db, Ob, Mb = x
         feed_dict={self.brain.neighbors_input:Nb, self.brain.addr_input:Ab,
-                   self.brain.dst_input:Db, self.brain.amatrix_input:Mb}
+                   self.brain.dst_input:Db, self.brain.out_links_input:Ob,
+                   self.brain.amatrix_input:Mb}
         if y is not None:
             feed_dict[self.brain.target] = y
         return feed_dict
@@ -132,20 +133,24 @@ class DQNRouter(QRouter, LinkStateHolder):
     def getState(self, pkg):
         d = pkg.dst
         k = self.addr
+        out_logs = np.zeros(len(self.network))
+        # for (m, count) in self.outgoing_pkgs_num.items():
+            # out_logs[m] = np.log(count + 1)
+
         gstate = np.ravel(nx.to_numpy_matrix(self.network_graph))
         for i, v in enumerate(gstate):
             gstate[i] = 0 if v == 0 else 1
-        return (self.current_time, (d, k, gstate))
+        return (self.current_time, (d, k, out_logs, gstate))
 
     def _getInputs(self, state):
         n = len(self.network)
-        d, k, gstate = state
+        d, k, out_logs, gstate = state
         addr_arr = np.zeros(n)
         addr_arr[k] = 1
         dst_arr = np.zeros(n)
         dst_arr[d] = 1
         neighbors_arr = gstate[k*n : (k+1)*n]
-        return [neighbors_arr, addr_arr, dst_arr, gstate]
+        return [neighbors_arr, addr_arr, dst_arr, out_logs, gstate]
 
     def act(self, state):
         _s = self._getInputs(state[1])

@@ -18,16 +18,22 @@ settings:
     sequence:
       # - {pkg_number: 1000, delta: 10} 
       - {pkg_number: 100, delta: 10}
-      - {pkg_number: 500, delta: 10, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
-      - {pkg_number: 1500, delta: 3.5, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
-      - {pkg_number: 500, delta: 10, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
+      - {pkg_number: 300, delta: 10, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
+      - {pkg_number: 1000, delta: 3.5, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
+      - {pkg_number: 400, delta: 10, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
+      - {pkg_number: 1000, delta: 3.5, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
+      - {pkg_number: 400, delta: 10, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
+      - {pkg_number: 1000, delta: 3.5, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
+      - {pkg_number: 400, delta: 10, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
+      - {pkg_number: 1000, delta: 3.5, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
+      - {pkg_number: 400, delta: 10, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
   synchronizer:
-    period: 70
+    period: 80
     delta: 10
   logging:
     delta: 500
   router:
-    learning_rate: 1
+    learning_rate: 0.5
     beta_rate: 0.7
     gamma_rate: 0.9
     pkg_process_delay: 5
@@ -35,4 +41,3 @@ settings:
     batch_size: 1
     mem_capacity: 1
     prioritized_xp: False
- 
