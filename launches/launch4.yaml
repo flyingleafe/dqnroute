@@ -24,7 +24,10 @@ settings:
       - {action: 'restore_link', pause: 20, u: 6, v: 7}
       - {pkg_number: 500, delta: 20, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
   synchronizer:
-    period: 40
+    period:
+      link_state: 20
+      simple_q: 30
+      dqn: 40
     delta: 10
   logging:
     delta: 500
@@ -33,5 +36,8 @@ settings:
     beta_rate: 0.1
     gamma_rate: 0.3
     pkg_process_delay: 5
-    model_file: 'router_network_{}.h5'
- 
+    model_file: '../tf_model'
+    batch_size: 1
+    mem_capacity: 1
+    prioritized_xp: False
+

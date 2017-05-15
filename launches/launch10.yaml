@@ -14,7 +14,7 @@ network:
 
 settings:
   pkg_distr:
-    seed: 42
+    seed: 43
     sequence:
       # - {pkg_number: 1000, delta: 10} 
       - {pkg_number: 100, delta: 10}
@@ -28,7 +28,10 @@ settings:
       - {pkg_number: 1000, delta: 3.5, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
       - {pkg_number: 400, delta: 10, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
   synchronizer:
-    period: 80
+    period:
+      simple_q: 100
+      link_state: 60
+      dqn: 100
     delta: 10
   logging:
     delta: 500

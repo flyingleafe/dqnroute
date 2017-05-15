@@ -23,6 +23,7 @@ class Overlord(Actor):
         self.cur_count = 0
         self.results_file = None
         self.log_file = None
+        self.router_type = None
         self.routers = {}
         self.answered_inits = {}
         self.settings = None
@@ -62,7 +63,7 @@ class Overlord(Actor):
         settings = message.settings
         results_file = message.results_file
         log_file = message.logfile
-        router_type = message.router_type
+        self.router_type = message.router_type
 
         self.settings = settings
         logging_settings = settings['logging']
@@ -81,25 +82,25 @@ class Overlord(Actor):
 
         router_class = None
         router_init_msg_class = None
-        if router_type == 'link_state':
+        if self.router_type == 'link_state':
             print('Using link-state router algorithm')
             router_class = LinkStateRouter
             router_init_msg_class = LinkStateInitMsg
-        elif router_type == 'simple_q':
+        elif self.router_type == 'simple_q':
             print('Using Simple Q-routing router algorithm')
             router_class = SimpleQRouter
             router_init_msg_class = SimpleQRouterInitMsg
-        elif router_type == 'pred_q':
+        elif self.router_type == 'pred_q':
             print('Using Predictive Q-routing router algorithm')
             router_class = PredictiveQRouter
             router_init_msg_class = PredictiveQRouterInitMsg
-        elif router_type == 'dqn':
+        elif self.router_type == 'dqn':
             print('Using DQN router algorithm')
             router_class = DQNRouter
             router_init_msg_class = DQNRouterInitMsg
             self.router_sequential_init = True
         else:
-            raise Exception('Unknown router type: ' + router_type)
+            raise Exception('Unknown router type: ' + self.router_type)
 
         self.routers = {}
         for n in G:
@@ -137,9 +138,12 @@ class Overlord(Actor):
                                                self.routers))
 
         print("Starting synchronizer")
+        period = sync_settings['period']
+        if type(period) == dict:
+            period = period[self.router_type]
         self.send(synchronizer, SynchronizerInitMsg(list(self.routers.values()) + [pkg_sender],
                                                     sync_settings['delta'],
-                                                    dt.timedelta(milliseconds=sync_settings['period'])))
+                                                    dt.timedelta(milliseconds=period)))
 
     def recordPkg(self, message):
         pkg = message.getContents()

@@ -1,5 +1,6 @@
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
+import numpy as np
 
 from keras.layers import *
 
@@ -19,7 +20,7 @@ class Qnetwork():
         layer2 = slim.fully_connected(inputs=layer1, num_outputs=64, scope=myScope+'_dense2')
         self.dense_out = slim.fully_connected(inputs=layer2, num_outputs=n, activation_fn=None, scope=myScope+'_dense_out')
 
-        lambda_l = Lambda(lambda x: (1 - x) * -1000000)(self.neighbors_input)
+        lambda_l = Lambda(lambda x: (1 - tf.minimum(x, 1))*-1000000)(self.neighbors_input)
         self.Qout = tf.add(self.dense_out, lambda_l)
 
         self.target = tf.placeholder(shape=(None, n), dtype=tf.float32)

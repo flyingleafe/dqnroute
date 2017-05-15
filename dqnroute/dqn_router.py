@@ -17,7 +17,7 @@ MIN_EPSILON = 0.01
 LAMBDA = 0.01
 
 MAX_TEMP = 10.0
-MIN_TEMP = 0.3
+MIN_TEMP = 1.5
 DECAY_TEMP_STEPS = 60000
 
 LOAD_LVL_WEIGHTS = [10, 8, 6, 5, 4, 3, 2, 2, 1, 1]
@@ -39,6 +39,7 @@ class DQNRouter(QRouter, LinkStateHolder):
         self.outgoing_pkgs_num = {}
         self.load_lvl_mavg = deque([0, 0, 0, 0, 0, 0, 0, 0, 0, 0], 10)
         self.neighbors_advices = {}
+        self.neighbors_load_statuses = {}
         self.ploho_flag = False
 
     def _initModel(self, n, path):
@@ -108,9 +109,11 @@ class DQNRouter(QRouter, LinkStateHolder):
         if isinstance(message, LinkStateAnnouncement):
             if self.processLSAnnouncement(message, self.network.keys()):
                 self._broadcastAnnouncement(message, sender)
-        elif isinstance(message, NeighborsAdvice):
-            n = self.network_inv[str(sender)]
-            self.neighbors_advices[n] = (message.time, message.estimations)
+        # elif isinstance(message, NeighborsAdvice):
+        #     n = self.network_inv[str(sender)]
+        #     self.neighbors_advices[n] = (message.time, message.estimations)
+        # elif isinstance(message, NeighborLoadStatus):
+            # self.neighbors_load_statuses[self.network_inv[str(sender)]] = message.is_overloaded
 
     def breakLink(self, v):
         self.lsBreakLink(self.addr, v)
@@ -151,8 +154,8 @@ class DQNRouter(QRouter, LinkStateHolder):
         d = pkg.dst
         k = self.addr
         out_logs = np.zeros(len(self.network))
-        # for (m, count) in self.outgoing_pkgs_num.items():
-            # out_logs[m] = np.log(count + 1)
+        for (m, count) in self.outgoing_pkgs_num.items():
+            out_logs[m] = np.log(count + 1)
         return (self.current_time, (d, k, out_logs, self._getAmatrix()))
 
     def _getInputs(self, state):
@@ -162,49 +165,65 @@ class DQNRouter(QRouter, LinkStateHolder):
         addr_arr[k] = 1
         dst_arr = np.zeros(n)
         dst_arr[d] = 1
+        neighbors_arr = np.zeros(n)
+        for m in self.neighbors.keys():
+            neighbors_arr[m] = 1 # 2 if self.neighbors_load_statuses.get(m, False) else 1
         neighbors_arr = gstate[k*n : (k+1)*n]
         # return [neighbors_arr, addr_arr, dst_arr, out_logs, gstate]
         return [neighbors_arr, addr_arr, dst_arr, gstate]
 
-    def _tellNeighborsIfFree(self):
+    # def _tellNeighborsIfFree(self):
+    #     lvl_avg = np.average(self.load_lvl_mavg, weights=LOAD_LVL_WEIGHTS)
+    #     if self.queue_count <= 1 and lvl_avg < LOAD_LVL_LOW_THRESHOLD and self.ploho_flag:
+    #         print("U {} VSE HOROSHO !!!".format(self.addr))
+    #         self.ploho_flag = False
+    #         for n in self.neighbors.keys():
+    #             if self.network_graph.has_edge(self.addr, n):
+    #                 self._adviceEstimations(n)
+    #     elif self.queue_count > 2 and lvl_avg > LOAD_LVL_HIGH_THRESHOLD:
+    #         print("U {} VSE OCHEN HUEVO !!!".format(self.addr))
+    #         self.ploho_flag = True
+
+    # def _adviceEstimations(self, n):
+    #     est_inps = []
+    #     for m in self.network.keys():
+    #         est_inps.append(self._getInputs((m, n, None, self._getAmatrix())))
+    #     est_inps = stack_batch(est_inps)
+    #     preds = self._predict(est_inps)[:, self.addr]
+    #     self.sendServiceMsg(self.network[n], NeighborsAdvice(self.current_time, preds))
+
+    # def _adjustAdvices(self, d, pred):
+    #     for (n, (time, ests)) in self.neighbors_advices.items():
+    #         if self.network_graph.has_edge(self.addr, n) and self.current_time - time < 500:
+    #             print("NODE {} APPLYING ADVICE FROM NODE {}".format(self.addr, n))
+    #             pred[n] = max(pred[n], ests[d])
+
+    def _tellLoadStatus(self):
         lvl_avg = np.average(self.load_lvl_mavg, weights=LOAD_LVL_WEIGHTS)
         if self.queue_count <= 1 and lvl_avg < LOAD_LVL_LOW_THRESHOLD and self.ploho_flag:
             print("U {} VSE HOROSHO !!!".format(self.addr))
             self.ploho_flag = False
             for n in self.neighbors.keys():
-                if self.network_graph.has_edge(self.addr, n):
-                    self._adviceEstimations(n)
-        elif self.queue_count > 2 and lvl_avg > LOAD_LVL_HIGH_THRESHOLD:
+                self.sendServiceMsg(self.network[n], NeighborLoadStatus(False))
+        elif self.queue_count > 2 and lvl_avg > LOAD_LVL_HIGH_THRESHOLD and not self.ploho_flag:
             print("U {} VSE OCHEN HUEVO !!!".format(self.addr))
             self.ploho_flag = True
-
-    def _adviceEstimations(self, n):
-        est_inps = []
-        for m in self.network.keys():
-            est_inps.append(self._getInputs((m, n, None, self._getAmatrix())))
-        est_inps = stack_batch(est_inps)
-        preds = self._predict(est_inps)[:, self.addr]
-        self.sendServiceMsg(self.network[n], NeighborsAdvice(self.current_time, preds))
-
-    def _adjustAdvices(self, d, pred):
-        for (n, (time, ests)) in self.neighbors_advices.items():
-            if self.network_graph.has_edge(self.addr, n) and self.current_time - time < 100:
-                pred[n] = min(pred[n], ests[d])
+            for n in self.neighbors.keys():
+                self.sendServiceMsg(self.network[n], NeighborLoadStatus(True))
 
     def act(self, state):
         _s = self._getInputs(state[1])
         s = reverse_input(_s)
         pred = self._predict(s)[0]
-        dst = state[1][0]
-        self._adjustAdvices(dst, pred)
+        # dst = state[1][0]
+        # self._adjustAdvices(dst, pred)
         res = -1
         while res not in self.neighbors.keys():
-            # print(s)
-            # print(pred)
             res = soft_argmax(pred, self.temp)
         self.outgoing_pkgs_num[res] += 1
         self.load_lvl_mavg.appendleft(self.queue_count)
-        self._tellNeighborsIfFree()
+        # self._tellLoadStatus()
+        # self._tellNeighborsIfFree()
         return res
 
     def observe(self, sample):

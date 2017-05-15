@@ -203,6 +203,10 @@ class NeighborsAdvice(ServiceMsg):
         self.time = time
         self.estimations = estimations
 
+class NeighborLoadStatus(ServiceMsg):
+    def __init__(self, is_overloaded):
+        self.is_overloaded = is_overloaded
+
 @total_ordering
 class Package:
     def __init__(self, pkg_id, size, dst, start_time, contents):
