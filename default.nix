@@ -24,9 +24,10 @@ python36Packages.buildPythonPackage {
         python36Packages.backports_shutil_get_terminal_size
         python36Packages.ipython
         python36Packages.ipykernel
-	#python35Packages.tensorflow
-	#python36Packages.networkx
+	python36Packages.tensorflow
+	python36Packages.networkx
 	python36Packages.h5py
+	python36Packages.pyyaml
         stdenv
         zlib
 	bazel

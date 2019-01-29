@@ -21,7 +21,6 @@ ipykernel==4.6.1
 ipython==6.0.0
 ipython-genutils==0.2.0
 ipywidgets==6.0.0
-jdcal==1.0
 jedi==0.10.2
 Jinja2==2.9.5
 jsonschema==2.5.1
@@ -34,7 +33,7 @@ Keras==2.0.3
 lxml==3.7.2
 MarkupSafe==1.0
 matplotlib==2.0.0
-mistune==0.7.1
+mistune>=0.8.1
 mock==2.0.0
 more-itertools==3.0.0
 mox==0.5.3
@@ -64,7 +63,7 @@ pyparsing==2.1.10
 python-dateutil==2.6.0
 python-gflags==2.0
 pytz==2016.6.1
-PyYAML==3.12
+pyyaml>=4.2b1
 pyzmq==16.0.2
 qtconsole==4.3.0
 requests==2.20.0
