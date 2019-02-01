@@ -5,29 +5,21 @@ import yaml
 import time
 import networkx as nx
 import argparse as ap
-import simpy
-import random
 
-from dqnroute.simpy_router import SimPyDumbRouter
-from dqnroute.messages import Package
+from thespian.actors import *
+from dqnroute.overlord import RoutersOverlord
+from dqnroute.messages import RoutersOverlordInitMsg, ReportRequest
 
-TIMEOUT_SEND_RANDOM_PKG = 4
 stop_it = False
 
-def sendRandomPkg(env, routerList):
-    while True:
-        yield env.timeout(TIMEOUT_SEND_RANDOM_PKG)
-        pkg = Package(0, 0, 0, 0, 0, None) # create empty packet
-        id = random.randint(0, len(routerList) - 1)
-        router = routerList[id]
-        #print(id, env.now)
-        yield env.process(router.sendPackage(pkg))
-        #print("Continue time: ", env.now)
-        
 def sigint_handler(signal, frame):
     global stop_it
+    actorSys = ActorSystem()
     print("Ctrl-C is hit, reporting results...")
+    overlord = actorSys.createActor(RoutersOverlord, globalName='overlord')
+    actorSys.ask(overlord, ReportRequest(None))
     print("Shutting down actor system...")
+    actorSys.shutdown()
     stop_it = True
 
 def main():
@@ -62,19 +54,16 @@ def main():
             os.remove(args.logfile)
         except FileNotFoundError:
             pass
-    
-    env = simpy.Environment()
-    routers = {}
-    for node in G.nodes():
-        routers[node] = SimPyDumbRouter(env, node)
-    for node in G.nodes():
-        out_routers = [routers[v] for (_, v) in G.edges(node)]
-        routers[node].setNeighbours(out_routers)
-    env.process(sendRandomPkg(env, routers))
-    env.run(until=40)
-    
-    #while not stop_it:
-    #    next(sys.stdin)
+
+    actorSys = ActorSystem('multiprocQueueBase')
+    overlord = actorSys.createActor(RoutersOverlord, globalName='overlord')
+    actorSys.tell(overlord, RoutersOverlordInitMsg(graph=G,
+                                                   settings=run_params['settings'],
+                                                   results_file=args.results_file,
+                                                   logfile=args.logfile,
+                                                   router_type=args.router_type))
+    while not stop_it:
+        next(sys.stdin)
 
     # answer = actorSys.ask(hello, 'hi', 1)
     # print(answer['b'])
