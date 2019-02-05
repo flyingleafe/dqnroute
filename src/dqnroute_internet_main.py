@@ -11,18 +11,21 @@ import random
 from dqnroute.simpy_router import SimPyDumbRouter
 from dqnroute.messages import Package
 
-TIMEOUT_SEND_RANDOM_PKG = 4
+TIMEOUT_SEND_RANDOM_PKG = 10
 stop_it = False
 
 def sendRandomPkg(env, routerList):
     while True:
         yield env.timeout(TIMEOUT_SEND_RANDOM_PKG)
-        pkg = Package(0, 0, 0, 0, 0, None) # create empty packet
-        id = random.randint(0, len(routerList) - 1)
-        router = routerList[id]
-        #print(id, env.now)
-        yield env.process(router.sendPackage(pkg))
-        #print("Continue time: ", env.now)
+        srcIndex = random.randint(0, len(routerList) - 1)
+        dstIndex = random.randint(0, len(routerList) - 1)
+        src = routerList[srcIndex]
+        dstID = routerList[dstIndex].id
+        pkg = Package(0, 0, dstID, 0, 0, None) # create empty packet
+
+        #print("Sending random pkg from router {} -> {} at {}".format(src.id, dstID, env.now))
+        src.sendPackage(pkg)
+        #print("Sending random pkg continue time: ", env.now)
         
 def sigint_handler(signal, frame):
     global stop_it
