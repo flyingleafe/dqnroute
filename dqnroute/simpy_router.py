@@ -1,10 +1,12 @@
 import simpy
 import random
+import logging
 
 class SimPyAbstractRouter(object):
     def __init__(self, env, id):
         self.env = env
         self.id = id
+        self.logger = logging.getLogger("SimPyAbstractRouter")
 
     def setNeighbours(self, neighbours):
         self.neighbours = neighbours
@@ -18,32 +20,32 @@ class SimPyAbstractRouter(object):
         print("Sending packet: {} -> {} at time {}...".format(self.id, dest.id, self.env.now))
 
         if self.id == dest.id:
-            print("Got source router {} as the destination router".format(self.id))
+            self.logger.info("Got source router {} as the destination router".format(self.id))
             # actual process of pkg & empty yielding
             yield self.env.timeout(0)
         else:
             # actual sending process & simulation
             self.env.process(self.__sendSimulation(pkg, dest))
-        #print("Sent from router {} at time {}".format(self.id, self.env.now))
+        self.logger.debug("Pkg sent from router {} at time {}".format(self.id, self.env.now))
 
     def __getPkg(self, pkg, src):
-        print("[Router {}] Got packet from router {} at time {}".format(self.id, src, self.env.now))
+        print("Got packet: {} <- {} at time {}".format(self.id, src, self.env.now))
         
         # process packet & empty yielding
         yield self.env.timeout(0)
         if pkg.dst != self.id:
-            print("Package destination is not reached on router {}, going to the next router...".format(self.id))
+            self.logger.info("Package destination is not reached on router {}, going to the next router...".format(self.id))
             self.sendPackage(pkg)
         else:
-            print("Package destination is reached on router {}".format(self.id))
-        #print("Proced on router {} at time {}".format(self.id, self.env.now))
+            self.logger.info("Package destination is reached on router {}".format(self.id))
+        self.logger.debug("Proced on router {} at time {}".format(self.id, self.env.now))
         
     def route(self, pkg):
         raise NotImplementedError()
     
     def sendPackage(self, pkg):
         if self.id == pkg.dst:
-            print("Got source router {} as the destination router".format(self.id))
+            self.logger.info("Got source router {} as the destination router".format(self.id))
             # make processing of this situation
         else:
             dest = self.route(pkg)

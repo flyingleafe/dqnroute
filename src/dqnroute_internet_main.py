@@ -7,12 +7,14 @@ import networkx as nx
 import argparse as ap
 import simpy
 import random
+import logging
 
 from dqnroute.simpy_router import SimPyDumbRouter
 from dqnroute.messages import Package
 
 TIMEOUT_SEND_RANDOM_PKG = 10
 stop_it = False
+logger = logging.getLogger("dqnroute_internet_main")
 
 def sendRandomPkg(env, routerList):
     while True:
@@ -23,9 +25,9 @@ def sendRandomPkg(env, routerList):
         dstID = routerList[dstIndex].id
         pkg = Package(0, 0, dstID, 0, 0, None) # create empty packet
 
-        #print("Sending random pkg from router {} -> {} at {}".format(src.id, dstID, env.now))
+        print("Sending random pkg {} -> {} at time {}".format(src.id, dstID, env.now))
         src.sendPackage(pkg)
-        #print("Sending random pkg continue time: ", env.now)
+        logger.debug("Sending random pkg continue time: %d", env.now)
         
 def sigint_handler(signal, frame):
     global stop_it
@@ -36,6 +38,8 @@ def sigint_handler(signal, frame):
 def main():
     global stop_it
     signal.signal(signal.SIGINT, sigint_handler)
+    logging.basicConfig(stream=sys.stderr, format='%(levelname)s: %(message)s',
+                        level=logging.INFO)
 
     parser = ap.ArgumentParser(description='Routing emulator')
     parser.add_argument('settings_file', metavar='settings_file', type=str,
@@ -75,13 +79,6 @@ def main():
         routers[node].setNeighbours(out_routers)
     env.process(sendRandomPkg(env, routers))
     env.run(until=40)
-    
-    #while not stop_it:
-    #    next(sys.stdin)
-
-    # answer = actorSys.ask(hello, 'hi', 1)
-    # print(answer['b'])
-    # actorSys.tell(hello, ActorExitRequest())
 
 if __name__ == '__main__':
     main()
