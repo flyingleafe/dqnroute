@@ -1,6 +1,6 @@
 import unittest
 
-from event_queue import *
+from dqnroute.event_queue import *
 from collections import namedtuple
 
 Timed = namedtuple('Timed', ['time'])
@@ -28,7 +28,7 @@ class TestEventQueue(unittest.TestCase):
         self.assertEqual(self.queue.pop().time, 123)
 
     def test_earlier_than(self):
-        res = self.queue.earlier_than(Timed(123))
+        res = self.queue.earlier_than(123)
         self.assertEqual(set(res), set(map(Timed, [13, 31, 41, 123])))
 
 if __name__ == '__main__':

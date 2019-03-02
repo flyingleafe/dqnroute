@@ -1,33 +1,39 @@
 with import <nixpkgs> {};
 
 python36Packages.buildPythonPackage {
-    name = "thesis-env";
-    buildInputs = [
+    name = "dqnroute";
+    src = ./src;
+    buildInputs = with python36Packages; [
+        # system packages
         git
         libzip
 	libpng
 	freetype
+        
+        # python packages
         python36Full
-        python36Packages.virtualenv
- 	python36Packages.setuptools
-	python36Packages.matplotlib
-        python36Packages.Keras
-	python36Packages.pandas
-        python36Packages.numpy
-        python36Packages.scipy
-        python36Packages.scikitlearn
-        python36Packages.seaborn
-        python36Packages.jupyter_core
-        python36Packages.jupyter
-        python36Packages.jupyter_client
-        python36Packages.jupyterlab
-        python36Packages.backports_shutil_get_terminal_size
-        python36Packages.ipython
-        python36Packages.ipykernel
-	python36Packages.tensorflow
-	python36Packages.networkx
-	python36Packages.h5py
-	python36Packages.pyyaml
+        virtualenv
+ 	setuptools
+	matplotlib
+        Keras
+	pandas
+        more-itertools
+        numpy
+        scipy
+        scikitlearn
+        seaborn
+        jupyter_core
+        jupyter
+        jupyter_client
+        jupyterlab
+        backports_shutil_get_terminal_size
+        ipython
+        ipykernel
+	tensorflow
+        thespian
+	networkx
+	h5py
+	pyyaml
         stdenv
         zlib
 	bazel
