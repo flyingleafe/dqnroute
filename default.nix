@@ -19,6 +19,7 @@ python36Packages.buildPythonPackage {
 	pandas
         more-itertools
         numpy
+        simpy
         scipy
         scikitlearn
         seaborn
