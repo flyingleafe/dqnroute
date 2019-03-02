@@ -28,12 +28,18 @@ def sendRandomPkg(env, routerList):
         print("Sending random pkg {} -> {} at time {}".format(src.id, dstID, env.now))
         src.sendPackage(pkg)
         logger.debug("Sending random pkg continue time: %d", env.now)
-        
+
 def sigint_handler(signal, frame):
     global stop_it
     print("Ctrl-C is hit, reporting results...")
     print("Shutting down actor system...")
     stop_it = True
+
+def read_edge(e):
+    new_e = e.copy()
+    new_e['u_of_edge'] = new_e.pop('u')
+    new_e['v_of_edge'] = new_e.pop('v')
+    return new_e
 
 def main():
     global stop_it
@@ -62,14 +68,14 @@ def main():
 
     G = nx.Graph()
     for e in run_params['network']:
-        G.add_edge(**e)
+        G.add_edge(**read_edge(e))
 
     if args.logfile is not None:
         try:
             os.remove(args.logfile)
         except FileNotFoundError:
             pass
-    
+
     env = simpy.Environment()
     routers = {}
     for node in G.nodes():
