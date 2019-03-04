@@ -1,0 +1,126 @@
+import random
+import math
+import logging
+import numpy as np
+import networkx as nx
+import tensorflow as tf
+import pandas as pd
+
+from typing import List, Tuple, Dict
+from .base import *
+from .link_state import LinkStateRouter
+from ..constants import DQNROUTE_LOGGER
+from ..messages import *
+from ..memory import *
+from ..utils import *
+from ..networks import get_qnetwork_class
+
+MIN_TEMP = 1.5
+
+logger = logging.getLogger(DQNROUTE_LOGGER)
+
+class DQNRouter(LinkStateRouter, RewardAgent):
+    """
+    A router which implements DQN-routing algorithm
+    """
+
+    def init(self, config) -> List[Message]:
+        msgs = super().init(config)
+        self.batch_size = config['batch_size']
+        self.memory = Memory(config['mem_capacity'])
+        self._initModel(len(self.network.nodes), config['nn_type'], config)
+        return msgs
+
+    def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
+        now = self.currentTime()
+        state = self._getNNState(pkg)
+        prediction = self._predict(state)[0]
+
+        to = -1
+        while to not in self.neighbour_ids:
+            to = soft_argmax(prediction, MIN_TEMP)
+
+        estimate = -np.max(prediction)
+        self.registerSentPkg(pkg, {'time_sent': self.currentTime(), 'state': state})
+        reward = NetworkRewardMsg(pkg.id, now, estimate)
+        return to, [OutMessage(sender, reward)] if sender != -1 else []
+
+    def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
+        if isinstance(msg, RewardMsg):
+            Q_new, saved_data = self.receiveReward(msg)
+            time_sent = saved_data['time_sent']
+            prev_state = saved_data['state']
+
+            self.memory.add((prev_state, sender, -Q_new))
+            self._replay()
+            return []
+
+        else:
+            return super().handleServiceMsg(sender, msg)
+
+    def _initModel(self, n: int, nn_type: str, settings):
+        """
+        Initializes the Tensorflow graph for the agent
+        """
+        tf.reset_default_graph()
+        init = tf.global_variables_initializer()
+        NetworkClass = get_qnetwork_class(nn_type)
+        self.brain = NetworkClass(n, **settings)
+        self.session = tf.Session()
+        # load model
+        self.session.run(init)
+        self.brain.restore(self.session)
+        logger.info('Restored model from ' + self.brain.getSavePath())
+
+    def _predict(self, x, batch_size=1):
+        return self.brain.predict(self.session, x, batch_size=batch_size)
+
+    def _train(self, x, y, batch_size=1):
+        self.brain.fit(self.session, x, y, batch_size=batch_size)
+
+    def _getAmatrix(self):
+        amatrix = nx.convert_matrix.to_numpy_array(self.network,
+                                                   nodelist=sorted(self.network.nodes))
+        gstate = np.ravel(amatrix)
+        gstate[gstate > 0] = 1
+        return gstate
+
+    def _getNNState(self, pkg: Package):
+        d = pkg.dst
+        k = self.id
+        n = len(self.network.nodes)
+        df = pd.DataFrame(columns=['dst', 'addr']+get_neighbors_cols(n)+get_amatrix_cols(n))
+        basic_state_inp = np.zeros(n+2)
+        basic_state_inp[0] = d
+        basic_state_inp[1] = k
+        amatrix = self._getAmatrix()
+        basic_state_inp[2:] = amatrix[n*k:n*(k+1)]
+        df.loc[0] = np.concatenate((basic_state_inp, amatrix))
+
+        return self.brain.makeInputFromData(df)
+
+    def _replay(self):
+        """
+        Fetches a batch of samples from the memory and fits against them
+        """
+        i_batch = self.memory.sample(self.batch_size)
+        blen = len(i_batch)
+        b_idxs = [b[0] for b in i_batch]
+        batch = [b[1] for b in i_batch]
+
+        states = stack_batch([l[0] for l in batch])
+        actions = [l[1] for l in batch]
+        values = [l[2] for l in batch]
+
+        preds = self._predict(states, batch_size=blen)
+        for i in range(blen):
+            a = actions[i]
+            preds[i][a] = values[i]
+
+        self._train(states, preds, batch_size=blen)
+
+class DQNRouterNetwork(DQNRouter, NetworkRewardAgent):
+    """
+    DQN-router which calculates rewards for computer routing setting
+    """
+    pass

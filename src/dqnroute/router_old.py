@@ -1,11 +1,8 @@
 import networkx as nx
 import numpy as np
 
-from thespian.actors import *
-
 from .router_mixins import RLAgent, LinkStateHolder
 from .messages import *
-from .time_actor import *
 from .utils import mk_current_neural_state, get_data_cols, dict_min, mk_num_list
 
 class RouterNotInitialized(Exception):

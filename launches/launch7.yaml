@@ -32,8 +32,9 @@ settings:
     delta: 10
   logging:
     delta: 500
+  router_env:
+    pkg_process_delay: 5
   router:
     learning_rate: 0.5
-    pkg_process_delay: 5
     model_file: 'router_network_{}.h5'
  

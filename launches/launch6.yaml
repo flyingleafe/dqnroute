@@ -14,7 +14,6 @@ network:
 
 settings:
   pkg_distr:
-    seed: 43
     sequence:
       # - {pkg_number: 1000, delta: 10} 
       - {pkg_number: 100, delta: 10}
@@ -29,17 +28,19 @@ settings:
     delta: 10
   logging:
     delta: 500
+  router_env:
+    pkg_process_delay: 5
   router:
     learning_rate: 0.5
+    # choice_policy: 'softmax'
     beta_rate: 0.7
     gamma_rate: 0.9
-    pkg_process_delay: 5
     nn_type: 'ff_amatrix'
     optimizer: 'rmsprop'
     activation: 'tanh'
     ff_activation: 'tanh'
     # scope: 'per_pkg'
-    layers: [64, 64, 64]
+    layers: [64, 64]
     pkg_states: False
     batch_size: 1
     mem_capacity: 1

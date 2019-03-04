@@ -1,66 +1,62 @@
 import pandas as pd
 
-def add_prefix(pref):
-    if pref == '':
-        return lambda x: x
-    else:
-        return lambda x: pref+'_'+x
+from typing import Callable, Dict, Optional, List
+
+Aggregator = Callable[[Optional[float], float], float]
 
 class EventSeries:
-    def __init__(self, period, prefix='', func='avg'):
-        value_columns = list(map(add_prefix(prefix), ['count', 'avg', 'min', 'max']))
+    def __init__(self, period: int, aggregators: Dict[str, Aggregator]):
+        columns = ['time'] + list(aggregators.keys())
 
-        self.prefix = prefix
-        self.records = pd.DataFrame(columns=['time']+value_columns)
-        self.func = func
+        self.records = pd.DataFrame(columns=columns)
         self.period = period
-        self.last_event_time = 0
-        self.current_val = 0
-        self.current_count = 0
-        self.cur_max = 0
-        self.cur_min = 1000000000000
-
-    def _curAvg(self):
-        if self.func == 'avg':
-            return 0 if self.current_count == 0 else self.current_val / self.current_count
-        elif self.func == 'sum':
-            return self.current_val
-        else:
-            raise Exception('mda kone4no nu ty i pososal')
+        self.aggregators = aggregators
 
     def logEvent(self, time, value):
-        last_period = round(self.last_event_time / self.period)
-        cur_period = round(time / self.period)
-        if cur_period == last_period:
-            self.current_val += value
-            self.current_count += 1
-            self.cur_max = max(self.cur_max, value)
-            self.cur_min = min(self.cur_min, value)
-            self.last_event_time = time
-        elif cur_period > last_period:
-            self.records.loc[len(self.records)] = [last_period * self.period, self.current_count, self._curAvg(), self.cur_min, self.cur_max]
-            for i in range(0, cur_period - last_period - 1):
-                self.records.loc[len(self.records)] = [(last_period + i + 1) * self.period, 0, 0, 0, 0]
-            self.current_val = value
-            self.current_count = 1
-            self.cur_min = value
-            self.cur_max = value
-            self.last_event_time = time
-        else:
-            real_cur_time = cur_period * self.period
-            idxs = self.records['time'] == real_cur_time
-            pr = self.prefix
-            count_col, avg_col, min_col, max_col = list(map(add_prefix(pr), ['count', 'avg', 'min', 'max']))
-            self.records.loc[idxs, min_col] = min(self.records.loc[idxs, min_col].iloc[0], value)
-            self.records.loc[idxs, max_col] = max(self.records.loc[idxs, max_col].iloc[0], value)
-            self.records.loc[idxs, count_col] += 1
-            if self.func == 'avg':
-                cnt = self.records.loc[idxs, count_col]
-                self.records.loc[idxs, avg_col] = (self.records.loc[idxs, avg_col] * (cnt - 1) + value) / cnt
-            elif self.func == 'sum':
-                self.records.loc[idxs, avg_col] += value
-            else:
-                raise Exception('eto 4to vashe takoe')
+        cur_period = int(time / self.period)
+        avg_time = cur_period * self.period
+        data_cols = self.records.columns[1:]
+
+        try:
+            data_vals = self.records.loc[cur_period, data_cols]
+        except KeyError:
+            data_vals = [None]*len(data_cols)
+
+        new_data_vals = [self.aggregators[col](old_value, value)
+                         for (col, old_value) in zip(data_cols, data_vals)]
+
+        self.records.loc[cur_period] = [avg_time] + new_data_vals
 
     def getSeries(self):
-        return self.records
+        return self.records.sort_index()
+
+    def reset(self):
+        self.records = self.records.iloc[0:0]
+
+def aggregator(f: Callable[[float, float], float], dv = None) -> Aggregator:
+    """
+    Make an aggregator from a simple function of two values
+    """
+    def _inner(a: Optional[float], b: float) -> float:
+        if a is None:
+            return dv if dv is not None else b
+        return f(a, b)
+    return _inner
+
+def binary_func(name: str) -> Aggregator:
+    """
+    Helper for getting standard aggregator functions
+    """
+    if name == 'sum':
+        return aggregator(lambda a, b: a + b)
+    elif name == 'count':
+        return aggregator(lambda a, _: a + 1, 1)
+    elif name == 'max':
+        return aggregator(max)
+    elif name == 'min':
+        return aggregator(min)
+    else:
+        raise Exception('Unknown aggregator function ' + name)
+
+def event_series(period: int, aggr_names: List[str]) -> EventSeries:
+    return EventSeries(period, {name: binary_func(name) for name in aggr_names})
