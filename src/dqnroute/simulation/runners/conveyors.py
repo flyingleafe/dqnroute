@@ -5,9 +5,8 @@ Runs a conveyor network simulation
 import networkx as nx
 import pandas as pd
 
-from typing import Dict
+from typing import Tuple, Dict, List
 from simpy import Environment
-from copy import deepcopy
 
 from ...agents import *
 from ...messages import *
@@ -19,6 +18,28 @@ from .common import *
 
 logger = logging.getLogger(DQNROUTE_LOGGER)
 
+def _run_scenario(env: Environment, sections_map: Dict[int, SimpyConveyorEnv],
+                  sources: List[int], sinks: List[int],
+                  bag_distr, random_seed=None):
+    if random_seed is not None:
+        random.seed(random_seed)
+
+    bag_id = 1
+    for period in bag_distr['sequence']:
+        delta = period['delta']
+        sources = period.get('sources', sources)
+        sinks = period.get('sinks', sinks)
+
+        for i in range(0, period["bags_number"]):
+            src = random.choice(sources)
+            dst = random.choice(sinks)
+            bag = Bag(bag_id, dst, env.now, None)
+            logger.debug("Sending random bag #{} from {} to {} at time {}"
+                         .format(bag_id, src, dst, env.now))
+            sections_map[src].handle(InMessage(-1, src, PkgMessage(pkg)))
+            bag_id += 1
+            yield env.timeout(delta)
+
 def _get_router_class(router_type):
     if router_type == "simple_q":
         return SimpleQRouterConveyor
@@ -29,14 +50,42 @@ def _get_router_class(router_type):
     else:
         raise Exception("Unsupported router type: " + router_type)
 
-def run_conveyor_scenario(run_params, router_type: str, event_series: EventSeries,
-                          random_seed = None, progress_step = None, progress_queue = None) -> EventSeries:
+def run_conveyor_scenario(run_params, router_type: str,
+                          time_series: EventSeries, energy_series: EventSeries
+                          random_seed = None, progress_step = None,
+                          progress_queue = None) -> Tuple[EventSeries, EventSeries]:
     """
     Runs a conveyor network test scenario with given params and
     aggregates test data in a given `EventSeries`.
     """
 
-    G = make_conveyor_graph(run_params['configuration'])
+    configuration = run_params['configuration']
+    layout = configuration['layout']
+    sources = configuration['sources']
+    sinks = configuration['sinks']
+    G = make_conveyor_graph(layout)
 
     env = Environment()
-    conveyors = {}
+    sections_map = {}
+    conveyors = []
+    ChosenRouter = _get_router_class(router_type)
+
+    for (i, conveyor) in enumerate(layout):
+        conveyor_env = SimpyConveyorEnv(env, ChosenRouter, i, conveyor,
+                                        time_series=time_series, energy_series=energy_series,
+                                        router_init_args=make_router_cfg(ChosenRouter, node, G, run_params),
+                                        **run_params['settings']['conveyor_env'])
+
+        for sec_id in conveyor.keys():
+            sections_map[sec_id] = conveyor_env
+        conveyors.append(conveyor_env)
+
+    for conveyor in conveyors:
+        conveyor.init(sections_map, {})
+
+    logger.setLevel(logging.DEBUG)
+    env.process(_run_scenario(env, sections_map, run_params['settings']['bags_distr'], random_seed))
+    run_env_progress(env, router_type=router_type, random_seed=random_seed,
+                     progress_step=progress_step, progress_queue=progress_queue)
+
+    return time_series, energy_series

@@ -39,7 +39,7 @@ class Router(MessageHandler):
 
     def handle(self, msg: Message) -> List[Message]:
         if isinstance(msg, InMessage):
-            sender = msg.sender
+            sender = msg.from_node
             msg = msg.inner_msg
 
             if isinstance(msg, PkgMessage):
@@ -49,7 +49,7 @@ class Router(MessageHandler):
                 else:
                     to_interface, additional_msgs = self.route(sender, pkg)
                     logger.debug('Routing pkg #{} on router {} to router {}'.format(pkg.id, self.id, to_interface))
-                    return [OutMessage(to_interface, PkgMessage(pkg))] + additional_msgs
+                    return [OutMessage(self.id, to_interface, PkgMessage(pkg))] + additional_msgs
 
             elif isinstance(msg, ServiceMessage):
                 return self.handleServiceMsg(sender, msg)
@@ -111,5 +111,12 @@ class NetworkRewardAgent(RewardAgent):
         return Q + (time_received - time_sent)
 
 class ConveyorRewardAgent(RewardAgent):
+    def __init__(self, energy_reward_weight=1, **kwargs):
+        super().__init__(**kwargs)
+        self._e_weight = energy_reward_weght
+
     def computeReward(self, reward_data, saved_data):
-        raise NotImplementedError()
+        time_received, energy_gap, Q = reward_data
+        time_sent = saved_data['time_sent']
+        time_gap = time_received - time_sent
+        return Q + time_gap + self._e_weight * energy_gap

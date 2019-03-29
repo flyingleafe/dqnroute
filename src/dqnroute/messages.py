@@ -40,27 +40,32 @@ class InitMessage(Message):
     def __init__(self, config):
         super().__init__(config=config)
 
-class InMessage(Message):
+class _TransferMessage(Message):
     """
-    Wrapped message which has came from the outside.
+    Wrapper message which is used to send data between nodes
     """
-    def __init__(self, sender: int, inner_msg: Message):
-        super().__init__(sender=sender, inner_msg=inner_msg)
+    def __init__(self, from_node: int, to_node: int, inner_msg: Message):
+        super().__init__(from_node=from_node, to_node=to_node, inner_msg=inner_msg)
 
-class OutMessage(Message):
+class InMessage(_TransferMessage):
     """
-    Wrapped message which is sent to a neighbor through the interface
+    Wrapper message which has came from the outside.
+    """
+    pass
+
+class OutMessage(_TransferMessage):
+    """
+    Wrapper message which is sent to a neighbor through the interface
     with given ID.
     """
-    def __init__(self, recipient: int, inner_msg: Message):
-        super().__init__(recipient=recipient, inner_msg=inner_msg)
+    pass
 
-def repackMsg(sender: int, msg: OutMessage) -> InMessage:
+class SectionMessage(Message):
     """
-    Creates an incoming message for recipient from outgoing message
-    for sender
+    Wrapper message which targets a particular subhandler
     """
-    return InMessage(sender, msg.inner_msg)
+    def __init__(self, section: int, inner_msg: Message):
+        super().__init__(section=section, inner_msg=inner_msg)
 
 class ServiceMessage(Message):
     """
@@ -72,7 +77,7 @@ class ServiceMessage(Message):
 # Packages
 @total_ordering
 class Package:
-    def __init__(self, pkg_id, size, dst, start_time, state_size, contents):
+    def __init__(self, pkg_id, size, dst, start_time, contents):
         self.id = pkg_id
         self.size = size
         self.dst = dst
@@ -100,11 +105,9 @@ class Package:
     def __lt__(self, other):
         return self.id < other.id
 
-# class Bag(Package):
-#     def __init__(self, bag_id, dst, start_time, prev_time, state_size, contents):
-#         super().__init__(bag_id, 0, dst, start_time, state_size, contents)
-#         self.prev_time = prev_time
-#         self.energy_spent = 0
+class Bag(Package):
+    def __init__(self, bag_id, dst, start_time, contents):
+        super().__init__(bag_id, 0, dst, start_time, contents)
 
 class PkgMessage(Message):
     """

@@ -52,7 +52,7 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         estimate = -np.max(prediction)
         self.registerSentPkg(pkg, {'time_sent': self.currentTime(), 'state': state})
         reward = NetworkRewardMsg(pkg.id, now, estimate)
-        return to, [OutMessage(sender, reward)] if sender != -1 else []
+        return to, [OutMessage(self.id, sender, reward)] if sender != -1 else []
 
     def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
         if isinstance(msg, RewardMsg):

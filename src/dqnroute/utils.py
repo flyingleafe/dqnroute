@@ -37,6 +37,28 @@ def make_network_graph(edge_list) -> nx.DiGraph:
         DG.add_edge(v, u, **params)
     return DG
 
+def make_conveyor_graph(layout) -> nx.DiGraph:
+    """
+    Creates a conveyor network graph from conveyor system layout.
+    """
+
+    DG = nx.DiGraph()
+    for conveyor in configuration:
+        for sec_id, section in conveyor['sections'].items():
+            length = section['length']
+            try:
+                upn = section['upstream_neighbor']
+                DG.add_edge(sec_id, upn, length=length)
+            except KeyError:
+                pass
+
+            try:
+                ajn = section['adjacent_neighbor']
+                DG.add_edge(sec_id, ajn, length=length)
+            except KeyError:
+                pass
+    return DG
+
 def mk_current_neural_state(G, time, pkg, node_addr, *add_data):
     n = len(G.nodes())
     k = node_addr

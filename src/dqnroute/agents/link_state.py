@@ -38,7 +38,7 @@ class LinkStateRouter(Router):
     def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
         if isinstance(msg, LSAnnouncementMsg):
             if self._processLSAnnouncement(msg.node, msg.seq, msg.neighbours):
-                return [OutMessage(v, deepcopy(msg))
+                return [OutMessage(self.id, v, deepcopy(msg))
                         for v in (self.all_neighbours - set([sender]))]
             return []
 
@@ -49,7 +49,7 @@ class LinkStateRouter(Router):
         neighbour_links = self.network.adj[self.id]
         announcement = LSAnnouncementMsg(self.id, self.seq_num, neighbour_links)
         self.seq_num += 1
-        return [OutMessage(v, deepcopy(announcement)) for v in self.all_neighbours]
+        return [OutMessage(self.id, v, deepcopy(announcement)) for v in self.all_neighbours]
 
     def _processLSAnnouncement(self, node: int, seq: int, neighbours) -> bool:
         if node not in self.announcements or self.announcements[node]["seq"] < seq:

@@ -49,10 +49,10 @@ def _run_scenario(env: Environment, routers: Dict[str, SimpyRouterEnv],
             for i in range(0, period["pkg_number"]):
                 src = random.choice(sources)
                 dst = random.choice(dests)
-                pkg = Package(pkg_id, 1024, dst, env.now, 0, None) # create empty packet
+                pkg = Package(pkg_id, 1024, dst, env.now, None) # create empty packet
                 logger.debug("Sending random pkg #{} from {} to {} at time {}"
                              .format(pkg_id, src, dst, env.now))
-                routers[src].handle(InMessage(-1, PkgMessage(pkg)))
+                routers[src].handle(InMessage(-1, src, PkgMessage(pkg)))
                 pkg_id += 1
                 yield env.timeout(delta)
 
@@ -78,6 +78,7 @@ def run_network_scenario(run_params, router_type: str, event_series: EventSeries
     env = Environment()
     routers = {}
     ChosenRouter = _get_router_class(router_type)
+
     for node, nbrs in G.adjacency():
         edges = [(node, v, attrs) for v, attrs in nbrs.items()]
         routers[node] = SimpyRouterEnv(env, ChosenRouter,

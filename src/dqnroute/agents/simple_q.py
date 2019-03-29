@@ -40,7 +40,7 @@ class SimpleQRouter(Router, RewardAgent):
             to = best_to
 
         reward_msg = NetworkRewardMsg(pkg.id, now, estimate)
-        return to, [OutMessage(sender, reward_msg)] if sender != -1 else []
+        return to, [OutMessage(self.id, sender, reward_msg)] if sender != -1 else []
 
     def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
         if isinstance(msg, RewardMsg):

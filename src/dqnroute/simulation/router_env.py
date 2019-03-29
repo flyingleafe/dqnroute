@@ -10,6 +10,8 @@ from ..agents import Router
 from ..constants import DQNROUTE_LOGGER
 from .message_env import SimpyMessageEnv
 
+logger = logging.getLogger(DQNROUTE_LOGGER)
+
 class SimpyRouterEnv(SimpyMessageEnv):
     """
     Router environment which plays the role of outer world and
@@ -29,7 +31,6 @@ class SimpyRouterEnv(SimpyMessageEnv):
         self.interfaces = {v: {"params": ps, "resource": None, "neighbour": None}
                            for (_, v, ps) in edges}
         self.msgProcessingQueue = Resource(self.env, capacity=1)
-        self.logger = logging.getLogger(DQNROUTE_LOGGER)
 
     def init(self, neighbours: Dict[int, SimpyMessageEnv], config):
         for (v, neighbour) in neighbours.items():
@@ -38,7 +39,6 @@ class SimpyRouterEnv(SimpyMessageEnv):
             self.interfaces[v]["resource"] = Resource(self.env, capacity=1)
 
         # Schedule the router initialization
-        config.update({'id': self.id})
         self.handle(InitMessage(config))
 
     def _msgEvent(self, msg: Message) -> Event:
@@ -46,15 +46,15 @@ class SimpyRouterEnv(SimpyMessageEnv):
             return Event(self.env).succeed(value=msg)
 
         elif isinstance(msg, OutMessage):
-            to = msg.recipient
+            to = msg.to_node
             return self.env.process(self._edgeTransfer(msg, self.interfaces[to]))
 
         elif isinstance(msg, InMessage):
             return self.env.process(self._inputQueue(msg))
 
         elif isinstance(msg, PkgReceivedMessage):
-            self.logger.debug("Package #{} received at node {} at time {}"
-                              .format(msg.pkg.id, self.id, self.env.now))
+            logger.debug("Package #{} received at node {} at time {}"
+                         .format(msg.pkg.id, self.id, self.env.now))
             self.data_series.logEvent(self.env.now, self.env.now - msg.pkg.start_time)
 
         else:
@@ -63,7 +63,7 @@ class SimpyRouterEnv(SimpyMessageEnv):
     def _edgeTransfer(self, msg: OutMessage, edge):
         neighbour = edge["neighbour"]
         inner_msg = msg.inner_msg
-        new_msg = InMessage(self.id, inner_msg)
+        new_msg = InMessage(**msg.getContents())
 
         # TODO: add an option to enable link clogging with
         # service messages
@@ -73,8 +73,8 @@ class SimpyRouterEnv(SimpyMessageEnv):
 
         elif isinstance(inner_msg, PkgMessage):
             pkg = inner_msg.pkg
-            self.logger.debug("Package #{} hop: {} -> {}"
-                              .format(pkg.id, self.id, msg.recipient))
+            logger.debug("Package #{} hop: {} -> {}"
+                         .format(pkg.id, msg.from_node, msg.to_node))
 
             latency = edge["params"]["latency"]
             bandwidth = edge["params"]["bandwidth"]
