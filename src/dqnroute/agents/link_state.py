@@ -10,11 +10,14 @@ class LinkStateRouter(Router):
     """
     A router which implements simple link-state algorithm
     """
-    def init(self, config) -> List[Message]:
-        msgs = super().init(config)
-        self.network = config["network"]
+    def __init__(self, env: DynamicEnv, network: nx.DiGraph, **kwargs):
+        super().__init__(env, **kwargs)
+        self.network = network
         self.seq_num = 0
         self.announcements = {}
+
+    def init(self, config) -> List[Message]:
+        msgs = super().init(config)
         return msgs + self._announceLinkState()
 
     def addLink(self, to: int, params={}) -> List[Message]:
@@ -34,38 +37,26 @@ class LinkStateRouter(Router):
 
     def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
         if isinstance(msg, LSAnnouncementMsg):
-            args = msg.getContents()
-            node = args["node"]
-            seq = args["seq"]
-            neighbours = args["neighbours"]
-
-            if self._processLSAnnouncement(node, seq, neighbours):
+            if self._processLSAnnouncement(msg.node, msg.seq, msg.neighbours):
                 return [OutMessage(v, deepcopy(msg))
-                        for v in (self.neighbour_ids - set([sender]))]
+                        for v in (self.all_neighbours - set([sender]))]
             return []
 
         else:
             return super().handleServiceMsg(sender, msg)
 
     def _announceLinkState(self) -> List[Message]:
-        neighbour_links = dict(self.network.adjacency())[self.id]
+        neighbour_links = self.network.adj[self.id]
         announcement = LSAnnouncementMsg(self.id, self.seq_num, neighbour_links)
         self.seq_num += 1
-        return [OutMessage(v, deepcopy(announcement)) for v in self.neighbour_ids]
+        return [OutMessage(v, deepcopy(announcement)) for v in self.all_neighbours]
 
     def _processLSAnnouncement(self, node: int, seq: int, neighbours) -> bool:
         if node not in self.announcements or self.announcements[node]["seq"] < seq:
             self.announcements[node] = {"seq": seq, "neighbours": neighbours}
 
             for (m, params) in neighbours.items():
-                # add link back only after announcements
-                # from both routers connected by a link
-                try:
-                    m_data = self.announcements[m]["neighbours"]
-                    if node in m_data:
-                        self.network.add_edge(node, m, **params)
-                except KeyError:
-                    pass
+                self.network.add_edge(node, m, **params)
 
             for m in set(self.network.nodes()) - set(neighbours.keys()):
                 try:

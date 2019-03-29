@@ -4,6 +4,7 @@ Runs a computer network simulation
 
 import networkx as nx
 import pandas as pd
+import tensorflow as tf
 
 from typing import Dict
 from simpy import Environment
@@ -13,14 +14,14 @@ from ...agents import *
 from ...messages import *
 from ...constants import *
 from ...utils import *
-from ...time_env import *
 from ...event_series import *
 from ..router_env import *
+from .common import *
 
 logger = logging.getLogger(DQNROUTE_LOGGER)
 
 def _run_scenario(env: Environment, routers: Dict[str, SimpyRouterEnv],
-                  G, pkg_distr, random_seed = None):
+                  G: nx.DiGraph, pkg_distr, random_seed = None):
     if random_seed is not None:
         random.seed(random_seed)
 
@@ -65,18 +66,6 @@ def _get_router_class(router_type):
     else:
         raise Exception("Unsupported router type: " + router_type)
 
-def _make_config(RouterClass, router_id, G, run_params):
-    out_routers = [v for (_, v) in G.edges(router_id)]
-    router_cfg = {
-        'nodes': list(G.nodes()),
-        'neighbour_ids': out_routers
-    }
-    router_cfg.update(run_params['settings']['router'])
-
-    if issubclass(RouterClass, LinkStateRouter):
-        router_cfg['network'] = deepcopy(G)
-    return router_cfg
-
 def run_network_scenario(run_params, router_type: str, event_series: EventSeries,
                          random_seed = None, progress_step = None, progress_queue = None) -> EventSeries:
     """
@@ -87,34 +76,27 @@ def run_network_scenario(run_params, router_type: str, event_series: EventSeries
     G = make_network_graph(run_params['network'])
 
     env = Environment()
-    time_env = SimpyTimeEnv(env)
     routers = {}
     ChosenRouter = _get_router_class(router_type)
-    for u, nbrs in G.adjacency():
-        edges = [(u, v, attrs) for v, attrs in nbrs.items()]
-        routers[u] = SimpyRouterEnv(env, u, ChosenRouter(time_env),
-                                    event_series, edges,
-                                    **run_params['settings']['router_env'])
+    for node, nbrs in G.adjacency():
+        edges = [(node, v, attrs) for v, attrs in nbrs.items()]
+        routers[node] = SimpyRouterEnv(env, ChosenRouter,
+                                       router_id=node,
+                                       router_init_args=make_router_cfg(ChosenRouter, node, G, run_params),
+                                       data_series=event_series, edges=edges,
+                                       **run_params['settings']['router_env'])
+
     for node in G.nodes():
-        out_routers = {v: routers[v] for (_, v) in G.edges(node)}
-        routers[node].init(out_routers,
-                           _make_config(ChosenRouter, node, G, run_params))
+        out_routers = {v: routers[v] for (_, v) in G.out_edges(node)}
+        routers[node].init(out_routers, {})
 
     logger.setLevel(logging.DEBUG)
     env.process(_run_scenario(env, routers, G, run_params['settings']['pkg_distr'], random_seed))
+    run_env_progress(env, router_type=router_type, random_seed=random_seed,
+                     progress_step=progress_step, progress_queue=progress_queue)
 
-    if progress_queue is not None:
-        if progress_step is None:
-            env.run()
-            progress_queue.put((router_type, random_seed, progress_step))
-        else:
-            next_step = progress_step
-            while env.peek() != float('inf'):
-                env.run(until=next_step)
-                progress_queue.put((router_type, random_seed, progress_step))
-                next_step += progress_step
-        progress_queue.put((router_type, random_seed, None))
-    else:
-        env.run()
+    if issubclass(ChosenRouter, DQNRouter):
+        for router_env in routers.values():
+            router_env.handler.session.close()
 
     return event_series

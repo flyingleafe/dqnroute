@@ -1,22 +1,20 @@
 from typing import List, Tuple, Dict
 from .base import *
 from ..messages import *
-from ..time_env import TimeEnv
 from ..utils import dict_min
 
 class SimpleQRouter(Router, RewardAgent):
     """
     A router which implements Q-routing algorithm
     """
-
-    def init(self, config) -> List[Message]:
-        msgs = super().init(config)
-        self.learning_rate = config['learning_rate']
-        self.choice_policy = config.get('choice_policy', 'strict')
+    def __init__(self, env: DynamicEnv, learning_rate: float,
+                 nodes: List[int], choice_policy: str = 'strict', **kwargs):
+        super().__init__(env, **kwargs)
+        self.learning_rate = learning_rate
+        self.choice_policy = choice_policy
         self.Q = {u: {v: 0 if u == v else 10
-                      for v in self.neighbour_ids}
-                  for u in config['nodes']}
-        return msgs
+                      for v in self.out_neighbours}
+                  for u in nodes}
 
     def addLink(self, to: int, params={}) -> List[Message]:
         msgs = super().addLink(to, params)
@@ -36,7 +34,7 @@ class SimpleQRouter(Router, RewardAgent):
             for (node, val) in Qs.items():
                 q[node] = -val
             to = -1
-            while to not in self.neighbour_ids:
+            while to not in self.out_neighbours:
                 to = soft_argmax(q)
         else:
             to = best_to
@@ -58,12 +56,18 @@ class SimpleQRouter(Router, RewardAgent):
         Returns a dict which only includes available neighbours
         """
         res = {}
-        for n in self.neighbour_ids:
+        for n in self.out_neighbours:
             res[n] = self.Q[d][n]
         return res
 
 class SimpleQRouterNetwork(SimpleQRouter, NetworkRewardAgent):
     """
     Q-router which calculates rewards for computer routing setting
+    """
+    pass
+
+class SimpleQRouterConveyor(SimpleQRouter, ConveyorRewardAgent):
+    """
+    Q-router which calculates rewards for conveyor routing setting
     """
     pass

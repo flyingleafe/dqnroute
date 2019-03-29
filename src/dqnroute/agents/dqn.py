@@ -23,13 +23,22 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     """
     A router which implements DQN-routing algorithm
     """
+    def __init__(self, env: DynamicEnv, batch_size: int, mem_capacity: int,
+                 nn_type: str, **kwargs):
+        super().__init__(env, **kwargs)
+        self.batch_size = batch_size
+        self.memory = Memory(mem_capacity)
 
-    def init(self, config) -> List[Message]:
-        msgs = super().init(config)
-        self.batch_size = config['batch_size']
-        self.memory = Memory(config['mem_capacity'])
-        self._initModel(len(self.network.nodes), config['nn_type'], config)
-        return msgs
+        tf.reset_default_graph()
+        init = tf.global_variables_initializer()
+
+        NetworkClass = get_qnetwork_class(nn_type)
+        self.brain = NetworkClass(len(self.network.nodes), **kwargs)
+
+        self.session = tf.Session()
+        self.session.run(init)
+        self.brain.restore(self.session)
+        logger.info('Restored model from ' + self.brain.getSavePath())
 
     def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
         now = self.currentTime()
@@ -37,7 +46,7 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         prediction = self._predict(state)[0]
 
         to = -1
-        while to not in self.neighbour_ids:
+        while to not in self.out_neighbours:
             to = soft_argmax(prediction, MIN_TEMP)
 
         estimate = -np.max(prediction)
@@ -57,20 +66,6 @@ class DQNRouter(LinkStateRouter, RewardAgent):
 
         else:
             return super().handleServiceMsg(sender, msg)
-
-    def _initModel(self, n: int, nn_type: str, settings):
-        """
-        Initializes the Tensorflow graph for the agent
-        """
-        tf.reset_default_graph()
-        init = tf.global_variables_initializer()
-        NetworkClass = get_qnetwork_class(nn_type)
-        self.brain = NetworkClass(n, **settings)
-        self.session = tf.Session()
-        # load model
-        self.session.run(init)
-        self.brain.restore(self.session)
-        logger.info('Restored model from ' + self.brain.getSavePath())
 
     def _predict(self, x, batch_size=1):
         return self.brain.predict(self.session, x, batch_size=batch_size)
@@ -120,6 +115,12 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         self._train(states, preds, batch_size=blen)
 
 class DQNRouterNetwork(DQNRouter, NetworkRewardAgent):
+    """
+    DQN-router which calculates rewards for computer routing setting
+    """
+    pass
+
+class DQNRouterConveyor(DQNRouter, ConveyorRewardAgent):
     """
     DQN-router which calculates rewards for computer routing setting
     """

@@ -1,4 +1,5 @@
 from functools import total_ordering
+from copy import deepcopy
 # import pandas as pd
 # import numpy as np
 
@@ -7,8 +8,20 @@ class Message:
     Base class for all messages used in the system
     """
 
-    def __init__(self, contents):
-        self.contents = contents
+    def __init__(self, **kwargs):
+        self.contents = kwargs
+
+    def __str__(self):
+        return '{}: {}'.format(self.__class__.__name__, str(self.contents))
+
+    def __repr__(self):
+        return '<{}>'.format(str(self))
+
+    def __getattr__(self, name):
+        try:
+            return super().__getattribute__('contents')[name]
+        except KeyError:
+            raise AttributeError(name)
 
     def getContents(self):
         return self.contents
@@ -24,31 +37,30 @@ class InitMessage(Message):
     """
     Message which router receives as environment starts
     """
-    pass
+    def __init__(self, config):
+        super().__init__(config=config)
 
 class InMessage(Message):
     """
     Wrapped message which has came from the outside.
     """
-    def __init__(self, sender: int, contents: Message):
-        super().__init__(contents)
-        self.sender = sender
+    def __init__(self, sender: int, inner_msg: Message):
+        super().__init__(sender=sender, inner_msg=inner_msg)
 
 class OutMessage(Message):
     """
     Wrapped message which is sent to a neighbor through the interface
     with given ID.
     """
-    def __init__(self, recipient: int, contents: Message):
-        super().__init__(contents)
-        self.recipient = recipient
+    def __init__(self, recipient: int, inner_msg: Message):
+        super().__init__(recipient=recipient, inner_msg=inner_msg)
 
 def repackMsg(sender: int, msg: OutMessage) -> InMessage:
     """
     Creates an incoming message for recipient from outgoing message
     for sender
     """
-    return InMessage(sender, msg.getContents())
+    return InMessage(sender, msg.inner_msg)
 
 class ServiceMessage(Message):
     """
@@ -65,8 +77,8 @@ class Package:
         self.size = size
         self.dst = dst
         self.start_time = start_time
-        self.route = None
         self.contents = contents
+        # self.route = None
         # self.rnn_state = (np.zeros((1, state_size)),
         #                   np.zeros((1, state_size)))
 
@@ -74,6 +86,10 @@ class Package:
     #     if self.route is None:
     #         self.route = pd.DataFrame(columns=cols)
     #     self.route.loc[len(self.route)] = data
+
+    def __str__(self):
+        return '{}#{}{}'.format(self.__class__.__name__, self.id,
+                                str((self.dst, self.size, self.start_time, self.contents)))
 
     def __hash__(self):
         return hash((self.id, self.contents))
@@ -96,7 +112,7 @@ class PkgMessage(Message):
     destination.
     """
     def __init__(self, pkg: Package):
-        super().__init__(pkg)
+        super().__init__(pkg=pkg)
 
 class PkgReceivedMessage(Message):
     """
@@ -104,21 +120,28 @@ class PkgReceivedMessage(Message):
     destination
     """
     def __init__(self, pkg: Package):
-        super().__init__(pkg)
+        super().__init__(pkg=pkg)
 
-class AddLinkMessage(Message):
+class LinkUpdateMessage(Message):
+    """
+    Message which router receives when graph topology is changed
+    """
+    def __init__(self, to: int, direction='both', **kwargs):
+        super().__init__(to=to, direction=direction, **kwargs)
+
+class AddLinkMessage(LinkUpdateMessage):
     """
     Message which router receives when a link is connected (or restored).
     """
-    def __init__(self, to: int, params={}):
-        super().__init__({"to": to, "params": params})
+    def __init__(self, to: int, direction='both', params={}):
+        super().__init__(to, direction, params=params)
 
-class RemoveLinkMessage(Message):
+class RemoveLinkMessage(LinkUpdateMessage):
     """
     Message which router receives when link breakage is detected
     """
-    def __init__(self, to: int):
-        super().__init__(to)
+    def __init__(self, to: int, direction='both'):
+        super().__init__(to, direction)
 
 #
 # Service messages
@@ -126,10 +149,7 @@ class RemoveLinkMessage(Message):
 
 class RewardMsg(ServiceMessage):
     def __init__(self, action_id: int, reward_data):
-        super().__init__({
-            "action_id": action_id,
-            "reward_data": reward_data,
-        })
+        super().__init__(action_id=action_id, reward_data=reward_data)
 
 class NetworkRewardMsg(RewardMsg):
     def __init__(self, pkg_id: int, time_received: float, Q: float):
@@ -141,8 +161,4 @@ class ConveyorRewardMsg(RewardMsg):
 
 class LSAnnouncementMsg(ServiceMessage):
     def __init__(self, node: int, seq: int, neighbours):
-        super().__init__({
-            "node": node,
-            "seq": seq,
-            "neighbours": neighbours
-        })
+        super().__init__(node=node, seq=seq, neighbours=neighbours)

@@ -4,7 +4,6 @@ from typing import List, Tuple
 from ..messages import *
 from ..utils import *
 from ..constants import DQNROUTE_LOGGER
-from ..time_env import TimeEnv
 
 logger = logging.getLogger(DQNROUTE_LOGGER)
 
@@ -21,20 +20,30 @@ class Router(MessageHandler):
     """
     Agent which routes packages and service messages.
     """
-    def __init__(self, time_env: TimeEnv, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.time_env = time_env
+    def __init__(self, env: DynamicEnv, router_id: int,
+                 out_neighbours: List[int], in_neighbours: List[int], **kwargs):
+        super().__init__()
+        self.env = env
+        self.id = router_id
+        self.out_neighbours = set(out_neighbours)
+        self.in_neighbours = set(in_neighbours)
+
+    def __getattr__(self, name):
+        if name == 'all_neighbours':
+            return self.in_neighbours | self.out_neighbours
+        else:
+            raise AttributeError(name)
 
     def currentTime(self) -> int:
-        return self.time_env.currentTime()
+        return self.env.time
 
     def handle(self, msg: Message) -> List[Message]:
         if isinstance(msg, InMessage):
             sender = msg.sender
-            msg = msg.getContents()
+            msg = msg.inner_msg
 
             if isinstance(msg, PkgMessage):
-                pkg = msg.getContents()
+                pkg = msg.pkg
                 if pkg.dst == self.id:
                     return [PkgReceivedMessage(pkg)]
                 else:
@@ -46,28 +55,32 @@ class Router(MessageHandler):
                 return self.handleServiceMsg(sender, msg)
 
         elif isinstance(msg, InitMessage):
-            return self.init(msg.getContents())
+            return self.init(msg.config)
 
         elif isinstance(msg, AddLinkMessage):
             return self.addLink(**msg.getContents())
 
         elif isinstance(msg, RemoveLinkMessage):
-            return self.removeLink(msg.getContents())
+            return self.removeLink(**msg.getContents())
 
         else:
             return super().handle(msg)
 
     def init(self, config) -> List[Message]:
-        self.id = config["id"]
-        self.neighbour_ids = set(config["neighbour_ids"])
         return []
 
-    def addLink(self, to: int, params={}) -> List[Message]:
-        self.neighbour_ids.add(to)
+    def addLink(self, to: int, direction: str, params={}) -> List[Message]:
+        if direction != 'out':
+            self.in_neighbours.add(to)
+        if direction != 'in':
+            self.out_neighbours.add(to)
         return []
 
-    def removeLink(self, to: int) -> List[Message]:
-        self.neighbour_ids.remove(to)
+    def removeLink(self, to: int, direction: str) -> List[Message]:
+        if direction != 'out':
+            self.in_neighbours.remove(to)
+        if direction != 'in':
+            self.out_neighbours.remove(to)
         return []
 
     def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
@@ -77,19 +90,15 @@ class Router(MessageHandler):
         raise UnsupportedMessageType(msg)
 
 class RewardAgent(object):
-    def __init__(self):
+    def __init__(self, **kwargs):
         self._pending_pkgs = {}
 
     def registerSentPkg(self, pkg: Package, data):
         self._pending_pkgs[pkg.id] = data
 
     def receiveReward(self, msg: RewardMsg):
-        args = msg.getContents()
-        pkg_id = args['action_id']
-        reward_data = args['reward_data']
-
-        saved_data = self._pending_pkgs.pop(pkg_id)
-        reward = self.computeReward(reward_data, saved_data)
+        saved_data = self._pending_pkgs.pop(msg.action_id)
+        reward = self.computeReward(msg.reward_data, saved_data)
         return reward, saved_data
 
     def computeReward(self, observation, action, reward_data):

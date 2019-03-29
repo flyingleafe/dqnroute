@@ -3,6 +3,7 @@ import math
 
 from typing import List, Callable, Dict
 from simpy import Environment, Event, Resource, Process
+from ..utils import *
 from ..messages import *
 from ..event_series import EventSeries
 from ..agents import Router
@@ -16,8 +17,10 @@ class SimpyRouterEnv(SimpyMessageEnv):
     Passing a message to a router is done via `handle` method.
     """
 
-    def __init__(self, env: Environment, router_id: int, router: Router,
-                 data_series: EventSeries, edges, pkg_process_delay: int = 0, **kwargs):
+    def __init__(self, env: Environment, RouterClass, router_id: int, data_series: EventSeries,
+                 edges, router_init_args={}, pkg_process_delay: int = 0, **kwargs):
+        dyn_env = DynamicEnv(time=lambda: env.now)
+        router = RouterClass(dyn_env, router_id=router_id, **router_init_args)
         super().__init__(env, router)
         self.id = router_id
         self.pkg_process_delay = pkg_process_delay
@@ -50,17 +53,16 @@ class SimpyRouterEnv(SimpyMessageEnv):
             return self.env.process(self._inputQueue(msg))
 
         elif isinstance(msg, PkgReceivedMessage):
-            pkg = msg.getContents()
             self.logger.debug("Package #{} received at node {} at time {}"
-                              .format(pkg.id, self.id, self.env.now))
-            self.data_series.logEvent(self.env.now, self.env.now - pkg.start_time)
+                              .format(msg.pkg.id, self.id, self.env.now))
+            self.data_series.logEvent(self.env.now, self.env.now - msg.pkg.start_time)
 
         else:
             raise UnsupportedMessageType(msg)
 
     def _edgeTransfer(self, msg: OutMessage, edge):
         neighbour = edge["neighbour"]
-        inner_msg = msg.getContents()
+        inner_msg = msg.inner_msg
         new_msg = InMessage(self.id, inner_msg)
 
         # TODO: add an option to enable link clogging with
@@ -70,9 +72,10 @@ class SimpyRouterEnv(SimpyMessageEnv):
             return new_msg
 
         elif isinstance(inner_msg, PkgMessage):
+            pkg = inner_msg.pkg
             self.logger.debug("Package #{} hop: {} -> {}"
-                              .format(inner_msg.getContents().id, self.id, msg.recipient))
-            pkg = inner_msg.getContents()
+                              .format(pkg.id, self.id, msg.recipient))
+
             latency = edge["params"]["latency"]
             bandwidth = edge["params"]["bandwidth"]
 
@@ -88,7 +91,7 @@ class SimpyRouterEnv(SimpyMessageEnv):
             raise UnsupportedMessageType(inner_msg)
 
     def _inputQueue(self, msg: InMessage):
-        inner_msg = msg.getContents()
+        inner_msg = msg.inner_msg
         # TODO: add an option for enabling processing delay
         # for service messages
         if isinstance(inner_msg, ServiceMessage):

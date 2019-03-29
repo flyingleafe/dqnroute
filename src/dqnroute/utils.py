@@ -18,7 +18,11 @@ def memoize(func):
             return r
     return memfoo
 
-def make_network_graph(edge_list):
+def make_network_graph(edge_list) -> nx.DiGraph:
+    """
+    Creates a computer network graph (with symmetric edges)
+    from edge list
+    """
 
     def read_edge(e):
         new_e = e.copy()
@@ -26,11 +30,12 @@ def make_network_graph(edge_list):
         v = new_e.pop('v')
         return (u, v, new_e)
 
-    G = nx.Graph()
+    DG = nx.DiGraph()
     for e in edge_list:
         u, v, params = read_edge(e)
-        G.add_edge(u, v, **params)
-    return G
+        DG.add_edge(u, v, **params)
+        DG.add_edge(v, u, **params)
+    return DG
 
 def mk_current_neural_state(G, time, pkg, node_addr, *add_data):
     n = len(G.nodes())
@@ -263,6 +268,25 @@ def stack_batch_list(batch):
         if ss[i].shape[1] == 1:
             ss[i] = ss[i].flatten()
     return ss
+
+#
+# Attribute accessor
+#
+
+class DynamicEnv(object):
+    """
+    Dynamic env is an object which stores a bunch of getter functions,
+    which are accessible via attributes.
+    """
+
+    def __init__(self, **accessors):
+        self._accessors = accessors
+
+    def __getattr__(self, name):
+        try:
+            return super().__getattribute__('_accessors')[name]()
+        except KeyError:
+            raise AttributeError(name)
 
 #
 # Stochastic policy distribution

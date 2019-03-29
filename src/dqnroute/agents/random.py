@@ -10,7 +10,7 @@ class RandomRouter(Router):
     """
 
     def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
-        return random.choice(self.neighbour_ids), []
+        return random.choice(self.out_neighbours), []
 
     def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
         return []
