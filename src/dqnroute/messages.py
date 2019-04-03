@@ -108,6 +108,10 @@ class Package:
 class Bag(Package):
     def __init__(self, bag_id, dst, start_time, contents):
         super().__init__(bag_id, 0, dst, start_time, contents)
+        self.energy_overhead = 0
+
+    def spend_energy(self, x: int):
+        self.energy_overhead += x
 
 class PkgMessage(Message):
     """
@@ -151,16 +155,17 @@ class RemoveLinkMessage(LinkUpdateMessage):
 #
 
 class RewardMsg(ServiceMessage):
-    def __init__(self, action_id: int, reward_data):
-        super().__init__(action_id=action_id, reward_data=reward_data)
+    def __init__(self, pkg_id: int, Q_estimate: float, reward_data):
+        super().__init__(pkg_id=pkg_id, Q_estimate=Q_estimate, reward_data=reward_data)
 
 class NetworkRewardMsg(RewardMsg):
-    def __init__(self, pkg_id: int, time_received: float, Q: float):
-        super().__init__(pkg_id, (time_received, Q))
+    def __init__(self, pkg_id: int, Q_estimate: float, time_received: float):
+        super().__init__(pkg_id, Q_estimate, time_received)
 
 class ConveyorRewardMsg(RewardMsg):
-    def __init__(self, bag_id: int, time_processed: float, energy_gap: float, Q: float):
-        super().__init__(bag_id, (time_received, energy_gap, Q))
+    def __init__(self, bag_id: int, Q_estimate: float, time_processed: float,
+                 energy_gap: float):
+        super().__init__(bag_id, Q_estimate, (time_processed, energy_gap))
 
 class LSAnnouncementMsg(ServiceMessage):
     def __init__(self, node: int, seq: int, neighbours):

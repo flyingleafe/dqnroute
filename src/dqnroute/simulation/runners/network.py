@@ -81,9 +81,12 @@ def run_network_scenario(run_params, router_type: str, event_series: EventSeries
 
     for node, nbrs in G.adjacency():
         edges = [(node, v, attrs) for v, attrs in nbrs.items()]
+        router_args = make_router_cfg(ChosenRouter, node, G, run_params)
+        router_args['edge_weight'] = 'latency'
+
         routers[node] = SimpyRouterEnv(env, ChosenRouter,
                                        router_id=node,
-                                       router_init_args=make_router_cfg(ChosenRouter, node, G, run_params),
+                                       router_init_args=router_args,
                                        data_series=event_series, edges=edges,
                                        **run_params['settings']['router_env'])
 

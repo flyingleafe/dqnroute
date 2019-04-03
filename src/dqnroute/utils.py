@@ -18,6 +18,9 @@ def memoize(func):
             return r
     return memfoo
 
+def empty_gen():
+    yield from ()
+
 def make_network_graph(edge_list) -> nx.DiGraph:
     """
     Creates a computer network graph (with symmetric edges)
@@ -43,8 +46,8 @@ def make_conveyor_graph(layout) -> nx.DiGraph:
     """
 
     DG = nx.DiGraph()
-    for conveyor in configuration:
-        for sec_id, section in conveyor['sections'].items():
+    for conveyor in layout:
+        for sec_id, section in conveyor.items():
             length = section['length']
             try:
                 upn = section['upstream_neighbor']
@@ -297,16 +300,16 @@ def stack_batch_list(batch):
 
 class DynamicEnv(object):
     """
-    Dynamic env is an object which stores a bunch of getter functions,
-    which are accessible via attributes.
+    Dynamic env is an object which stores a bunch of read-only attributes,
+    which might be functions
     """
 
-    def __init__(self, **accessors):
-        self._accessors = accessors
+    def __init__(self, **attrs):
+        self._attrs = attrs
 
     def __getattr__(self, name):
         try:
-            return super().__getattribute__('_accessors')[name]()
+            return super().__getattribute__('_attrs')[name]
         except KeyError:
             raise AttributeError(name)
 

@@ -42,7 +42,6 @@ configuration:
 
 settings:
   bags_distr:
-    seed: 42
     sequence:
       - {bags_number: 200, delta: 20} 
   synchronizer:

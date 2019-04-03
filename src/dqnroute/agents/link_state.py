@@ -10,9 +10,11 @@ class LinkStateRouter(Router):
     """
     A router which implements simple link-state algorithm
     """
-    def __init__(self, env: DynamicEnv, network: nx.DiGraph, **kwargs):
+    def __init__(self, env: DynamicEnv, network: nx.DiGraph,
+                 edge_weight='weight', **kwargs):
         super().__init__(env, **kwargs)
         self.network = network
+        self.edge_weight = edge_weight
         self.seq_num = 0
         self.announcements = {}
 
@@ -20,20 +22,26 @@ class LinkStateRouter(Router):
         msgs = super().init(config)
         return msgs + self._announceLinkState()
 
-    def addLink(self, to: int, params={}) -> List[Message]:
-        msgs = super().addLink(to, params)
-        self.network.add_edge(self.id, to, **params)
+    def addLink(self, to: int, direction: str, params={}) -> List[Message]:
+        msgs = super().addLink(to, direction, params)
+        if direction != 'out':
+            self.network.add_edge(to, self.id, **params)
+        if direction != 'in':
+            self.network.add_edge(self.id, to, **params)
         return msgs + self._announceLinkState()
 
-    def removeLink(self, to: int) -> List[Message]:
-        msgs = super().removeLink(to)
-        self.network.remove_edge(self.id, to)
+    def removeLink(self, to: int, direction: str) -> List[Message]:
+        msgs = super().removeLink(to, direction)
+        if direction != 'out':
+            self.network.remove_edge(to, self.id)
+        if direction != 'in':
+            self.network.remove_edge(self.id, to)
         return msgs + self._announceLinkState()
 
     def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
-        paths = nx.all_shortest_paths(self.network, self.id, pkg.dst,
-                                      weight='latency')
-        return random.choice(list(paths))[1], []
+        path = nx.dijkstra_path(self.network, self.id, pkg.dst,
+                                weight=self.edge_weight)
+        return path[1], []
 
     def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
         if isinstance(msg, LSAnnouncementMsg):

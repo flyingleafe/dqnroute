@@ -41,7 +41,6 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         logger.info('Restored model from ' + self.brain.getSavePath())
 
     def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
-        now = self.currentTime()
         state = self._getNNState(pkg)
         prediction = self._predict(state)[0]
 
@@ -50,20 +49,15 @@ class DQNRouter(LinkStateRouter, RewardAgent):
             to = soft_argmax(prediction, MIN_TEMP)
 
         estimate = -np.max(prediction)
-        self.registerSentPkg(pkg, {'time_sent': self.currentTime(), 'state': state})
-        reward = NetworkRewardMsg(pkg.id, now, estimate)
+        reward = self.registerResentPkg(pkg, estimate, state)
         return to, [OutMessage(self.id, sender, reward)] if sender != -1 else []
 
     def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
         if isinstance(msg, RewardMsg):
-            Q_new, saved_data = self.receiveReward(msg)
-            time_sent = saved_data['time_sent']
-            prev_state = saved_data['state']
-
+            Q_new, prev_state = self.receiveReward(msg)
             self.memory.add((prev_state, sender, -Q_new))
             self._replay()
             return []
-
         else:
             return super().handleServiceMsg(sender, msg)
 
@@ -89,7 +83,8 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         basic_state_inp[0] = d
         basic_state_inp[1] = k
         amatrix = self._getAmatrix()
-        basic_state_inp[2:] = amatrix[n*k:n*(k+1)]
+        basic_state_inp[2:] = np.array(list(map(lambda v: v in self.out_neighbours,
+                                                sorted(self.network.nodes))))
         df.loc[0] = np.concatenate((basic_state_inp, amatrix))
 
         return self.brain.makeInputFromData(df)
@@ -124,4 +119,16 @@ class DQNRouterConveyor(DQNRouter, ConveyorRewardAgent):
     """
     DQN-router which calculates rewards for computer routing setting
     """
-    pass
+    def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
+        """
+        Makes sure that bags are not sent to the path which can not lead to
+        the destination
+        """
+        old_neighbours = self.out_neighbours
+        filter_func = lambda v: nx.has_path(self.network, v, pkg.dst)
+        self.out_neighbours = set(filter(filter_func, old_neighbours))
+
+        to, msgs = super().route(sender, pkg)
+        self.out_neighbours = old_neighbours
+        return to, msgs
+

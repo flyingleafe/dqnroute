@@ -27,16 +27,16 @@ def _run_scenario(env: Environment, sections_map: Dict[int, SimpyConveyorEnv],
     bag_id = 1
     for period in bag_distr['sequence']:
         delta = period['delta']
-        sources = period.get('sources', sources)
-        sinks = period.get('sinks', sinks)
+        cur_sources = period.get('sources', sources)
+        cur_sinks = period.get('sinks', sinks)
 
-        for i in range(0, period["bags_number"]):
-            src = random.choice(sources)
-            dst = random.choice(sinks)
+        for i in range(0, period['bags_number']):
+            src = random.choice(cur_sources)
+            dst = random.choice(cur_sinks)
             bag = Bag(bag_id, dst, env.now, None)
             logger.debug("Sending random bag #{} from {} to {} at time {}"
                          .format(bag_id, src, dst, env.now))
-            sections_map[src].handle(InMessage(-1, src, PkgMessage(pkg)))
+            sections_map[src].handle(InMessage(-1, src, PkgMessage(bag)))
             bag_id += 1
             yield env.timeout(delta)
 
@@ -51,7 +51,7 @@ def _get_router_class(router_type):
         raise Exception("Unsupported router type: " + router_type)
 
 def run_conveyor_scenario(run_params, router_type: str,
-                          time_series: EventSeries, energy_series: EventSeries
+                          time_series: EventSeries, energy_series: EventSeries,
                           random_seed = None, progress_step = None,
                           progress_queue = None) -> Tuple[EventSeries, EventSeries]:
     """
@@ -71,9 +71,15 @@ def run_conveyor_scenario(run_params, router_type: str,
     ChosenRouter = _get_router_class(router_type)
 
     for (i, conveyor) in enumerate(layout):
+        routers_args = {}
+        for sec_id in conveyor.keys():
+            args = make_router_cfg(ChosenRouter, sec_id, G, run_params)
+            args['edge_weight'] = 'length'
+            routers_args[sec_id] = args
+
         conveyor_env = SimpyConveyorEnv(env, ChosenRouter, i, conveyor,
                                         time_series=time_series, energy_series=energy_series,
-                                        router_init_args=make_router_cfg(ChosenRouter, node, G, run_params),
+                                        routers_init_args=routers_args,
                                         **run_params['settings']['conveyor_env'])
 
         for sec_id in conveyor.keys():
@@ -84,7 +90,9 @@ def run_conveyor_scenario(run_params, router_type: str,
         conveyor.init(sections_map, {})
 
     logger.setLevel(logging.DEBUG)
-    env.process(_run_scenario(env, sections_map, run_params['settings']['bags_distr'], random_seed))
+    env.process(_run_scenario(env, sections_map, sources, sinks,
+                              run_params['settings']['bags_distr'], random_seed))
+
     run_env_progress(env, router_type=router_type, random_seed=random_seed,
                      progress_step=progress_step, progress_queue=progress_queue)
 

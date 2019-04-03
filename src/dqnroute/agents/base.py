@@ -34,9 +34,6 @@ class Router(MessageHandler):
         else:
             raise AttributeError(name)
 
-    def currentTime(self) -> int:
-        return self.env.time
-
     def handle(self, msg: Message) -> List[Message]:
         if isinstance(msg, InMessage):
             sender = msg.from_node
@@ -90,33 +87,65 @@ class Router(MessageHandler):
         raise UnsupportedMessageType(msg)
 
 class RewardAgent(object):
+    """
+    Agent which receives rewards for sent packages
+    """
+
     def __init__(self, **kwargs):
         self._pending_pkgs = {}
 
-    def registerSentPkg(self, pkg: Package, data):
-        self._pending_pkgs[pkg.id] = data
+    def registerResentPkg(self, pkg: Package, Q_estimate: float, data) -> RewardMsg:
+        rdata = self._getRewardData(pkg, data)
+        self._pending_pkgs[pkg.id] = (rdata, data)
+        return self._mkReward(pkg.id, Q_estimate, rdata)
 
     def receiveReward(self, msg: RewardMsg):
-        saved_data = self._pending_pkgs.pop(msg.action_id)
-        reward = self.computeReward(msg.reward_data, saved_data)
+        old_reward_data, saved_data = self._pending_pkgs.pop(msg.pkg_id)
+        reward = self._computeReward(msg, old_reward_data)
         return reward, saved_data
 
-    def computeReward(self, observation, action, reward_data):
+    def _computeReward(self, msg: RewardMsg, old_reward_data):
+        raise NotImplementedError()
+
+    def _mkReward(self, pkg_id: int, Q_estimate: float, reward_data) -> RewardMsg:
+        raise NotImplementedError()
+
+    def _getRewardData(self, pkg: Package, data):
         raise NotImplementedError()
 
 class NetworkRewardAgent(RewardAgent):
-    def computeReward(self, reward_data, saved_data):
-        time_received, Q = reward_data
-        time_sent = saved_data['time_sent']
-        return Q + (time_received - time_sent)
+    """
+    Agent which receives and processes rewards in computer networks.
+    """
+
+    def _computeReward(self, msg: NetworkRewardMsg, time_sent: float):
+        time_received = msg.reward_data
+        return msg.Q_estimate + (time_received - time_sent)
+
+    def _mkReward(self, pkg_id: int, Q_estimate: float, time_sent: float) -> NetworkRewardMsg:
+        return NetworkRewardMsg(pkg_id, Q_estimate, time_sent)
+
+    def _getRewardData(self, pkg: Package, data):
+        return self.env.time()
 
 class ConveyorRewardAgent(RewardAgent):
+    """
+    Agent which receives and processes rewards in conveyor networks
+    """
+
     def __init__(self, energy_reward_weight=1, **kwargs):
         super().__init__(**kwargs)
-        self._e_weight = energy_reward_weght
+        self._e_weight = energy_reward_weight
 
-    def computeReward(self, reward_data, saved_data):
-        time_received, energy_gap, Q = reward_data
-        time_sent = saved_data['time_sent']
-        time_gap = time_received - time_sent
-        return Q + time_gap + self._e_weight * energy_gap
+    def _computeReward(self, msg: ConveyorRewardMsg, old_reward_data):
+        time_sent, _ = old_reward_data
+        time_processed, energy_gap = msg.reward_data
+        time_gap = time_processed - time_sent
+        return msg.Q_estimate + time_gap + self._e_weight * energy_gap
+
+    def _mkReward(self, bag_id: int, Q_estimate: float, reward_data) -> ConveyorRewardMsg:
+        time_processed, energy_gap = reward_data
+        return ConveyorRewardMsg(bag_id, Q_estimate, time_processed, energy_gap)
+
+    def _getRewardData(self, bag: Bag, data):
+        return self.env.time(), self.env.energy_gap(bag.id)
