@@ -35,7 +35,6 @@ python36Packages.buildPythonPackage {
         ipykernel
         ipywidgets
         tensorflow
-        thespian
         typing
         networkx
         h5py
