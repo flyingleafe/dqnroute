@@ -35,11 +35,12 @@ settings:
     delta: 10
   logging:
     delta: 500
+  router_env:
+    pkg_process_delay: 10
   router:
     learning_rate: 0.5
     beta_rate: 0.7
     gamma_rate: 0.9
-    pkg_process_delay: 10
     nn_type: 'rnn_amatrix'
     optimizer: 'rmsprop'
     ff_activation: 'tanh'

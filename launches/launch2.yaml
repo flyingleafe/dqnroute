@@ -28,6 +28,7 @@ settings:
     delta: 5
   logging:
     delta: 20
+  router_env:
+    pkg_process_delay: 3
   router:
     learning_rate: 0.2
-    pkg_process_delay: 3

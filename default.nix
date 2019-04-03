@@ -7,37 +7,42 @@ python36Packages.buildPythonPackage {
         # system packages
         git
         libzip
-	libpng
-	freetype
+        libpng
+        freetype
         
         # python packages
         python36Full
         virtualenv
- 	setuptools
-	matplotlib
+        setuptools
+        matplotlib
         Keras
-	pandas
+        pandas
         more-itertools
         numpy
         simpy
         scipy
         scikitlearn
         seaborn
-        jupyter_core
         jupyter
         jupyter_client
+        jupyter_console
+        jupyter_core
         jupyterlab
+        jupyterlab_launcher
         backports_shutil_get_terminal_size
+        widgetsnbextension
         ipython
         ipykernel
-	tensorflow
-        thespian
-	networkx
-	h5py
-	pyyaml
+        ipywidgets
+        tensorflow
+        typing
+        networkx
+        h5py
+        pyyaml
+        tqdm
         stdenv
         zlib
-	bazel
+        bazel
         graphviz
     ];
     # When used as `nix-shell --pure`

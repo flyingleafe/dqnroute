@@ -1,52 +1,45 @@
 configuration:
-  - sections:
-      0: {length: 0, upstream_neighbor: 5}
+  layout:
+    - 0: {length: 0, upstream_neighbor: 5}
       5: {length: 10, upstream_neighbor: 8}
       8: {length: 10, upstream_neighbor: 10}
       10: {length: 10, upstream_neighbor: 15, adjacent_neighbor: 9}
       15: {length: 0}
-  - sections:
-      1: {length: 0, upstream_neighbor: 4}
+
+    - 1: {length: 0, upstream_neighbor: 4}
       4: {length: 10, upstream_neighbor: 8, adjacent_neighbor: 6}
-  - sections:
-      2: {length: 0, upstream_neighbor: 3}
+
+    - 2: {length: 0, upstream_neighbor: 3}
       3: {length: 10, upstream_neighbor: 7, adjacent_neighbor: 11}
-  - sections:
-      6: {length: 10, upstream_neighbor: 7}
+      
+    - 6: {length: 10, upstream_neighbor: 7}
       7: {length: 10, upstream_neighbor: 9, adjacent_neighbor: 10}
       9: {length: 10, upstream_neighbor: 12}
       12: {length: 10, upstream_neighbor: 14, adjacent_neighbor: 13}
       14: {length: 0}
-  - sections:
-      11: {length: 10, upstream_neighbor: 13}
+      
+    - 11: {length: 10, upstream_neighbor: 13}
       13: {length: 0}
+
+  sources: [0, 1, 2]
+  sinks: [13, 14, 15]
 
 settings:
   bags_distr:
-    seed: 42
     sequence:
       - {bags_number: 1000, delta: 10} 
-  synchronizer:
-    period:
-      link_state: 20
-      simple_q: 30
-      dqn: 150
-    delta: 10
-  logging:
-    delta: 500
-  router:
-    sources: [0, 1, 2]
-    sinks: [13, 14, 15]
+  conveyor_env:
     speed: 1
     energy_consumption: 1
     sec_process_time: 3
     stop_delay: 20
+  router:
     energy_reward_weight: 1
     learning_rate: 0.5
     pkg_process_delay: 5
-    nn_type: 'ff_amatrix_flat_add'
-    flat_inputs:
-      work_status: 'graph_size'
+    nn_type: 'ff_amatrix'
+    # flat_inputs:
+    #   work_status: 'graph_size'
     optimizer: 'rmsprop'
     scope: 'conveyor_test'
     layers: [64, 64]

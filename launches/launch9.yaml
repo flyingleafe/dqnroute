@@ -22,9 +22,10 @@ settings:
     delta: 10
   logging:
     delta: 200
+  router_env:
+    pkg_process_delay: 5    
   router:
     learning_rate: 0.2
-    pkg_process_delay: 5
     model_file: null
     batch_size: 1
     mem_capacity: 1

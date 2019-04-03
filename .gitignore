@@ -1,4 +1,5 @@
 result
+tf_models
 __pycache__
 logs*
 .ipynb_checkpoints

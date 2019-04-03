@@ -4,7 +4,7 @@ import numpy as np
 from keras.layers import Lambda
 
 from ..utils import *
-from ..constants import TF_MODELS_DIR
+from ..constants import TF_MODELS_DIR, INFTY
 from .optimizers import get_optimizer
 
 class QNetwork:
@@ -28,7 +28,7 @@ class QNetwork:
 
         self.hidden_out = self.getHiddenLayers(**kwargs)
 
-        lambda_l = Lambda(lambda x: (1 - tf.minimum(x, 1))*-1000000)(self.neighbors_input)
+        lambda_l = Lambda(lambda x: (1 - tf.minimum(x, 1))*-INFTY)(self.neighbors_input)
         self.Qout = tf.add(self.hidden_out, lambda_l)
 
         self.target = tf.placeholder(shape=(None, n), dtype=tf.float32)

@@ -3,6 +3,10 @@ import networkx as nx
 import numpy as np
 import itertools as it
 
+from typing import NewType
+
+from .constants import INFTY
+
 def memoize(func):
     mp = {}
     def memfoo(x):
@@ -13,6 +17,50 @@ def memoize(func):
             mp[x] = r
             return r
     return memfoo
+
+def empty_gen():
+    yield from ()
+
+def make_network_graph(edge_list) -> nx.DiGraph:
+    """
+    Creates a computer network graph (with symmetric edges)
+    from edge list
+    """
+
+    def read_edge(e):
+        new_e = e.copy()
+        u = new_e.pop('u')
+        v = new_e.pop('v')
+        return (u, v, new_e)
+
+    DG = nx.DiGraph()
+    for e in edge_list:
+        u, v, params = read_edge(e)
+        DG.add_edge(u, v, **params)
+        DG.add_edge(v, u, **params)
+    return DG
+
+def make_conveyor_graph(layout) -> nx.DiGraph:
+    """
+    Creates a conveyor network graph from conveyor system layout.
+    """
+
+    DG = nx.DiGraph()
+    for conveyor in layout:
+        for sec_id, section in conveyor.items():
+            length = section['length']
+            try:
+                upn = section['upstream_neighbor']
+                DG.add_edge(sec_id, upn, length=length)
+            except KeyError:
+                pass
+
+            try:
+                ajn = section['adjacent_neighbor']
+                DG.add_edge(sec_id, ajn, length=length)
+            except KeyError:
+                pass
+    return DG
 
 def mk_current_neural_state(G, time, pkg, node_addr, *add_data):
     n = len(G.nodes())
@@ -49,13 +97,13 @@ def mk_current_neural_state(G, time, pkg, node_addr, *add_data):
                 data[off + i*n + j] = 1
     off += n*n
     for i in range(off, dlen):
-        data[i] = -1000000
+        data[i] = -INFTY
     for m in neighbors:
         try:
             data[off + m] = -(nx.dijkstra_path_length(G, m, d) + \
                               G.get_edge_data(k, m)['weight'])
         except nx.exception.NetworkXNoPath:
-            data[off + m] = -1000000
+            data[off + m] = -INFTY
     return data
 
 def dict_min(dct):
@@ -246,17 +294,52 @@ def stack_batch_list(batch):
             ss[i] = ss[i].flatten()
     return ss
 
-def uni(n):
-    return np.full(n, 1.0/n)
+#
+# Attribute accessor
+#
 
-def softmax(x, t=1.0):
+class DynamicEnv(object):
+    """
+    Dynamic env is an object which stores a bunch of read-only attributes,
+    which might be functions
+    """
+
+    def __init__(self, **attrs):
+        self._attrs = attrs
+
+    def __getattr__(self, name):
+        try:
+            return super().__getattribute__('_attrs')[name]
+        except KeyError:
+            raise AttributeError(name)
+
+#
+# Stochastic policy distribution
+#
+
+Distribution = NewType('Distribution', np.ndarray)
+
+def delta(i: int, n: int) -> Distribution:
+    if i >= n:
+        raise Exception('Action index is out of bounds')
+    d = np.zeros(n)
+    d[i] = 1
+    return Distribution(d)
+
+def uni(n) -> Distribution:
+    return Distribution(np.full(n, 1.0/n))
+
+def softmax(x, t=1.0) -> Distribution:
     ax = np.array(x) / t
     ax -= np.amax(ax)
     e = np.exp(ax)
     sum = np.sum(e)
     if sum == 0:
         return uni(len(ax))
-    return e / np.sum(e, axis=0)
+    return Distribution(e / np.sum(e, axis=0))
 
-def soft_argmax(arr, t=1.0):
-    return np.random.choice(np.arange(len(arr)), p=softmax(arr, t=t))
+def sample_distr(distr: Distribution) -> int:
+    return np.random.choice(np.arange(len(distr)), p=distr)
+
+def soft_argmax(arr, t=1.0) -> int:
+    return sample_distr(softmax(arr, t=t))

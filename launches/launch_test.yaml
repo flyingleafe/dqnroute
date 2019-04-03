@@ -25,11 +25,12 @@ settings:
     delta: 10
   logging:
     delta: 500
+  router_env:
+    pkg_process_delay: 5
   router:
     learning_rate: 1
     beta_rate: 0.1
     gamma_rate: 0.3
-    pkg_process_delay: 5
     model_file: '../tf_model'
     batch_size: 1
     mem_capacity: 1

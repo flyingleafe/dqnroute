@@ -1,37 +1,32 @@
 configuration:
-  - sections:
-      0: {length: 0, upstream_neighbor: 2}
+  layout:
+    - 0: {length: 0, upstream_neighbor: 2}
       2: {length: 10, upstream_neighbor: 3, adjacent_neighbor: 11}
       3: {length: 10, upstream_neighbor: 4}
       4: {length: 10, upstream_neighbor: 17, adjacent_neighbor: 7}
       17: {length: 0}
-  - sections:
-      1: {length: 0, upstream_neighbor: 5}
+    - 1: {length: 0, upstream_neighbor: 5}
       5: {length: 10, upstream_neighbor: 6, adjacent_neighbor: 12}
       6: {length: 10, upstream_neighbor: 21, adjacent_neighbor: 4}
       21: {length: 10, upstream_neighbor: 8}
-  - sections:
-      7: {length: 10, upstream_neighbor: 8}
+    - 7: {length: 10, upstream_neighbor: 8}
       8: {length: 10, upstream_neighbor: 9, adjacent_neighbor: 18}
       9: {length: 10, upstream_neighbor: 10, adjacent_neighbor: 19}
       10: {length: 10, upstream_neighbor: 20}
-  - sections:
-      11: {length: 10, upstream_neighbor: 12}
+    - 11: {length: 10, upstream_neighbor: 12}
       12: {length: 10, upstream_neighbor: 13}
-  - sections:
-      13: {length: 10, upstream_neighbor: 14, adjacent_neighbor: 20}
+    - 13: {length: 10, upstream_neighbor: 14, adjacent_neighbor: 20}
       14: {length: 10, upstream_neighbor: 15, adjacent_neighbor: 19}
-  - sections:
       15: {length: 10, upstream_neighbor: 16, adjacent_neighbor: 18}
       16: {length: 10, upstream_neighbor: 17}
-  - sections:
-      18: {length: 0}
+    - 18: {length: 0}
       19: {length: 0}
       20: {length: 0}
+  sources: [0, 1]
+  sinks: [17, 18, 19, 20]
 
 settings:
   bags_distr:
-    seed: 43
     sequence:
       - {bags_number: 200, delta: 20, sinks: [17, 18]}
       - {bags_number: 200, delta: 20}
@@ -43,26 +38,17 @@ settings:
       - {bags_number: 570, delta: 7}
       - {bags_number: 666, delta: 6}
       # - {bags_number: 430, delta: 3}
-  synchronizer:
-    period:
-      link_state: [[20, 16000], [40, 20000], [50, 24000], [60, 28000], [70, 32000]]
-      simple_q: [[20, 16000], [40, 20000], [50, 24000], [60, 28000], [70, 32000]]
-      dqn: [[120, 16000], [270, 20000], [310, 24000], [360, 28000], [400, 32000]]
-    delta: 10
-  logging:
-    delta: 500
-  router:
-    sources: [0, 1]
-    sinks: [17, 18, 19, 20]
+  conveyor_env:
     speed: 1
     energy_consumption: 1
     sec_process_time: 10
     stop_delay: 40
-    energy_reward_weight: 0.6
+  router:
+    energy_reward_weight: 1
     learning_rate: 0.5
-    nn_type: 'ff_amatrix_flat_add'
-    flat_inputs:
-      work_status: 'graph_size'
+    nn_type: 'ff_amatrix'
+    # flat_inputs:
+      # work_status: 'graph_size'
     optimizer: 'rmsprop'
     scope: 'conveyor_test_ng'
     ff_activation: 'tanh'
@@ -70,5 +56,4 @@ settings:
     pkg_states: False
     batch_size: 1
     mem_capacity: 1
-    prioritized_xp: False 
-
+    prioritized_xp: False

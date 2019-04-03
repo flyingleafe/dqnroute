@@ -67,11 +67,12 @@ settings:
     delta: 10
   logging:
     delta: 500
+  router_env:
+    pkg_process_delay: 5
   router:
     learning_rate: 0.5
     beta_rate: 0.7
     gamma_rate: 0.9
-    pkg_process_delay: 5
     nn_type: 'ff_amatrix'
     optimizer: 'rmsprop'
     layers: [64, 64]

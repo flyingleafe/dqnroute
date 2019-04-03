@@ -1,365 +1,100 @@
 from functools import total_ordering
-import datetime as dt
-import pandas as pd
-import numpy as np
+from copy import deepcopy
+# import pandas as pd
+# import numpy as np
 
 class Message:
-    """Base class for all messages used in the system"""
+    """
+    Base class for all messages used in the system
+    """
 
-    def __init__(self, contents):
-        self.contents = contents
+    def __init__(self, **kwargs):
+        self.contents = kwargs
+
+    def __str__(self):
+        return '{}: {}'.format(self.__class__.__name__, str(self.contents))
+
+    def __repr__(self):
+        return '<{}>'.format(str(self))
+
+    def __getattr__(self, name):
+        try:
+            return super().__getattribute__('contents')[name]
+        except KeyError:
+            raise AttributeError(name)
 
     def getContents(self):
         return self.contents
 
-# Message classes for events layer
-# ===
-#
-# These classes are the basis for time simulation
-
-@total_ordering
-class TimedMessage(Message):
-    """Class of messages which can be compared by time"""
-
-    def __init__(self, time, contents):
-        self.time = time
-        super().__init__(contents)
-
-    def __hash__(self):
-        return hash((self.time, self.contents))
-
-    def __eq__(self, other):
-        return (self.time, hash(self.contents)) == (other.time, hash(other.contents))
-
-    def __lt__(self, other):
-        return (self.time, hash(self.contents)) < (other.time, hash(other.contents))
-
-class EventMsg(TimedMessage):
-    """Base class for all messages which are subject to time simulation"""
-
-    def __init__(self, time, sender, contents):
-        self.sender = sender
-        super().__init__(time, contents)
-
-class TickMsg(TimedMessage):
-    """Message for system time synchronization"""
-
-    def __init__(self, time):
-        super().__init__(time, None)
-
-class SelfPlannedMsg(TimedMessage):
-    """Message class for various planned events"""
-
-    def __init__(self, time):
-        super().__init__(time, -1)
-
-class ServiceMsg(Message):
-    """Any message which doesn't take part in time simulation"""
-
-# Initialization messages
-# ===
-#
-# These classes represent service messages which are used on system init
-
-class InitMsg(Message):
-    """Base class for init message (to distinguish it from every other)"""
-    def __init__(self, **kwargs):
-        super().__init__(kwargs)
-
-class FinishInitMsg(Message):
-    def __init__(self, child_id, **kwargs):
-        super().__init__(kwargs)
-        self.child_id = child_id
-
-class OverlordInitMsg(InitMsg):
-    """Init message for overlord"""
-
-    def __init__(self, settings, results_file, logfile, router_type, **kwargs):
-        super().__init__(**kwargs)
-        self.settings = settings
-        self.results_file = results_file
-        self.logfile = logfile
-        self.router_type = router_type
-
-class RoutersOverlordInitMsg(OverlordInitMsg):
-    def __init__(self, graph, **kwargs):
-        super().__init__(**kwargs)
-        self.graph = graph
-
-class ConveyorsOverlordInitMsg(OverlordInitMsg):
-    def __init__(self, configuration, **kwargs):
-        super().__init__(**kwargs)
-        self.configuration = configuration
-
-class SynchronizerInitMsg(InitMsg):
-    """Init message for synchronizer"""
-
-    def __init__(self, targets, delta=1.0, period=dt.timedelta(seconds=1), **kwargs):
-        super().__init__(**kwargs)
-        self.targets = targets
-        self.delta = delta
-        self.period = period
-
-class PkgSenderInitMsg(InitMsg):
-    """Init message for package sender"""
-
-    def __init__(self, pkg_distr, sync_delta, network, state_size, **kwargs):
-        super().__init__(**kwargs)
-        self.pkg_distr = pkg_distr
-        self.sync_delta = sync_delta
-        self.network = network
-        self.state_size = state_size
-
-class BagSenderInitMsg(PkgSenderInitMsg):
-    """Init message for bag sender"""
-
-    def __init__(self, sources, sinks, **kwargs):
-        super().__init__(**kwargs)
-        self.sources = sources
-        self.sinks = sinks
-
-class AbstractRouterInitMsg(InitMsg):
-    """Init message for a node in some network"""
-
-    def __init__(self, network_addr, network, full_log, **kwargs):
-        super().__init__(**kwargs)
-        self.network_addr = network_addr
-        self.network = network
-        self.full_log = full_log
-
-class RouterInitMsg(AbstractRouterInitMsg):
-    """Init message for network router"""
-
-    def __init__(self, pkg_process_delay, neighbors, **kwargs):
-        super().__init__(**kwargs)
-        self.neighbors = neighbors
-        self.pkg_process_delay = pkg_process_delay
-
-class ConveyorInitMsg(AbstractRouterInitMsg):
-    """Init message for conveyor belt"""
-
-    def __init__(self, sections, all_sections, sinks, speed,
-                 energy_consumption, stop_delay,
-                 energy_reward_weight, sec_process_time, **kwargs):
-        super().__init__(**kwargs)
-        self.sections = sections
-        self.all_sections = all_sections
-        self.sinks = sinks
-        self.speed = speed
-        self.energy_consumption = energy_consumption
-        self.stop_delay = stop_delay
-        self.energy_reward_weight = energy_reward_weight
-        self.sec_process_time = sec_process_time
-
-class RouterFinalizeInitMsg(InitMsg):
-    """Finalize init message for router"""
-
-# Init messages for particular router types
-
-class SimpleQRouterInitMsg(RouterInitMsg):
-    """Init message for SimpleQRouter"""
-
-    def __init__(self, learning_rate, **kwargs):
-        super().__init__(**kwargs)
-        self.learning_rate = learning_rate
-
-class PredictiveQRouterInitMsg(RouterInitMsg):
-    """Init message for PredictiveQRouter"""
-
-    def __init__(self, learning_rate, beta_rate, gamma_rate, **kwargs):
-        super().__init__(**kwargs)
-        self.learning_rate = learning_rate
-        self.beta_rate = beta_rate
-        self.gamma_rate = gamma_rate
-
-class DQNRouterInitMsg(RouterInitMsg):
-    """Init message for DQNRouter"""
-
-    def __init__(self, nn_type, batch_size=1, mem_capacity=1,
-                 prioritized_xp=False, pkg_states=False, **kwargs):
-        super().__init__(**kwargs)
-        self.nn_type = nn_type
-        self.mem_capacity = mem_capacity
-        self.batch_size = batch_size
-        self.prioritized_xp = prioritized_xp
-        self.pkg_states = pkg_states
-
-class LinkStateInitMsg(RouterInitMsg):
-    """Init message for LinkStateRouter"""
-
-# Init messages for particular conveyor types
-
-class SimpleQConveyorInitMsg(ConveyorInitMsg):
-    """Init message for SimpleQConveyor"""
-
-    def __init__(self, learning_rate, **kwargs):
-        super().__init__(**kwargs)
-        self.learning_rate = learning_rate
-
-class LinkStateConveyorInitMsg(ConveyorInitMsg):
-    """Init message for link-state conveyor"""
-
-class DQNConveyorInitMsg(ConveyorInitMsg):
-    """Init message for DQNConveyor"""
-
-    def __init__(self, nn_type, batch_size=1, mem_capacity=1,
-                 prioritized_xp=False, pkg_states=False, **kwargs):
-        super().__init__(**kwargs)
-        self.nn_type = nn_type
-        self.mem_capacity = mem_capacity
-        self.batch_size = batch_size
-        self.prioritized_xp = prioritized_xp
-        self.pkg_states = False
-
-# Routing messages
-# ===
-#
-# These classes represent layer of information on routing level
-
-class IncomingPkgEvent(EventMsg):
+class UnsupportedMessageType(Exception):
+    """
+    Exception which is thrown by message handlers on encounter of
+    unknown message type
+    """
     pass
 
-class ProcessPkgEvent(EventMsg):
+class InitMessage(Message):
+    """
+    Message which router receives as environment starts
+    """
+    def __init__(self, config):
+        super().__init__(config=config)
+
+class _TransferMessage(Message):
+    """
+    Wrapper message which is used to send data between nodes
+    """
+    def __init__(self, from_node: int, to_node: int, inner_msg: Message):
+        super().__init__(from_node=from_node, to_node=to_node, inner_msg=inner_msg)
+
+class InMessage(_TransferMessage):
+    """
+    Wrapper message which has came from the outside.
+    """
     pass
 
-class PkgTransferEndEvent(EventMsg):
+class OutMessage(_TransferMessage):
+    """
+    Wrapper message which is sent to a neighbor through the interface
+    with given ID.
+    """
     pass
 
-class PkgDoneMsg(EventMsg):
+class SectionMessage(Message):
+    """
+    Wrapper message which targets a particular subhandler
+    """
+    def __init__(self, section: int, inner_msg: Message):
+        super().__init__(section=section, inner_msg=inner_msg)
+
+class ServiceMessage(Message):
+    """
+    Message which does not contain a package and, hence,
+    contains no destination.
+    """
     pass
 
-# For conveyors
-class IncomingLuggageEvent(EventMsg):
-    def __init__(self, time, sender, section, prev_section, contents):
-        super().__init__(time, sender, contents)
-        self.section = section
-        self.prev_section = prev_section
-
-class ProcessLuggageEvent(EventMsg):
-    def __init__(self, time, sender, section, prev_section, contents):
-        super().__init__(time, sender, contents)
-        self.section = section
-        self.prev_section = prev_section
-        self.prev_belt_stop_time = 0
-
-class BagDoneMsg(PkgDoneMsg):
-    pass
-
-class LinkBreakMsg(EventMsg):
-    def __init__(self, time, sender, neighbor):
-        super().__init__(time, sender, None)
-        self.neighbor = neighbor
-
-class LinkRestoreMsg(EventMsg):
-    def __init__(self, time, sender, neighbor):
-        super().__init__(time, sender, None)
-        self.neighbor = neighbor
-
-class PkgReturnedMsg(ServiceMsg):
-    pass
-
-class BeltStatusMsg(ServiceMsg):
-    def __init__(self, sections, working=False):
-        self.sections = sections
-        self.working = working
-
-# Reward messages
-# ===
-#
-# For RL agents
-
-class RewardMsg(ServiceMsg):
-    def __init__(self, pkg_id, **kwargs):
-        super().__init__(kwargs)
-        self.pkg_id = pkg_id
-
-class SimpleRewardMsg(RewardMsg):
-    def __init__(self, pkg_id, cur_time, estimate, dst, **kwargs):
-        super().__init__(pkg_id, **kwargs)
-        self.cur_time = cur_time
-        self.estimate = estimate
-        self.dst = dst
-
-class PredictiveRewardMsg(RewardMsg):
-    def __init__(self, pkg_id, cur_time, estimate, dst, **kwargs):
-        super().__init__(pkg_id, **kwargs)
-        self.cur_time = cur_time
-        self.estimate = estimate
-        self.dst = dst
-
-class DQNRewardMsg(RewardMsg):
-    def __init__(self, pkg_id, pkg_size, cur_time, estimate, dst, **kwargs):
-        super().__init__(pkg_id, **kwargs)
-        self.pkg_size = pkg_size
-        self.cur_time = cur_time
-        self.estimate = estimate
-        self.dst = dst
-
-# For conveyors
-
-class ConveyorRewardMsg(ServiceMsg):
-    def __init__(self, bag_id, section, **kwargs):
-        super().__init__(kwargs)
-        self.bag_id = bag_id
-        self.section = section
-
-class SimpleQConveyorRewardMsg(ConveyorRewardMsg):
-    def __init__(self, bag_id, section, reward, estimate, **kwargs):
-        super().__init__(bag_id, section, **kwargs)
-        self.reward = reward
-        self.estimate = estimate
-
-class DQNConveyorRewardMsg(ConveyorRewardMsg):
-    def __init__(self, bag_id, section, reward, estimate, **kwargs):
-        super().__init__(bag_id, section, **kwargs)
-        self.reward = reward
-        self.estimate = estimate
-
-# Other messages
-# ===
-
-class LinkStateAnnouncement(ServiceMsg):
-    def __init__(self, seq_num, from_addr, neighbors):
-        self.seq_num = seq_num
-        self.from_addr = from_addr
-        self.neighbors = neighbors
-
-class ConveyorLinkStateAnnouncement(ServiceMsg):
-    def __init__(self, seq_num, section_infos):
-        self.seq_num = seq_num
-        self.section_infos = section_infos
-
-class NeighborsAdvice(ServiceMsg):
-    def __init__(self, time, estimations):
-        self.time = time
-        self.estimations = estimations
-
-class NeighborLoadStatus(ServiceMsg):
-    def __init__(self, is_overloaded):
-        self.is_overloaded = is_overloaded
-
-# Planned events for conveyors
-# ===
-
-class StopMovingEvent(SelfPlannedMsg):
-    pass
-
+# Packages
 @total_ordering
 class Package:
-    def __init__(self, pkg_id, size, dst, start_time, state_size, contents):
+    def __init__(self, pkg_id, size, dst, start_time, contents):
         self.id = pkg_id
         self.size = size
         self.dst = dst
         self.start_time = start_time
-        self.route = None
         self.contents = contents
-        self.rnn_state = (np.zeros((1, state_size)),
-                          np.zeros((1, state_size)))
+        # self.route = None
+        # self.rnn_state = (np.zeros((1, state_size)),
+        #                   np.zeros((1, state_size)))
 
-    def route_add(self, data, cols):
-        if self.route is None:
-            self.route = pd.DataFrame(columns=cols)
-        self.route.loc[len(self.route)] = data
+    # def route_add(self, data, cols):
+    #     if self.route is None:
+    #         self.route = pd.DataFrame(columns=cols)
+    #     self.route.loc[len(self.route)] = data
+
+    def __str__(self):
+        return '{}#{}{}'.format(self.__class__.__name__, self.id,
+                                str((self.dst, self.size, self.start_time, self.contents)))
 
     def __hash__(self):
         return hash((self.id, self.contents))
@@ -371,18 +106,67 @@ class Package:
         return self.id < other.id
 
 class Bag(Package):
-    def __init__(self, bag_id, dst, start_time, prev_time, state_size, contents):
-        super().__init__(bag_id, 0, dst, start_time, state_size, contents)
-        self.prev_time = prev_time
-        self.energy_spent = 0
+    def __init__(self, bag_id, dst, start_time, contents):
+        super().__init__(bag_id, 0, dst, start_time, contents)
+        self.energy_overhead = 0
 
-# Finishing job
-# ===
+    def spend_energy(self, x: int):
+        self.energy_overhead += x
+
+class PkgMessage(Message):
+    """
+    Message which contains a package which has a particular
+    destination.
+    """
+    def __init__(self, pkg: Package):
+        super().__init__(pkg=pkg)
+
+class PkgReceivedMessage(Message):
+    """
+    Message which router uses in case it was the package's
+    destination
+    """
+    def __init__(self, pkg: Package):
+        super().__init__(pkg=pkg)
+
+class LinkUpdateMessage(Message):
+    """
+    Message which router receives when graph topology is changed
+    """
+    def __init__(self, to: int, direction='both', **kwargs):
+        super().__init__(to=to, direction=direction, **kwargs)
+
+class AddLinkMessage(LinkUpdateMessage):
+    """
+    Message which router receives when a link is connected (or restored).
+    """
+    def __init__(self, to: int, direction='both', params={}):
+        super().__init__(to, direction, params=params)
+
+class RemoveLinkMessage(LinkUpdateMessage):
+    """
+    Message which router receives when link breakage is detected
+    """
+    def __init__(self, to: int, direction='both'):
+        super().__init__(to, direction)
+
 #
-# These are messages which are sent to/from overlord in the end
+# Service messages
+#
 
-class ReportRequest(Message):
-    pass
+class RewardMsg(ServiceMessage):
+    def __init__(self, pkg_id: int, Q_estimate: float, reward_data):
+        super().__init__(pkg_id=pkg_id, Q_estimate=Q_estimate, reward_data=reward_data)
 
-class ReportDone(Message):
-    pass
+class NetworkRewardMsg(RewardMsg):
+    def __init__(self, pkg_id: int, Q_estimate: float, time_received: float):
+        super().__init__(pkg_id, Q_estimate, time_received)
+
+class ConveyorRewardMsg(RewardMsg):
+    def __init__(self, bag_id: int, Q_estimate: float, time_processed: float,
+                 energy_gap: float):
+        super().__init__(bag_id, Q_estimate, (time_processed, energy_gap))
+
+class LSAnnouncementMsg(ServiceMessage):
+    def __init__(self, node: int, seq: int, neighbours):
+        super().__init__(node=node, seq=seq, neighbours=neighbours)
