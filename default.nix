@@ -15,7 +15,6 @@ python36Packages.buildPythonPackage {
         virtualenv
         setuptools
         matplotlib
-        Keras
         pandas
         more-itertools
         numpy
@@ -40,6 +39,7 @@ python36Packages.buildPythonPackage {
         h5py
         pyyaml
         tqdm
+
         stdenv
         zlib
         bazel
