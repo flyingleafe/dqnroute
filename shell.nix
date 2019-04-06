@@ -1,21 +1,25 @@
 { pkgs ? import <nixpkgs> {} }:
+
+with pkgs;
+
 let
   virtualenvDir = "pythonenv";
-  liblapackShared = pkgs.liblapack.override { shared = true; };
+  manylinuxLibPath = stdenv.lib.makeLibraryPath [(callPackage ./manylinux1.nix {}).package];
+  # liblapackShared = pkgs.liblapack.override { shared = true; };
 in
-pkgs.mkShell {
-  buildInputs = with pkgs; [
+mkShell {
+  buildInputs = [
     busybox
     git
-    pkgconfig
-    hdf5
-    libzip
-    libpng
-    freetype
-    gfortran
-    liblapackShared
+    # pkgconfig
+    # hdf5
+    # libzip
+    # libpng
+    # freetype
+    # gfortran
+    # liblapackShared
     nodejs
-    
+
     (python36.withPackages (pythonPkgs: with pythonPkgs; [
       virtualenvwrapper
     ]))
@@ -27,9 +31,9 @@ pkgs.mkShell {
     if [ ! -d "${virtualenvDir}" ]; then
       virtualenv ${virtualenvDir}
     fi
+    echo "manylinux1_compatible = True" > ${virtualenvDir}/lib/python3.6/_manylinux.py
     source ${virtualenvDir}/bin/activate
+    export LD_LIBRARY_PATH=${manylinuxLibPath}
     export TMPDIR=/tmp
-    export LAPACK=${liblapackShared}/lib/liblapack.so
-    export BLAS=${liblapackShared}/lib/libblas.so
   '';
 }
