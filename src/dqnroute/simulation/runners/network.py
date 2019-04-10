@@ -4,7 +4,6 @@ Runs a computer network simulation
 
 import networkx as nx
 import pandas as pd
-import tensorflow as tf
 
 from typing import Dict
 from simpy import Environment
