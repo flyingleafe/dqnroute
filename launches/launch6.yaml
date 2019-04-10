@@ -35,12 +35,12 @@ settings:
     # choice_policy: 'softmax'
     beta_rate: 0.7
     gamma_rate: 0.9
-    nn_type: 'ff_amatrix'
-    optimizer: 'rmsprop'
-    activation: 'tanh'
-    ff_activation: 'tanh'
+    optimizer: 'adagrad'
+    activation: 'relu'
     # scope: 'per_pkg'
     layers: [64, 64]
+    additional_inputs:
+      - tag: 'amatrix'
     pkg_states: False
     batch_size: 1
     mem_capacity: 1

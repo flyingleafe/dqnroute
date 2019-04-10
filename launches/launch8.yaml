@@ -36,12 +36,12 @@ settings:
     pkg_process_delay: 5
   router:
     learning_rate: 0.5
-    nn_type: 'ff_amatrix'
     optimizer: 'rmsprop'
-    activation: 'tanh'
-    ff_activation: 'tanh'
+    activation: 'relu'
     # scope: 'per_pkg'
     layers: [64, 64]
+    additional_inputs:
+      - tag: 'amatrix'
     pkg_states: False
     batch_size: 1
     mem_capacity: 1

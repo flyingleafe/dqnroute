@@ -1,8 +1,11 @@
 result
 tf_models
+torch_models
 pythonenv
 __pycache__
 logs*
+img*
 .ipynb_checkpoints
 *.h5
+*.egg-info
 *.png

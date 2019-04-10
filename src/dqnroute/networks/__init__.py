@@ -1,8 +1,8 @@
-from .optimizers import *
+from .common import *
 from .q_network import *
-from .input_type_networks import *
-from .ff_network import *
-from .rnn_network import *
+# from .input_type_networks import *
+# from .ff_network import *
+# from .rnn_network import *
 
 def get_qnetwork_class(label):
     if label == 'ff_none':
