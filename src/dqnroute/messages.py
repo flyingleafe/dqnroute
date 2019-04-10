@@ -167,6 +167,6 @@ class ConveyorRewardMsg(RewardMsg):
                  energy_gap: float):
         super().__init__(bag_id, Q_estimate, (time_processed, energy_gap))
 
-class LSAnnouncementMsg(ServiceMessage):
-    def __init__(self, node: int, seq: int, neighbours):
-        super().__init__(node=node, seq=seq, neighbours=neighbours)
+class StateAnnouncementMsg(ServiceMessage):
+    def __init__(self, node: int, seq: int, state):
+        super().__init__(node=node, seq=seq, state=state)
