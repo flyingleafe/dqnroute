@@ -5,19 +5,11 @@ with pkgs;
 let
   virtualenvDir = "pythonenv";
   manylinuxLibPath = stdenv.lib.makeLibraryPath [(callPackage ./manylinux1.nix {}).package];
-  # liblapackShared = pkgs.liblapack.override { shared = true; };
 in
 mkShell {
   buildInputs = [
     busybox
     git
-    # pkgconfig
-    # hdf5
-    # libzip
-    # libpng
-    # freetype
-    # gfortran
-    # liblapackShared
     nodejs
 
     (python36.withPackages (pythonPkgs: with pythonPkgs; [

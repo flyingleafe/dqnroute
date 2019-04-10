@@ -33,7 +33,7 @@ python36Packages.buildPythonPackage {
         ipython
         ipykernel
         ipywidgets
-        tensorflow
+        torch
         typing
         networkx
         h5py

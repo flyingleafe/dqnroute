@@ -22,7 +22,7 @@ def _run_scenario(env: Environment, sections_map: Dict[int, SimpyConveyorEnv],
                   sources: List[int], sinks: List[int],
                   bag_distr, random_seed=None):
     if random_seed is not None:
-        random.seed(random_seed)
+        set_random_seed(random_seed)
 
     bag_id = 1
     for period in bag_distr['sequence']:

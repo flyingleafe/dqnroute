@@ -1,107 +1,82 @@
-import tensorflow as tf
 import numpy as np
-
-from keras.layers import Lambda
+import os
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
 from ..utils import *
-from ..constants import TF_MODELS_DIR, INFTY
-from .optimizers import get_optimizer
+from ..constants import TORCH_MODELS_DIR, INFTY
+from .common import *
 
-class QNetwork:
-    def __init__(self, n, optimizer='rmsprop', optimizer_params={}, **kwargs):
+def _transform_add_inputs(n, add_inputs):
+    """
+    Transforms a config section into internal
+    representation
+    """
+    def _get_dim(inp):
+        if inp['tag'] == 'amatrix':
+            return n * n
+        else:
+            return inp.get('dim', n)
+
+    return [(inp['tag'], _get_dim(inp)) for inp in add_inputs]
+
+class QNetwork(nn.Module):
+
+    def __init__(self, n, layers=[64, 64], activation='relu',
+                 additional_inputs=[], scope='', **kwargs):
+        super().__init__()
         self.graph_size = n
+        self.add_inputs = _transform_add_inputs(n, additional_inputs)
 
-        opt_label = optimizer if type(optimizer) == str else 'custom'
-        self.label = 'dqn_' + opt_label
+        input_dim = 3 * n + sum([d for (_, d) in self.add_inputs])
 
-        self.neighbors_input = tf.placeholder(shape=(None,n),dtype=tf.float32)
-        self.addr_input = tf.placeholder(shape=(None,), dtype=tf.int32)
-        self.dst_input = tf.placeholder(shape=(None,), dtype=tf.int32)
+        self._scope = scope if len(scope) > 0 else None
+        self._label = 'qnetwork_{}_{}_{}_{}_{}'.format(
+            input_dim,
+            '-'.join(map(str, layers)),
+            n,
+            activation,
+            '_'.join(map(lambda p: p[0]+'-'+str(p[1]), self.add_inputs)))
 
-        self.addr_onehot = tf.one_hot(self.addr_input, n)
-        self.dst_onehot = tf.one_hot(self.dst_input, n)
+        self.ff_net = FFNetwork(input_dim, n, layers=layers, activation=activation)
 
-        add_input = self.getAdditionalInput(**kwargs)
-        inp_ls = [self.neighbors_input, self.addr_onehot, self.dst_onehot] + add_input
+    def forward(self, addr, dst, neighbours, *others):
+        addr_ = one_hot(atleast_dim(addr, 1), self.graph_size)
+        dst_ = one_hot(atleast_dim(dst, 1), self.graph_size)
+        neighbours = atleast_dim(neighbours, 2)
 
-        self.all_inps = tf.concat(inp_ls, 1)
+        input_tensors = [addr_, dst_, neighbours]
+        for ((tag, dim), inp) in zip(self.add_inputs, others):
+            inp = atleast_dim(inp, 2)
+            if inp.size()[1] != dim:
+                raise Exception('Wrong {} input dimension: expected {}, actual {}'
+                                .format(tag, dim, inp.size()[1]))
 
-        self.hidden_out = self.getHiddenLayers(**kwargs)
+            if tag == 'amatrix':
+                input_tensors.append(torch.flatten(inp, start_dim=1))
+            else:
+                input_tensors.append(inp)
 
-        lambda_l = Lambda(lambda x: (1 - tf.minimum(x, 1))*-INFTY)(self.neighbors_input)
-        self.Qout = tf.add(self.hidden_out, lambda_l)
+        input = torch.cat(input_tensors, dim=1)
+        output = self.ff_net(input)
 
-        self.target = tf.placeholder(shape=(None, n), dtype=tf.float32)
-        self.loss = tf.losses.mean_squared_error(self.target, self.Qout)
+        # Mask out unconnected neighbours with -INFTY values
+        inf_mask = torch.mul(torch.add(neighbours, -1), INFTY)
+        return torch.add(output, inf_mask)
 
-        self.trainer = get_optimizer(optimizer, optimizer_params)
-        self.updateModel = self.trainer.minimize(self.loss)
-        self.saver = tf.train.Saver()
+    def _savedir(self):
+        dir = TORCH_MODELS_DIR
+        if self._scope is not None:
+            dir += '/' + self._scope
+        return dir
 
-    def getLabel(self):
-        return self.label
+    def _savepath(self):
+        return self._savedir() + '/' + self._label
 
-    def getSavePath(self):
-        return TF_MODELS_DIR + '/' + self.getLabel()
+    def save(self):
+        os.makedirs(self._savedir(), exist_ok=True)
+        return torch.save(self.state_dict(), self._savepath())
 
-    def getAdditionalInput(self, **kwargs):
-        return []
-
-    def makeInputFromData(self, data):
-        n = self.graph_size
-        return {
-            'neighbors': data[get_neighbors_cols(n)].values,
-            'addr': data['addr'].values,
-            'dst': data['dst'].values
-        }
-
-    def getHiddenLayers(self, **kwargs):
-        pass
-
-    def mkFeedDict(self, x, y=None):
-        feed_dict = {
-            self.neighbors_input:x['neighbors'],
-            self.addr_input:x['addr'],
-            self.dst_input:x['dst']
-        }
-        if y is not None:
-            feed_dict[self.target] = y
-        return feed_dict
-
-    def fit(self, session, x, y, **kwargs):
-        loss, _ = session.run([self.loss, self.updateModel], self.mkFeedDict(x, y))
-        return loss
-
-    def predict(self, session, x, **kwargs):
-        return session.run(self.Qout, self.mkFeedDict(x))
-
-    def save(self, session):
-        return self.saver.save(session, self.getSavePath())
-
-    def restore(self, session):
-        return self.saver.restore(session, self.getSavePath())
-
-    def preTrain(self, session, data, epochs=1, **kwargs):
-        epochs_losses = []
-        for i in range(epochs):
-            print('Epoch {}... '.format(i), end='')
-            avg_loss = self.preTrainOneEpoch(session, data, **kwargs)
-            print('loss: {}'.format(avg_loss))
-            epochs_losses.append(avg_loss)
-        return epochs_losses
-
-    def preTrainOneEpoch(self, session, data, **kwargs):
-        sum_loss = 0
-        loss_cnt = 0
-        for (batch, targets) in self.preparePreTrainBatches(data, **kwargs):
-            loss = self.fit(session, batch, targets, **kwargs)
-            sum_loss += loss
-            loss_cnt += 1
-        return sum_loss / loss_cnt
-
-    def preparePreTrainBatches(self, data, batch_size=32, **kwargs):
-        count = data.shape[0]
-        target_cols = get_target_cols(self.graph_size)
-        for (a, b) in make_batches(count, batch_size):
-            batch = data[a:b]
-            yield (self.makeInputFromData(batch), batch[target_cols].values)
+    def restore(self):
+        return self.load_state_dict(torch.load(self._savepath()))

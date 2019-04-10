@@ -1,11 +1,20 @@
 import random
 import networkx as nx
 import numpy as np
+import torch
 import itertools as it
 
 from typing import NewType
 
 from .constants import INFTY
+
+def set_random_seed(seed: int):
+    """
+    Sets given random seed in all relevant RNGs
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
 def memoize(func):
     mp = {}
@@ -129,10 +138,6 @@ def get_addr_cols(n):
     return mk_num_list('addr_', n)
 
 @memoize
-def get_out_links_cols(n):
-    return mk_num_list('outl_', n)
-
-@memoize
 def get_neighbors_cols(n):
     return mk_num_list('neighbors_', n)
 
@@ -142,7 +147,7 @@ def get_work_status_cols(n):
 
 @memoize
 def get_feature_cols(n):
-    return get_dst_cols(n) + get_addr_cols(n) + get_neighbors_cols(n) #+ get_out_links_cols(n)
+    return get_dst_cols(n) + get_addr_cols(n) + get_neighbors_cols(n)
 
 @memoize
 def get_amatrix_cols(n):
@@ -170,8 +175,8 @@ def get_conveyor_data_cols(n):
 
 def make_batches(size, batch_size):
     num_batches = int(np.ceil(size / float(batch_size)))
-    return [(i * batch_size, min(size, (i + 1) * batch_size))
-            for i in range(0, num_batches)]
+    for i in range(0, num_batches):
+        yield (i * batch_size, min(size, (i + 1) * batch_size))
 
 def gen_network_actions(addrs, pkg_distr):
     cur_time = 0

@@ -1,9 +1,10 @@
 import random
 import math
 import logging
+import torch
+import torch.nn as nn
 import numpy as np
 import networkx as nx
-import tensorflow as tf
 import pandas as pd
 
 from typing import List, Tuple, Dict
@@ -13,7 +14,7 @@ from ..constants import DQNROUTE_LOGGER
 from ..messages import *
 from ..memory import *
 from ..utils import *
-from ..networks import get_qnetwork_class
+from ..networks import QNetwork, get_optimizer
 
 MIN_TEMP = 1.5
 
@@ -24,21 +25,18 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     A router which implements DQN-routing algorithm
     """
     def __init__(self, env: DynamicEnv, batch_size: int, mem_capacity: int,
-                 nn_type: str, **kwargs):
+                 optimizer='rmsprop', additional_inputs=[], **kwargs):
         super().__init__(env, **kwargs)
         self.batch_size = batch_size
         self.memory = Memory(mem_capacity)
+        self.additional_inputs = additional_inputs
 
-        tf.reset_default_graph()
-        init = tf.global_variables_initializer()
-
-        NetworkClass = get_qnetwork_class(nn_type)
-        self.brain = NetworkClass(len(self.network.nodes), **kwargs)
-
-        self.session = tf.Session()
-        self.session.run(init)
-        self.brain.restore(self.session)
-        logger.info('Restored model from ' + self.brain.getSavePath())
+        self.brain = QNetwork(len(self.network.nodes),
+                              additional_inputs=additional_inputs, **kwargs)
+        self.optimizer = get_optimizer(optimizer)(self.brain.parameters())
+        self.loss_func = nn.MSELoss()
+        self.brain.restore()
+        logger.info('Restored model ' + self.brain._label)
 
     def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
         state = self._getNNState(pkg)
@@ -61,33 +59,42 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         else:
             return super().handleServiceMsg(sender, msg)
 
-    def _predict(self, x, batch_size=1):
-        return self.brain.predict(self.session, x, batch_size=batch_size)
+    def _predict(self, x):
+        return self.brain(*map(torch.from_numpy, x))\
+                   .clone().detach().numpy()
 
-    def _train(self, x, y, batch_size=1):
-        self.brain.fit(self.session, x, y, batch_size=batch_size)
+    def _train(self, x, y):
+        self.optimizer.zero_grad()
+        output = self.brain(*map(torch.from_numpy, x))
+        loss = self.loss_func(output, torch.from_numpy(y))
+        loss.backward()
+        self.optimizer.step()
+        return float(loss)
 
-    def _getAmatrix(self):
-        amatrix = nx.convert_matrix.to_numpy_array(self.network,
-                                                   nodelist=sorted(self.network.nodes))
-        gstate = np.ravel(amatrix)
-        gstate[gstate > 0] = 1
-        return gstate
+    def _getAddInput(self, tag):
+        if tag == 'amatrix':
+            amatrix = nx.convert_matrix.to_numpy_array(
+                self.network, nodelist=sorted(self.network.nodes),
+                dtype=np.float32)
+            gstate = np.ravel(amatrix)
+            gstate[gstate > 0] = 1
+            return gstate
+        else:
+            raise Exception('Unknown additional input: ' + tag)
 
     def _getNNState(self, pkg: Package):
-        d = pkg.dst
-        k = self.id
         n = len(self.network.nodes)
-        df = pd.DataFrame(columns=['dst', 'addr']+get_neighbors_cols(n)+get_amatrix_cols(n))
-        basic_state_inp = np.zeros(n+2)
-        basic_state_inp[0] = d
-        basic_state_inp[1] = k
-        amatrix = self._getAmatrix()
-        basic_state_inp[2:] = np.array(list(map(lambda v: v in self.out_neighbours,
-                                                sorted(self.network.nodes))))
-        df.loc[0] = np.concatenate((basic_state_inp, amatrix))
+        addr = np.array(self.id)
+        dst = np.array(pkg.dst)
+        neighbours = np.array(list(map(lambda v: v in self.out_neighbours,
+                                       sorted(self.network.nodes))),
+                              dtype=np.float32)
+        input = [addr, dst, neighbours]
 
-        return self.brain.makeInputFromData(df)
+        for inp in self.additional_inputs:
+            input.append(self._getAddInput(inp['tag']))
+
+        return tuple(input)
 
     def _replay(self):
         """
@@ -102,12 +109,12 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         actions = [l[1] for l in batch]
         values = [l[2] for l in batch]
 
-        preds = self._predict(states, batch_size=blen)
+        preds = self._predict(states)
         for i in range(blen):
             a = actions[i]
             preds[i][a] = values[i]
 
-        self._train(states, preds, batch_size=blen)
+        self._train(states, preds)
 
 class DQNRouterNetwork(DQNRouter, NetworkRewardAgent):
     """

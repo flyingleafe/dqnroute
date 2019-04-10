@@ -4,7 +4,6 @@ Runs a computer network simulation
 
 import networkx as nx
 import pandas as pd
-import tensorflow as tf
 
 from typing import Dict
 from simpy import Environment
@@ -23,7 +22,7 @@ logger = logging.getLogger(DQNROUTE_LOGGER)
 def _run_scenario(env: Environment, routers: Dict[str, SimpyRouterEnv],
                   G: nx.DiGraph, pkg_distr, random_seed = None):
     if random_seed is not None:
-        random.seed(random_seed)
+        set_random_seed(random_seed)
 
     pkg_id = 1
     for period in pkg_distr["sequence"]:
@@ -98,9 +97,5 @@ def run_network_scenario(run_params, router_type: str, event_series: EventSeries
     env.process(_run_scenario(env, routers, G, run_params['settings']['pkg_distr'], random_seed))
     run_env_progress(env, router_type=router_type, random_seed=random_seed,
                      progress_step=progress_step, progress_queue=progress_queue)
-
-    if issubclass(ChosenRouter, DQNRouter):
-        for router_env in routers.values():
-            router_env.handler.session.close()
 
     return event_series
