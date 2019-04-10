@@ -1,4 +1,5 @@
 import numpy as np
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -30,15 +31,13 @@ class QNetwork(nn.Module):
 
         input_dim = 3 * n + sum([d for (_, d) in self.add_inputs])
 
+        self._scope = scope if len(scope) > 0 else None
         self._label = 'qnetwork_{}_{}_{}_{}_{}'.format(
             input_dim,
             '-'.join(map(str, layers)),
             n,
             activation,
             '_'.join(map(lambda p: p[0]+'-'+str(p[1]), self.add_inputs)))
-
-        if len(scope) > 0:
-            self._label = scope + '/' + self._label
 
         self.ff_net = FFNetwork(input_dim, n, layers=layers, activation=activation)
 
@@ -66,10 +65,17 @@ class QNetwork(nn.Module):
         inf_mask = torch.mul(torch.add(neighbours, -1), INFTY)
         return torch.add(output, inf_mask)
 
+    def _savedir(self):
+        dir = TORCH_MODELS_DIR
+        if self._scope is not None:
+            dir += '/' + self._scope
+        return dir
+
     def _savepath(self):
-        return TORCH_MODELS_DIR + '/' + self._label
+        return self._savedir() + '/' + self._label
 
     def save(self):
+        os.makedirs(self._savedir(), exist_ok=True)
         return torch.save(self.state_dict(), self._savepath())
 
     def restore(self):

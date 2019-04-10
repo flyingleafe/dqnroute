@@ -25,12 +25,14 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     A router which implements DQN-routing algorithm
     """
     def __init__(self, env: DynamicEnv, batch_size: int, mem_capacity: int,
-                 optimizer='rmsprop', **kwargs):
+                 optimizer='rmsprop', additional_inputs=[], **kwargs):
         super().__init__(env, **kwargs)
         self.batch_size = batch_size
         self.memory = Memory(mem_capacity)
+        self.additional_inputs = additional_inputs
 
-        self.brain = QNetwork(len(self.network.nodes), **kwargs)
+        self.brain = QNetwork(len(self.network.nodes),
+                              additional_inputs=additional_inputs, **kwargs)
         self.optimizer = get_optimizer(optimizer)(self.brain.parameters())
         self.loss_func = nn.MSELoss()
         self.brain.restore()
@@ -69,13 +71,16 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         self.optimizer.step()
         return float(loss)
 
-    def _getAmatrix(self):
-        amatrix = nx.convert_matrix.to_numpy_array(
-            self.network, nodelist=sorted(self.network.nodes),
-            dtype=np.float32)
-        gstate = np.ravel(amatrix)
-        gstate[gstate > 0] = 1
-        return gstate
+    def _getAddInput(self, tag):
+        if tag == 'amatrix':
+            amatrix = nx.convert_matrix.to_numpy_array(
+                self.network, nodelist=sorted(self.network.nodes),
+                dtype=np.float32)
+            gstate = np.ravel(amatrix)
+            gstate[gstate > 0] = 1
+            return gstate
+        else:
+            raise Exception('Unknown additional input: ' + tag)
 
     def _getNNState(self, pkg: Package):
         n = len(self.network.nodes)
@@ -84,8 +89,12 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         neighbours = np.array(list(map(lambda v: v in self.out_neighbours,
                                        sorted(self.network.nodes))),
                               dtype=np.float32)
-        amatrix = self._getAmatrix()
-        return (addr, dst, neighbours, amatrix)
+        input = [addr, dst, neighbours]
+
+        for inp in self.additional_inputs:
+            input.append(self._getAddInput(inp['tag']))
+
+        return tuple(input)
 
     def _replay(self):
         """

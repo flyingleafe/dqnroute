@@ -45,13 +45,13 @@ settings:
   router:
     energy_reward_weight: 0.5
     learning_rate: 0.5
-    nn_type: 'ff_none'
-    # flat_inputs:
-      # work_status: 'graph_size'
     optimizer: 'rmsprop'
     scope: 'conveyor_test_ng'
     ff_activation: 'tanh'
     layers: [64, 64]
+    additional_inputs:
+      - tag: 'amatrix'
+      # - tag: 'work_status'
     pkg_states: False
     batch_size: 1
     mem_capacity: 1
