@@ -42,7 +42,6 @@ python36Packages.buildPythonPackage {
 
         stdenv
         zlib
-        bazel
         graphviz
     ];
     # When used as `nix-shell --pure`

@@ -1,7 +1,6 @@
 jupyter>=1.0.0
 jupyter-client>=5.2.3
 jupyterlab>=0.35.4
-Keras>=2.2.4
 matplotlib>=3.0.2
 more-itertools>=4.3.0
 networkx>=2.2
