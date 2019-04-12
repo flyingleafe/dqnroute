@@ -12,8 +12,7 @@ class EventSeries:
         self.period = period
         self.aggregators = aggregators
 
-    def logEvent(self, time, value):
-        cur_period = int(time / self.period)
+    def _log(self, cur_period: int, value):
         avg_time = cur_period * self.period
         data_cols = self.records.columns[1:]
 
@@ -26,6 +25,25 @@ class EventSeries:
                          for (col, old_value) in zip(data_cols, data_vals)]
 
         self.records.loc[cur_period] = [avg_time] + new_data_vals
+
+    def logEvent(self, time, value):
+        cur_period = int(time // self.period)
+        self._log(cur_period, value)
+
+    def logUniformRange(self, start, end, coeff):
+        start_period = int(start // self.period)
+        end_period = int(end // self.period)
+
+        if start_period == end_period:
+            self._log(start_period, (end - start) * coeff)
+        else:
+            start_gap = self.period - (start % self.period)
+            end_gap = end % self.period
+
+            self._log(start_period, coeff * start_gap)
+            for period in range(start_period + 1, end_period):
+                self._log(period, coeff * self.period)
+            self._log(end_period, coeff * end_gap)
 
     def getSeries(self):
         return self.records.sort_index()

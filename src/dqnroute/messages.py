@@ -33,6 +33,22 @@ class UnsupportedMessageType(Exception):
     """
     pass
 
+class DelayedMessage(Message):
+    """
+    Special wrapper message which should be handled not immediately,
+    but after some time.
+    """
+    def __init__(self, id: int, delay: float, inner_msg: Message):
+        super().__init__(id=id, delay=delay, inner_msg=inner_msg)
+
+class DelayInterruptMessage(Message):
+    """
+    Special message which is used to un-schedule the handling of
+    `DelayedMessage`
+    """
+    def __init__(self, delay_id: int):
+        super().__init__(delay_id=delay_id)
+
 class InitMessage(Message):
     """
     Message which router receives as environment starts
@@ -96,6 +112,9 @@ class Package:
         return '{}#{}{}'.format(self.__class__.__name__, self.id,
                                 str((self.dst, self.size, self.start_time, self.contents)))
 
+    def __repr__(self):
+        return '<{}>'.format(str(self))
+
     def __hash__(self):
         return hash((self.id, self.contents))
 
@@ -109,9 +128,7 @@ class Bag(Package):
     def __init__(self, bag_id, dst, start_time, contents):
         super().__init__(bag_id, 0, dst, start_time, contents)
         self.energy_overhead = 0
-
-    def spend_energy(self, x: int):
-        self.energy_overhead += x
+        self.last_redirected = 0
 
 class PkgMessage(Message):
     """
@@ -170,3 +187,40 @@ class ConveyorRewardMsg(RewardMsg):
 class StateAnnouncementMsg(ServiceMessage):
     def __init__(self, node: int, seq: int, state):
         super().__init__(node=node, seq=seq, state=state)
+
+#
+# Conveyor control messages
+#
+
+class ConveyorServiceMsg(ServiceMessage):
+    pass
+
+class ConveyorStartMsg(ConveyorServiceMsg):
+    pass
+
+class ConveyorStopMsg(ConveyorServiceMsg):
+    pass
+
+class ConveyorBagMsg(ConveyorServiceMsg):
+    def __init__(self, bag: Bag):
+        super().__init__(bag=bag)
+
+class IncomingBagMsg(ConveyorBagMsg):
+    pass
+
+class OutgoingBagMsg(ConveyorBagMsg):
+    pass
+
+class StopTimeUpdMsg(ConveyorServiceMsg):
+    def __init__(self, time: float):
+        super().__init__(time=time)
+
+class ConveyorMessage(Message):
+    def __init__(self, inner: ConveyorServiceMsg):
+        super().__init__(inner=inner)
+
+class InConveyorMsg(ConveyorMessage):
+    pass
+
+class OutConveyorMsg(ConveyorMessage):
+    pass

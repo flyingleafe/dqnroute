@@ -318,6 +318,9 @@ class DynamicEnv(object):
         except KeyError:
             raise AttributeError(name)
 
+    def register(self, name, val):
+        self._attrs[name] = val
+
 #
 # Stochastic policy distribution
 #

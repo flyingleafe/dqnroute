@@ -1,10 +1,10 @@
 import networkx as nx
 
 from typing import List, Tuple, Dict
-from .base import *
+from ..base import *
 from .link_state import *
-from ..messages import *
-from ..utils import dict_min
+from ...messages import *
+from ...utils import dict_min
 
 class SimpleQRouter(Router, RewardAgent):
     """
@@ -82,5 +82,16 @@ class SimpleQRouterConveyor(SimpleQRouter, LinkStateRouter, ConveyorRewardAgent)
         self.out_neighbours = set(filter(filter_func, old_neighbours))
 
         to, msgs = super().route(sender, pkg)
+        scheduled_stop_time = self.env.time() + self.env.stop_delay()
+        msgs.append(OutConveyorMsg(StopTimeUpdMsg(scheduled_stop_time)))
+
         self.out_neighbours = old_neighbours
         return to, msgs
+
+    def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
+        if isinstance(msg, ConveyorServiceMsg):
+            if isinstance(msg, ConveyorStartMsg):
+                self.scheduled_stop_time = self.env.time()
+            return []
+        else:
+            return super().handleServiceMsg(sender, msg)

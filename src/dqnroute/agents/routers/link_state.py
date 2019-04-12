@@ -3,8 +3,8 @@ import networkx as nx
 
 from copy import deepcopy
 from typing import List, Tuple, Dict
-from .base import *
-from ..messages import *
+from ..base import *
+from ...messages import *
 
 class AbstractLinkStateRouter(Router):
     """
@@ -37,7 +37,7 @@ class AbstractLinkStateRouter(Router):
         return [OutMessage(self.id, v, deepcopy(announcement)) for v in self.all_neighbours]
 
     def _processStateAnnouncement(self, msg: StateAnnouncementMsg) -> bool:
-        if msg.node not in self.announcements or self.announcements[msg.node].seq < seq:
+        if msg.node not in self.announcements or self.announcements[msg.node].seq < msg.seq:
             self.announcements[msg.node] = msg
             return self.processNewAnnouncement(msg.node, msg.state)
         return False
@@ -52,11 +52,14 @@ class LinkStateRouter(AbstractLinkStateRouter):
     """
     Simple link-state router
     """
-    def __init__(self, env: DynamicEnv, network: nx.DiGraph,
+    def __init__(self, env: DynamicEnv, adj_links,
                  edge_weight='weight', **kwargs):
         super().__init__(env, **kwargs)
-        self.network = network
+        self.network = nx.DiGraph()
         self.edge_weight = edge_weight
+
+        self.network.add_node(self.id)
+        self.processNewAnnouncement(self.id, adj_links)
 
     def addLink(self, to: int, direction: str, params={}) -> List[Message]:
         msgs = super().addLink(to, direction, params)
@@ -91,3 +94,12 @@ class LinkStateRouter(AbstractLinkStateRouter):
                 self.network.remove_edge(node, m)
             except nx.NetworkXError:
                 pass
+
+        return True
+
+class LinkStateRouterConveyor(LinkStateRouter):
+    def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
+        if isinstance(msg, ConveyorServiceMsg):
+            return []
+        else:
+            return super().handleServiceMsg(sender, msg)

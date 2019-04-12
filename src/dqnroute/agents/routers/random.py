@@ -1,8 +1,8 @@
 import random
 
 from typing import List, Tuple
-from .base import *
-from ..messages import *
+from ..base import *
+from ...messages import *
 
 class RandomRouter(Router):
     """

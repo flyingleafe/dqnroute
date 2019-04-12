@@ -86,6 +86,45 @@ class Router(MessageHandler):
     def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
         raise UnsupportedMessageType(msg)
 
+class Conveyor(MessageHandler):
+    """
+    Base class which implements a conveyor controller, which can start
+    a conveyor or stop it.
+    """
+    def __init__(self, env: DynamicEnv, conveyor_id: int, **kwargs):
+        super().__init__()
+        self.env = env
+        self.id = conveyor_id
+
+    def handle(self, msg: Message) -> List[Message]:
+        if isinstance(msg, ConveyorStartMsg):
+            return self.start()
+        elif isinstance(msg, ConveyorStopMsg):
+            return self.stop()
+        elif isinstance(msg, IncomingBagMsg):
+            return self.handleIncomingBag(msg.bag)
+        elif isinstance(msg, OutgoingBagMsg):
+            return self.handleOutgoingBag(msg.bag)
+        elif isinstance(msg, ConveyorServiceMsg):
+            return self.handleCustomMsg(msg)
+        else:
+            return super().handle(msg)
+
+    def start(self) -> List[Message]:
+        raise NotImplementedError()
+
+    def stop(self) -> List[Message]:
+        raise NotImplementedError()
+
+    def handleIncomingBag(self, bag: Bag) -> List[Message]:
+        raise NotImplementedError()
+
+    def handleOutgoingBag(self, bag: Bag) -> List[Message]:
+        raise NotImplementedError()
+
+    def handleCustomMsg(self, msg: ConveyorMessage) -> List[Message]:
+        raise UnsupportedMessageType(msg)
+
 class RewardAgent(object):
     """
     Agent which receives rewards for sent packages
@@ -148,4 +187,11 @@ class ConveyorRewardAgent(RewardAgent):
         return ConveyorRewardMsg(bag_id, Q_estimate, time_processed, energy_gap)
 
     def _getRewardData(self, bag: Bag, data):
-        return self.env.time(), self.env.energy_gap(bag.id)
+        cur_time = self.env.time()
+        delay = self.env.stop_delay()
+        consumption = self.env.energy_consumption()
+        stop_time = self.env.scheduled_stop()
+        time_gap = delay - max(0, stop_time - cur_time)
+        energy_gap = consumption * time_gap
+
+        return cur_time, energy_gap

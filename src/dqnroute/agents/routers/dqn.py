@@ -8,13 +8,13 @@ import networkx as nx
 import pandas as pd
 
 from typing import List, Tuple, Dict
-from .base import *
+from ..base import *
 from .link_state import LinkStateRouter
-from ..constants import DQNROUTE_LOGGER
-from ..messages import *
-from ..memory import *
-from ..utils import *
-from ..networks import QNetwork, get_optimizer
+from ...constants import DQNROUTE_LOGGER
+from ...messages import *
+from ...memory import *
+from ...utils import *
+from ...networks import QNetwork, get_optimizer
 
 MIN_TEMP = 1.5
 
@@ -25,14 +25,14 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     A router which implements DQN-routing algorithm
     """
     def __init__(self, env: DynamicEnv, batch_size: int, mem_capacity: int,
-                 optimizer='rmsprop', additional_inputs=[], **kwargs):
+                 nodes: List[int], optimizer='rmsprop', additional_inputs=[], **kwargs):
         super().__init__(env, **kwargs)
         self.batch_size = batch_size
         self.memory = Memory(mem_capacity)
         self.additional_inputs = additional_inputs
+        self.nodes = nodes
 
-        self.brain = QNetwork(len(self.network.nodes),
-                              additional_inputs=additional_inputs, **kwargs)
+        self.brain = QNetwork(len(self.nodes), additional_inputs=additional_inputs, **kwargs)
         self.optimizer = get_optimizer(optimizer)(self.brain.parameters())
         self.loss_func = nn.MSELoss()
         self.brain.restore()
@@ -74,7 +74,7 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     def _getAddInput(self, tag):
         if tag == 'amatrix':
             amatrix = nx.convert_matrix.to_numpy_array(
-                self.network, nodelist=sorted(self.network.nodes),
+                self.network, nodelist=self.nodes,
                 dtype=np.float32)
             gstate = np.ravel(amatrix)
             gstate[gstate > 0] = 1
@@ -83,12 +83,12 @@ class DQNRouter(LinkStateRouter, RewardAgent):
             raise Exception('Unknown additional input: ' + tag)
 
     def _getNNState(self, pkg: Package):
-        n = len(self.network.nodes)
+        n = len(self.nodes)
         addr = np.array(self.id)
         dst = np.array(pkg.dst)
-        neighbours = np.array(list(map(lambda v: v in self.out_neighbours,
-                                       sorted(self.network.nodes))),
-                              dtype=np.float32)
+        neighbours = np.array(
+            list(map(lambda v: v in self.out_neighbours, self.nodes)),
+            dtype=np.float32)
         input = [addr, dst, neighbours]
 
         for inp in self.additional_inputs:
@@ -126,6 +126,10 @@ class DQNRouterConveyor(DQNRouter, ConveyorRewardAgent):
     """
     DQN-router which calculates rewards for computer routing setting
     """
+    def __init__(self, env: DynamicEnv, **kwargs):
+        super().__init__(env, **kwargs)
+        self.is_working = False
+
     def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
         """
         Makes sure that bags are not sent to the path which can not lead to
@@ -136,6 +140,19 @@ class DQNRouterConveyor(DQNRouter, ConveyorRewardAgent):
         self.out_neighbours = set(filter(filter_func, old_neighbours))
 
         to, msgs = super().route(sender, pkg)
+        scheduled_stop_time = self.env.time() + self.env.stop_delay()
+        msgs.append(OutConveyorMsg(StopTimeUpdMsg(scheduled_stop_time)))
+
         self.out_neighbours = old_neighbours
         return to, msgs
 
+    def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
+        if isinstance(msg, ConveyorServiceMsg):
+            if isinstance(msg, ConveyorStartMsg):
+                self.scheduled_stop_time = self.env.time()
+                self.is_working = True
+            elif isinstance(msg, ConveyorStopMsg):
+                self.is_working = False
+            return []
+        else:
+            return super().handleServiceMsg(sender, msg)

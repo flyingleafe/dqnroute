@@ -42,6 +42,7 @@ settings:
     speed: 1
     energy_consumption: 1
     sec_process_time: 10
+  conveyor:
     stop_delay: 40
   router:
     energy_reward_weight: 1
