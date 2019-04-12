@@ -1,0 +1,3 @@
+[submodule "GEM"]
+	path = GEM
+	url = git@github.com:flyingleafe/GEM.git
