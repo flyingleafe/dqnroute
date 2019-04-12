@@ -56,9 +56,13 @@ class FFNetwork(nn.Sequential):
         act_module = get_activation(activation)
 
         prev_dim = input_dim
-        for (i, lsize) in enumerate(layers):
-            self.add_module('fc{}'.format(i+1), nn.Linear(prev_dim, lsize))
-            self.add_module('activation{}'.format(i+1), act_module)
-            prev_dim = lsize
+        for (i, layer) in enumerate(layers):
+            if type(layer) == int:
+                lsize = layer
+                self.add_module('fc{}'.format(i+1), nn.Linear(prev_dim, lsize))
+                self.add_module('activation{}'.format(i+1), act_module)
+                prev_dim = lsize
+            elif layer == 'dropout':
+                self.add_module('dropout_{}'.format(i+1), nn.Dropout())
 
         self.add_module('output', nn.Linear(prev_dim, output_dim))

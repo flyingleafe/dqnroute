@@ -59,7 +59,8 @@ class LinkStateRouter(AbstractLinkStateRouter):
         self.edge_weight = edge_weight
 
         self.network.add_node(self.id)
-        self.processNewAnnouncement(self.id, adj_links)
+        for (m, params) in adj_links.items():
+            self.network.add_edge(self.id, m, **params)
 
     def addLink(self, to: int, direction: str, params={}) -> List[Message]:
         msgs = super().addLink(to, direction, params)
@@ -97,9 +98,62 @@ class LinkStateRouter(AbstractLinkStateRouter):
 
         return True
 
-class LinkStateRouterConveyor(LinkStateRouter):
+class LSConveyorMixin(object):
+    """
+    Mixin for state routers which are working in a conveyor
+    environment. Does not inherit `LinkStateRouter` in order
+    to maintain sane parent's MRO. Only for usage as a mixin
+    in other classes.
+    """
+
+    def __init__(self, env: DynamicEnv, **kwargs):
+        super().__init__(env, **kwargs)
+        self.network.nodes[self.id]['works'] = False
+
+    def _conveyorWorks(self) -> bool:
+        return self.network.nodes[self.id]['works']
+
+    def _setConveyorWorkStatus(self, works: bool) -> List[Message]:
+        if self._conveyorWorks() != works:
+            self.network.nodes[self.id]['works'] = works
+            return self._announceState()
+        return []
+
+    def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
+        """
+        Makes sure that bags are not sent to the path which can not lead to
+        the destination
+        """
+        old_neighbours = self.out_neighbours
+        filter_func = lambda v: nx.has_path(self.network, v, pkg.dst)
+        self.out_neighbours = set(filter(filter_func, old_neighbours))
+
+        to, msgs = super().route(sender, pkg)
+        scheduled_stop_time = self.env.time() + self.env.stop_delay()
+        msgs.append(OutConveyorMsg(StopTimeUpdMsg(scheduled_stop_time)))
+
+        self.out_neighbours = old_neighbours
+        return to, msgs
+
     def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
         if isinstance(msg, ConveyorServiceMsg):
+            if isinstance(msg, ConveyorStartMsg):
+                self.scheduled_stop_time = self.env.time()
+                return self._setConveyorWorkStatus(True)
+            elif isinstance(msg, ConveyorStopMsg):
+                return self._setConveyorWorkStatus(False)
             return []
         else:
             return super().handleServiceMsg(sender, msg)
+
+    def getState(self):
+        links = super().getState()
+        return {'links': links, 'works': self._conveyorWorks()}
+
+    def processNewAnnouncement(self, node: int, state) -> bool:
+        links_ok = super().processNewAnnouncement(node, state['links'])
+        self.network.nodes[node]['works'] = state['works']
+        return links_ok
+
+class LinkStateRouterConveyor(LSConveyorMixin, LinkStateRouter):
+    pass

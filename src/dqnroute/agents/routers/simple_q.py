@@ -67,31 +67,8 @@ class SimpleQRouterNetwork(SimpleQRouter, NetworkRewardAgent):
     """
     pass
 
-class SimpleQRouterConveyor(SimpleQRouter, LinkStateRouter, ConveyorRewardAgent):
+class SimpleQRouterConveyor(LSConveyorMixin, SimpleQRouter, LinkStateRouter, ConveyorRewardAgent):
     """
     Q-router which calculates rewards for conveyor routing setting
     """
-
-    def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
-        """
-        Makes sure that bags are not sent to the path which can not lead to
-        the destination
-        """
-        old_neighbours = self.out_neighbours
-        filter_func = lambda v: nx.has_path(self.network, v, pkg.dst)
-        self.out_neighbours = set(filter(filter_func, old_neighbours))
-
-        to, msgs = super().route(sender, pkg)
-        scheduled_stop_time = self.env.time() + self.env.stop_delay()
-        msgs.append(OutConveyorMsg(StopTimeUpdMsg(scheduled_stop_time)))
-
-        self.out_neighbours = old_neighbours
-        return to, msgs
-
-    def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
-        if isinstance(msg, ConveyorServiceMsg):
-            if isinstance(msg, ConveyorStartMsg):
-                self.scheduled_stop_time = self.env.time()
-            return []
-        else:
-            return super().handleServiceMsg(sender, msg)
+    pass

@@ -23,8 +23,8 @@ def _transform_add_inputs(n, add_inputs):
 
 class QNetwork(nn.Module):
 
-    def __init__(self, n, layers=[64, 64], activation='relu',
-                 additional_inputs=[], scope='', **kwargs):
+    def __init__(self, n, layers, activation, additional_inputs=[],
+                 scope='', **kwargs):
         super().__init__()
         self.graph_size = n
         self.add_inputs = _transform_add_inputs(n, additional_inputs)

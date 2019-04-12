@@ -9,7 +9,7 @@ import pandas as pd
 
 from typing import List, Tuple, Dict
 from ..base import *
-from .link_state import LinkStateRouter
+from .link_state import *
 from ...constants import DQNROUTE_LOGGER
 from ...messages import *
 from ...memory import *
@@ -60,10 +60,12 @@ class DQNRouter(LinkStateRouter, RewardAgent):
             return super().handleServiceMsg(sender, msg)
 
     def _predict(self, x):
+        self.brain.eval()
         return self.brain(*map(torch.from_numpy, x))\
                    .clone().detach().numpy()
 
     def _train(self, x, y):
+        self.brain.train()
         self.optimizer.zero_grad()
         output = self.brain(*map(torch.from_numpy, x))
         loss = self.loss_func(output, torch.from_numpy(y))
@@ -122,37 +124,14 @@ class DQNRouterNetwork(DQNRouter, NetworkRewardAgent):
     """
     pass
 
-class DQNRouterConveyor(DQNRouter, ConveyorRewardAgent):
+class DQNRouterConveyor(LSConveyorMixin, DQNRouter, ConveyorRewardAgent):
     """
-    DQN-router which calculates rewards for computer routing setting
+    DQN-router which calculates rewards for conveyors setting
     """
-    def __init__(self, env: DynamicEnv, **kwargs):
-        super().__init__(env, **kwargs)
-        self.is_working = False
-
-    def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
-        """
-        Makes sure that bags are not sent to the path which can not lead to
-        the destination
-        """
-        old_neighbours = self.out_neighbours
-        filter_func = lambda v: nx.has_path(self.network, v, pkg.dst)
-        self.out_neighbours = set(filter(filter_func, old_neighbours))
-
-        to, msgs = super().route(sender, pkg)
-        scheduled_stop_time = self.env.time() + self.env.stop_delay()
-        msgs.append(OutConveyorMsg(StopTimeUpdMsg(scheduled_stop_time)))
-
-        self.out_neighbours = old_neighbours
-        return to, msgs
-
-    def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
-        if isinstance(msg, ConveyorServiceMsg):
-            if isinstance(msg, ConveyorStartMsg):
-                self.scheduled_stop_time = self.env.time()
-                self.is_working = True
-            elif isinstance(msg, ConveyorStopMsg):
-                self.is_working = False
-            return []
+    def _getAddInput(self, tag):
+        if tag == 'work_status':
+            return np.array(
+                list(map(lambda n: self.network.nodes[n].get('works', False), self.nodes)),
+                dtype=np.float32)
         else:
-            return super().handleServiceMsg(sender, msg)
+            return super()._getAddInput(tag)

@@ -48,12 +48,10 @@ settings:
     learning_rate: 0.5
     optimizer: 'rmsprop'
     scope: 'conveyor_test_ng'
-    ff_activation: 'tanh'
+    activation: 'relu'
     layers: [64, 64]
     additional_inputs:
       - tag: 'amatrix'
-      # - tag: 'work_status'
-    pkg_states: False
+      - tag: 'work_status'
     batch_size: 1
     mem_capacity: 1
-    prioritized_xp: False 
