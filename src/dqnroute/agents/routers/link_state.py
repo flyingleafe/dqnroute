@@ -39,8 +39,22 @@ class AbstractLinkStateRouter(Router):
     def _processStateAnnouncement(self, msg: StateAnnouncementMsg) -> bool:
         if msg.node not in self.announcements or self.announcements[msg.node].seq < msg.seq:
             self.announcements[msg.node] = msg
-            return self.processNewAnnouncement(msg.node, msg.state)
+            res = self.processNewAnnouncement(msg.node, msg.state)
+
+            # Do some action if initial announcements exchange is complete
+            if self.networkComplete():
+                self.networkInit()
+            return res
         return False
+
+    def networkComplete(self):
+        """
+        Never call `networkInit` by default
+        """
+        return False
+
+    def networkInit(self):
+        raise NotImplementedError()
 
     def getState(self):
         raise NotImplementedError()

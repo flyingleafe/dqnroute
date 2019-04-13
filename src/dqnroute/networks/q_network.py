@@ -1,11 +1,10 @@
 import numpy as np
-import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from ..utils import *
-from ..constants import TORCH_MODELS_DIR, INFTY
+from ..constants import INFTY
 from .common import *
 
 def _transform_add_inputs(n, add_inputs):
@@ -21,18 +20,27 @@ def _transform_add_inputs(n, add_inputs):
 
     return [(inp['tag'], _get_dim(inp)) for inp in add_inputs]
 
-class QNetwork(nn.Module):
+class QNetwork(SaveableModel):
+    """
+    Simple Q-network with one-hot encoded inputs
+    """
 
     def __init__(self, n, layers, activation, additional_inputs=[],
-                 scope='', **kwargs):
+                 embedding_dim=None, scope='', **kwargs):
         super().__init__()
         self.graph_size = n
         self.add_inputs = _transform_add_inputs(n, additional_inputs)
+        self.uses_embedding = embedding_dim is not None
 
-        input_dim = 3 * n + sum([d for (_, d) in self.add_inputs])
+        input_dim = n + sum([d for (_, d) in self.add_inputs])
+        if not self.uses_embedding:
+            input_dim += 2 * n
+        else:
+            input_dim += 2 * embedding_dim
 
         self._scope = scope if len(scope) > 0 else None
-        self._label = 'qnetwork_{}_{}_{}_{}_{}'.format(
+        self._label = 'qnetwork{}_{}_{}_{}_{}_{}'.format(
+            '-emb-{}'.format(embedding_dim) if self.uses_embedding else '',
             input_dim,
             '-'.join(map(str, layers)),
             n,
@@ -42,11 +50,16 @@ class QNetwork(nn.Module):
         self.ff_net = FFNetwork(input_dim, n, layers=layers, activation=activation)
 
     def forward(self, addr, dst, neighbours, *others):
-        addr_ = one_hot(atleast_dim(addr, 1), self.graph_size)
-        dst_ = one_hot(atleast_dim(dst, 1), self.graph_size)
-        neighbours = atleast_dim(neighbours, 2)
+        if self.uses_embedding:
+            addr_ = atleast_dim(addr, 2)
+            dst_ = atleast_dim(dst, 2)
+        else:
+            addr_ = one_hot(atleast_dim(addr, 1), self.graph_size)
+            dst_ = one_hot(atleast_dim(dst, 1), self.graph_size)
 
+        neighbours = atleast_dim(neighbours, 2)
         input_tensors = [addr_, dst_, neighbours]
+
         for ((tag, dim), inp) in zip(self.add_inputs, others):
             inp = atleast_dim(inp, 2)
             if inp.size()[1] != dim:
@@ -64,19 +77,3 @@ class QNetwork(nn.Module):
         # Mask out unconnected neighbours with -INFTY values
         inf_mask = torch.mul(torch.add(neighbours, -1), INFTY)
         return torch.add(output, inf_mask)
-
-    def _savedir(self):
-        dir = TORCH_MODELS_DIR
-        if self._scope is not None:
-            dir += '/' + self._scope
-        return dir
-
-    def _savepath(self):
-        return self._savedir() + '/' + self._label
-
-    def save(self):
-        os.makedirs(self._savedir(), exist_ok=True)
-        return torch.save(self.state_dict(), self._savepath())
-
-    def restore(self):
-        return self.load_state_dict(torch.load(self._savepath()))

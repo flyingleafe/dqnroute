@@ -12,7 +12,8 @@ mkShell {
     git
     nodejs
 
-    (python36.withPackages (pythonPkgs: with pythonPkgs; [
+    (python36Full.withPackages (pythonPkgs: with pythonPkgs; [
+      tkinter
       virtualenvwrapper
     ]))
   ];
@@ -21,7 +22,7 @@ mkShell {
   shellHook = ''
     unset SOURCE_DATE_EPOCH
     if [ ! -d "${virtualenvDir}" ]; then
-      virtualenv ${virtualenvDir}
+      virtualenv --system-site-packages ${virtualenvDir}
     fi
     echo "manylinux1_compatible = True" > ${virtualenvDir}/lib/python3.6/_manylinux.py
     source ${virtualenvDir}/bin/activate

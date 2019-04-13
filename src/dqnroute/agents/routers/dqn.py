@@ -14,7 +14,7 @@ from ...constants import DQNROUTE_LOGGER
 from ...messages import *
 from ...memory import *
 from ...utils import *
-from ...networks import QNetwork, get_optimizer
+from ...networks import *
 
 MIN_TEMP = 1.5
 
@@ -25,14 +25,24 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     A router which implements DQN-routing algorithm
     """
     def __init__(self, env: DynamicEnv, batch_size: int, mem_capacity: int,
-                 nodes: List[int], optimizer='rmsprop', additional_inputs=[], **kwargs):
+                 nodes: List[int], embedding=None, optimizer='rmsprop',
+                 additional_inputs=[], **kwargs):
         super().__init__(env, **kwargs)
         self.batch_size = batch_size
         self.memory = Memory(mem_capacity)
         self.additional_inputs = additional_inputs
         self.nodes = nodes
 
-        self.brain = QNetwork(len(self.nodes), additional_inputs=additional_inputs, **kwargs)
+        if embedding is None:
+            self.embedding = None
+            embedding_dim = None
+        else:
+            self.embedding = HOPEEmbedding(**embedding)
+            embedding_dim = self.embedding.dim
+
+        self.brain = QNetwork(len(self.nodes), additional_inputs=additional_inputs,
+                              embedding_dim=embedding_dim, **kwargs)
+
         self.optimizer = get_optimizer(optimizer)(self.brain.parameters())
         self.loss_func = nn.MSELoss()
         self.brain.restore()
@@ -58,6 +68,13 @@ class DQNRouter(LinkStateRouter, RewardAgent):
             return []
         else:
             return super().handleServiceMsg(sender, msg)
+
+    def networkComplete(self):
+        return len(self.network.nodes) == len(self.nodes)
+
+    def networkInit(self):
+        if self.embedding is not None:
+            self.embedding.fit(self.network, weight=self.edge_weight)
 
     def _predict(self, x):
         self.brain.eval()
@@ -86,8 +103,14 @@ class DQNRouter(LinkStateRouter, RewardAgent):
 
     def _getNNState(self, pkg: Package):
         n = len(self.nodes)
-        addr = np.array(self.id)
-        dst = np.array(pkg.dst)
+
+        if self.embedding is None:
+            addr = np.array(self.id)
+            dst = np.array(pkg.dst)
+        else:
+            addr = self.embedding.get_embedding(self.id).astype(np.float32)
+            dst = self.embedding.get_embedding(pkg.dst).astype(np.float32)
+
         neighbours = np.array(
             list(map(lambda v: v in self.out_neighbours, self.nodes)),
             dtype=np.float32)

@@ -1,9 +1,11 @@
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
 from typing import List
 from functools import partial
+from ..constants import TORCH_MODELS_DIR
 
 def get_activation(name):
     if type(name) != str:
@@ -66,3 +68,24 @@ class FFNetwork(nn.Sequential):
                 self.add_module('dropout_{}'.format(i+1), nn.Dropout())
 
         self.add_module('output', nn.Linear(prev_dim, output_dim))
+
+class SaveableModel(nn.Module):
+    """
+    Mixin which provides `save` and `restore`
+    methods for (de)serializing the model.
+    """
+    def _savedir(self):
+        dir = TORCH_MODELS_DIR
+        if self._scope is not None:
+            dir += '/' + self._scope
+        return dir
+
+    def _savepath(self):
+        return self._savedir() + '/' + self._label
+
+    def save(self):
+        os.makedirs(self._savedir(), exist_ok=True)
+        return torch.save(self.state_dict(), self._savepath())
+
+    def restore(self):
+        return self.load_state_dict(torch.load(self._savepath()))
