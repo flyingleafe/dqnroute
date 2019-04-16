@@ -24,10 +24,9 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     """
     A router which implements DQN-routing algorithm
     """
-    def __init__(self, env: DynamicEnv, batch_size: int, mem_capacity: int,
-                 nodes: List[int], embedding=None, optimizer='rmsprop',
-                 additional_inputs=[], **kwargs):
-        super().__init__(env, **kwargs)
+    def __init__(self, batch_size: int, mem_capacity: int, nodes: List[int],
+                 embedding=None, optimizer='rmsprop', additional_inputs=[], **kwargs):
+        super().__init__(**kwargs)
         self.batch_size = batch_size
         self.memory = Memory(mem_capacity)
         self.additional_inputs = additional_inputs
@@ -50,14 +49,14 @@ class DQNRouter(LinkStateRouter, RewardAgent):
 
     def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
         state = self._getNNState(pkg)
-        prediction = self._predict(state)[0]
-
-        to = -1
-        while to not in self.out_neighbours:
-            to = soft_argmax(prediction, MIN_TEMP)
-
+        prediction = self._predict(state).flatten()
+        to_idx = soft_argmax(prediction, MIN_TEMP)
         estimate = -np.max(prediction)
-        reward = self.registerResentPkg(pkg, estimate, state)
+
+        saved_state = [s[to_idx] for s in state]
+        to = sorted(list(self.out_neighbours))[to_idx]
+
+        reward = self.registerResentPkg(pkg, estimate, saved_state)
         return to, [OutMessage(self.id, sender, reward)] if sender != -1 else []
 
     def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
@@ -101,25 +100,27 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         else:
             raise Exception('Unknown additional input: ' + tag)
 
+    def _nodeRepr(self, node):
+        if self.embedding is None:
+            return np.array(node)
+        else:
+            return self.embedding.get_embedding(node).astype(np.float32)
+
     def _getNNState(self, pkg: Package):
         n = len(self.nodes)
 
-        if self.embedding is None:
-            addr = np.array(self.id)
-            dst = np.array(pkg.dst)
-        else:
-            addr = self.embedding.get_embedding(self.id).astype(np.float32)
-            dst = self.embedding.get_embedding(pkg.dst).astype(np.float32)
+        addr = self._nodeRepr(self.id)
+        dst = self._nodeRepr(pkg.dst)
 
         neighbours = np.array(
             list(map(lambda v: v in self.out_neighbours, self.nodes)),
             dtype=np.float32)
-        input = [addr, dst, neighbours]
 
-        for inp in self.additional_inputs:
-            input.append(self._getAddInput(inp['tag']))
+        add_inputs = [self._getAddInput(inp['tag']) for inp in self.additional_inputs]
 
-        return tuple(input)
+        input = [[addr, dst, self._nodeRepr(v)] + add_inputs
+                 for v in sorted(list(self.out_neighbours))]
+        return stack_batch(input)
 
     def _replay(self):
         """
@@ -134,20 +135,15 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         actions = [l[1] for l in batch]
         values = [l[2] for l in batch]
 
-        preds = self._predict(states)
-        for i in range(blen):
-            a = actions[i]
-            preds[i][a] = values[i]
+        self._train(states, np.array(values, dtype=np.float32))
 
-        self._train(states, preds)
-
-class DQNRouterNetwork(DQNRouter, NetworkRewardAgent):
+class DQNRouterNetwork(NetworkRewardAgent, DQNRouter):
     """
     DQN-router which calculates rewards for computer routing setting
     """
     pass
 
-class DQNRouterConveyor(LSConveyorMixin, DQNRouter, ConveyorRewardAgent):
+class DQNRouterConveyor(LSConveyorMixin, ConveyorRewardAgent, DQNRouter):
     """
     DQN-router which calculates rewards for conveyors setting
     """

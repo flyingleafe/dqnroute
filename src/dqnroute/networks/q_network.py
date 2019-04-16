@@ -32,14 +32,14 @@ class QNetwork(SaveableModel):
         self.add_inputs = _transform_add_inputs(n, additional_inputs)
         self.uses_embedding = embedding_dim is not None
 
-        input_dim = n + sum([d for (_, d) in self.add_inputs])
+        input_dim = sum([d for (_, d) in self.add_inputs])
         if not self.uses_embedding:
-            input_dim += 2 * n
+            input_dim += 3 * n
         else:
-            input_dim += 2 * embedding_dim
+            input_dim += 3 * embedding_dim
 
         self._scope = scope if len(scope) > 0 else None
-        self._label = 'qnetwork{}_{}_{}_{}_{}_{}'.format(
+        self._label = 'qnetwork-oneinp{}_{}_{}_{}_{}_{}'.format(
             '-emb-{}'.format(embedding_dim) if self.uses_embedding else '',
             input_dim,
             '-'.join(map(str, layers)),
@@ -47,18 +47,19 @@ class QNetwork(SaveableModel):
             activation,
             '_'.join(map(lambda p: p[0]+'-'+str(p[1]), self.add_inputs)))
 
-        self.ff_net = FFNetwork(input_dim, n, layers=layers, activation=activation)
+        self.ff_net = FFNetwork(input_dim, 1, layers=layers, activation=activation)
 
-    def forward(self, addr, dst, neighbours, *others):
+    def forward(self, addr, dst, neighbour, *others):
         if self.uses_embedding:
             addr_ = atleast_dim(addr, 2)
             dst_ = atleast_dim(dst, 2)
+            neighbour_ = atleast_dim(neighbour, 2)
         else:
             addr_ = one_hot(atleast_dim(addr, 1), self.graph_size)
             dst_ = one_hot(atleast_dim(dst, 1), self.graph_size)
+            neighbour_ = one_hot(atleast_dim(neighbour, 1), self.graph_size)
 
-        neighbours = atleast_dim(neighbours, 2)
-        input_tensors = [addr_, dst_, neighbours]
+        input_tensors = [addr_, dst_, neighbour_]
 
         for ((tag, dim), inp) in zip(self.add_inputs, others):
             inp = atleast_dim(inp, 2)
@@ -72,8 +73,4 @@ class QNetwork(SaveableModel):
                 input_tensors.append(inp)
 
         input = torch.cat(input_tensors, dim=1)
-        output = self.ff_net(input)
-
-        # Mask out unconnected neighbours with -INFTY values
-        inf_mask = torch.mul(torch.add(neighbours, -1), INFTY)
-        return torch.add(output, inf_mask)
+        return self.ff_net(input)

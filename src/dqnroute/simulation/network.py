@@ -22,7 +22,7 @@ class SimpyRouterEnv(SimpyMessageEnv):
     def __init__(self, env: Environment, RouterClass, router_id: int, data_series: EventSeries,
                  edges, router_init_args={}, pkg_process_delay: int = 0, **kwargs):
         dyn_env = DynamicEnv(time=lambda: env.now)
-        router = RouterClass(dyn_env, router_id=router_id, **router_init_args)
+        router = RouterClass(env=dyn_env, router_id=router_id, **router_init_args)
         super().__init__(env, router)
         self.id = router_id
         self.pkg_process_delay = pkg_process_delay

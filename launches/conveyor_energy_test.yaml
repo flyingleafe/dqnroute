@@ -52,6 +52,6 @@ settings:
     layers: [64, 64]
     additional_inputs:
       - tag: 'amatrix'
-      - tag: 'work_status'
+      # - tag: 'work_status'
     batch_size: 1
     mem_capacity: 1

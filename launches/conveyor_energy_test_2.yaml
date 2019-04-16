@@ -45,7 +45,7 @@ settings:
   conveyor:
     stop_delay: 40
   router:
-    energy_reward_weight: 0.6
+    energy_reward_weight: 1.5
     learning_rate: 0.5
     optimizer: 'rmsprop'
     scope: 'conveyor_test_ng'

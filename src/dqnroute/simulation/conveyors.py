@@ -74,9 +74,9 @@ class SimpyConveyorEnv(SimpyMessageEnv):
         energy_func = lambda: energy_consumption
         dyn_env = DynamicEnv(time=time_func, energy_consumption=energy_func)
 
-        conveyor = ConveyorClass(dyn_env, conveyor_id=conveyor_id, **conveyor_init_args)
+        conveyor = ConveyorClass(env=dyn_env, conveyor_id=conveyor_id, **conveyor_init_args)
         section_routers = {
-            sec_id: RouterClass(dyn_env, router_id=sec_id,
+            sec_id: RouterClass(env=dyn_env, router_id=sec_id,
                                 **routers_init_args.get(sec_id, {}))
             for sec_id in sections.keys()
         }

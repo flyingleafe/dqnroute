@@ -10,9 +10,9 @@ class SimpleQRouter(Router, RewardAgent):
     """
     A router which implements Q-routing algorithm
     """
-    def __init__(self, env: DynamicEnv, learning_rate: float,
-                 nodes: List[int], choice_policy: str = 'strict', **kwargs):
-        super().__init__(env, **kwargs)
+    def __init__(self, learning_rate: float, nodes: List[int],
+                 choice_policy: str = 'strict', **kwargs):
+        super().__init__(**kwargs)
         self.learning_rate = learning_rate
         self.choice_policy = choice_policy
         self.Q = {u: {v: 0 if u == v else 10
@@ -61,13 +61,13 @@ class SimpleQRouter(Router, RewardAgent):
             res[n] = self.Q[d][n]
         return res
 
-class SimpleQRouterNetwork(SimpleQRouter, NetworkRewardAgent):
+class SimpleQRouterNetwork(NetworkRewardAgent, SimpleQRouter):
     """
     Q-router which calculates rewards for computer routing setting
     """
     pass
 
-class SimpleQRouterConveyor(LSConveyorMixin, SimpleQRouter, LinkStateRouter, ConveyorRewardAgent):
+class SimpleQRouterConveyor(LSConveyorMixin, ConveyorRewardAgent, SimpleQRouter, LinkStateRouter):
     """
     Q-router which calculates rewards for conveyor routing setting
     """
