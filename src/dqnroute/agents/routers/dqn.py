@@ -25,7 +25,8 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     A router which implements DQN-routing algorithm
     """
     def __init__(self, batch_size: int, mem_capacity: int, nodes: List[int],
-                 embedding=None, optimizer='rmsprop', additional_inputs=[], **kwargs):
+                 embedding=None, optimizer='rmsprop',
+                 brain=None, additional_inputs=[], **kwargs):
         super().__init__(**kwargs)
         self.batch_size = batch_size
         self.memory = Memory(mem_capacity)
@@ -35,17 +36,23 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         if embedding is None:
             self.embedding = None
             embedding_dim = None
-        else:
+        elif type(embedding) == dict:
             self.embedding = HOPEEmbedding(**embedding)
             embedding_dim = self.embedding.dim
+        else:
+            self.embedding = embedding
+            embedding_dim = self.embedding.dim
 
-        self.brain = QNetwork(len(self.nodes), additional_inputs=additional_inputs,
-                              embedding_dim=embedding_dim, **kwargs)
+        if brain is None:
+            self.brain = QNetwork(len(self.nodes), additional_inputs=additional_inputs,
+                                  embedding_dim=embedding_dim, **kwargs)
+            self.brain.restore()
+            logger.info('Restored model ' + self.brain._label)
+        else:
+            self.brain = brain
 
         self.optimizer = get_optimizer(optimizer)(self.brain.parameters())
         self.loss_func = nn.MSELoss()
-        self.brain.restore()
-        logger.info('Restored model ' + self.brain._label)
 
     def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
         state = self._getNNState(pkg)

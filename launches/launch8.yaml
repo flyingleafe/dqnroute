@@ -40,8 +40,10 @@ settings:
     activation: 'relu'
     # scope: 'per_pkg'
     layers: [64, 64]
-    additional_inputs:
-      - tag: 'amatrix'
+    # additional_inputs:
+      # - tag: 'amatrix'
+    embedding:
+      dim: 4  
     pkg_states: False
     batch_size: 1
     mem_capacity: 1

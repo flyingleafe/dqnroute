@@ -41,6 +41,7 @@ settings:
     speed: 1
     energy_consumption: 1
     sec_process_time: 2
+    # common_brain: True
   conveyor:
     stop_delay: 40
   router:

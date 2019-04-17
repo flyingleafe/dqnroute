@@ -36,7 +36,7 @@ class QNetwork(SaveableModel):
         if not self.uses_embedding:
             input_dim += 3 * n
         else:
-            input_dim += 3 * embedding_dim
+            input_dim += 2 * embedding_dim
 
         self._scope = scope if len(scope) > 0 else None
         self._label = 'qnetwork-oneinp{}_{}_{}_{}_{}_{}'.format(
@@ -54,12 +54,14 @@ class QNetwork(SaveableModel):
             addr_ = atleast_dim(addr, 2)
             dst_ = atleast_dim(dst, 2)
             neighbour_ = atleast_dim(neighbour, 2)
+
+            # re-center embeddings linearly against origin
+            input_tensors = [dst_ - addr_, neighbour_ - addr_]
         else:
             addr_ = one_hot(atleast_dim(addr, 1), self.graph_size)
             dst_ = one_hot(atleast_dim(dst, 1), self.graph_size)
             neighbour_ = one_hot(atleast_dim(neighbour, 1), self.graph_size)
-
-        input_tensors = [addr_, dst_, neighbour_]
+            input_tensors = [addr_, dst_, neighbour_]
 
         for ((tag, dim), inp) in zip(self.add_inputs, others):
             inp = atleast_dim(inp, 2)

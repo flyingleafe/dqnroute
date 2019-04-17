@@ -42,10 +42,11 @@ settings:
     speed: 1
     energy_consumption: 1
     sec_process_time: 10
+    # common_brain: True
   conveyor:
     stop_delay: 40
   router:
-    energy_reward_weight: 1.5
+    energy_reward_weight: 2
     learning_rate: 0.5
     optimizer: 'rmsprop'
     scope: 'conveyor_test_ng'

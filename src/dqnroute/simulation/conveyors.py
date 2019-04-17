@@ -3,6 +3,7 @@ import math
 import networkx as nx
 
 from typing import List, Callable, Dict, Tuple
+from functools import reduce
 from simpy import Environment, Event, Resource, Process, Interrupt
 from ..utils import *
 from ..messages import *
@@ -68,15 +69,30 @@ class SimpyConveyorEnv(SimpyMessageEnv):
     def __init__(self, env: Environment, ConveyorClass, RouterClass, conveyor_id: int, sections,
                  time_series: EventSeries, energy_series: EventSeries,
                  speed: float = 1, energy_consumption: float = 1, sec_process_time: int = 10,
-                 conveyor_init_args={}, routers_init_args={}, **kwargs):
+                 common_brain: bool = False, conveyor_init_args={}, routers_init_args={}, **kwargs):
 
         time_func = lambda: env.now
         energy_func = lambda: energy_consumption
         dyn_env = DynamicEnv(time=time_func, energy_consumption=energy_func)
 
         conveyor = ConveyorClass(env=dyn_env, conveyor_id=conveyor_id, **conveyor_init_args)
+
+        if common_brain and issubclass(RouterClass, DQNRouter):
+            common_router_args = next(iter(routers_init_args.values()))
+            try:
+                embedding_dim = common_router_args['embedding']['dim']
+            except KeyError:
+                embedding_dim = None
+            n = len(common_router_args['nodes'])
+
+            brain = QNetwork(n, embedding_dim=embedding_dim, **common_router_args)
+            brain.restore()
+            logger.info('Restored model ' + brain._label)
+        else:
+            brain = None
+
         section_routers = {
-            sec_id: RouterClass(env=dyn_env, router_id=sec_id,
+            sec_id: RouterClass(env=dyn_env, router_id=sec_id, brain=brain,
                                 **routers_init_args.get(sec_id, {}))
             for sec_id in sections.keys()
         }
