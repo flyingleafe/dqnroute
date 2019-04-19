@@ -51,6 +51,28 @@ class EventSeries:
     def reset(self):
         self.records = self.records.iloc[0:0]
 
+class MultiEventSeries(EventSeries):
+    def __init__(self, **series: Dict[str, EventSeries]):
+        self.series = series
+
+    def logEvent(self, tag: str, time, value):
+        self.series[tag].logEvent(time, value)
+
+    def logUniformRange(self, tag: str, start, end, coeff):
+        self.series[tag].logUniformRange(start, end, coeff)
+
+    def subSeries(self, tag: str):
+        return self.series[tag]
+
+    def getSeries(self):
+        dfs = [s.getSeries().rename(columns=lambda c: tag + '_' + c)
+               for (tag, s) in self.series.items()]
+        return pd.concat(dfs, axis=1)
+
+    def reset(self):
+        for s in self.series.values():
+            s.reset()
+
 def aggregator(f: Callable[[float, float], float], dv = None) -> Aggregator:
     """
     Make an aggregator from a simple function of two values

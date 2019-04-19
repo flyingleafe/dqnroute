@@ -1,8 +1,9 @@
+import warnings
 import networkx as nx
 import numpy as np
 
 from typing import Union
-from gem.embedding.hope import HOPE
+import scipy.sparse.linalg as lg
 
 class Embedding(object):
     """
@@ -14,7 +15,7 @@ class Embedding(object):
     def fit(self, graph: Union[nx.DiGraph, np.ndarray], **kwargs):
         raise NotImplementedError()
 
-    def get_embedding(self, node):
+    def transform(self, nodes):
         raise NotImplementedError()
 
 class HOPEEmbedding(Embedding):
@@ -23,15 +24,61 @@ class HOPEEmbedding(Embedding):
             dim -= dim % 2
             print('HOPE supports only even embedding dimensions; falling back to {}'.format(dim))
 
+        if proximity not in {'katz', 'common-neighbors'}:
+            raise Exception('Unsupported proximity measure: ' + proximity)
+
         super().__init__(dim, **kwargs)
-        self._impl = HOPE(d=dim, proximity=proximity, beta=beta)
+        self.proximity = proximity
+        self.beta = beta
         self._W = None
 
     def fit(self, graph: Union[nx.DiGraph, np.ndarray], weight='weight'):
         if type(graph) == nx.DiGraph:
-            self._W = self._impl.learn_embedding(graph=graph, weight=weight)[0]
+            A = nx.to_numpy_matrix(graph, nodelist=sorted(graph.nodes), weight=weight)
+            n = graph.number_of_nodes()
         else:
-            self._W = self._impl.learn_embedding(amatrix=graph)[0]
+            A = np.mat(graph)
+            n = A.shape[0]
 
-    def get_embedding(self, idx):
+        if self.proximity == 'katz':
+            M_g = np.eye(n) - self.beta * A
+            M_l = self.beta * A
+        elif self.proximity == 'common-neighbors':
+            M_g = np.eye(n)
+            M_l = A * A
+        S = np.dot(np.linalg.inv(M_g), M_l)
+
+        u, s, vt = lg.svds(S, k=self.dim // 2)
+        X1 = np.dot(u, np.diag(np.sqrt(s)))
+        X2 = np.dot(vt.T, np.diag(np.sqrt(s)))
+        self._W = np.concatenate((X1, X2), axis=1)
+
+    def transform(self, idx):
         return self._W[idx]
+
+class LaplacianEigenmap(Embedding):
+    def __init__(self, dim, **kwargs):
+        super().__init__(dim, **kwargs)
+        self._X = None
+
+    def fit(self, graph: Union[nx.DiGraph, np.ndarray], weight='weight', inv_weight=True):
+        if type(graph) == np.ndarray:
+            graph = nx.from_numpy_array(graph, create_using=nx.DiGraph)
+            weight = 'weight'
+
+        graph = graph.to_undirected()
+
+        if inv_weight:
+            for u, v, ps in graph.edges(data=True):
+                graph[u][v][weight] = 1 / ps[weight]
+
+        L_sym = nx.normalized_laplacian_matrix(graph, nodelist=sorted(graph.nodes), weight=weight)
+        w, v = lg.eigs(L_sym, k=self.dim + 1, which='SM')
+        eigens = v[:, 1:]
+        if not np.allclose(np.imag(eigens), np.zeros(eigens.shape)):
+            warnings.warn('Imaginary values in my LAP embeddings!\n {}'
+                          .format(nx.to_numpy_array(graph, nodelist=sorted(graph.nodes))))
+        self._X = np.real(eigens)
+
+    def transform(self, idx):
+        return self._X[idx]

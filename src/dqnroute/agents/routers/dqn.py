@@ -36,12 +36,17 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         if embedding is None:
             self.embedding = None
             embedding_dim = None
-        elif type(embedding) == dict:
-            self.embedding = HOPEEmbedding(**embedding)
-            embedding_dim = self.embedding.dim
         else:
-            self.embedding = embedding
-            embedding_dim = self.embedding.dim
+            # Those are used to only re-learn the embedding when the topology is changed
+            self.prev_num_nodes = 0
+            self.prev_num_edges = 0
+
+            if type(embedding) == dict:
+                self.embedding = LaplacianEigenmap(**embedding)
+                embedding_dim = self.embedding.dim
+            else:
+                self.embedding = embedding
+                embedding_dim = self.embedding.dim
 
         if brain is None:
             self.brain = QNetwork(len(self.nodes), additional_inputs=additional_inputs,
@@ -80,7 +85,12 @@ class DQNRouter(LinkStateRouter, RewardAgent):
 
     def networkInit(self):
         if self.embedding is not None:
-            self.embedding.fit(self.network, weight=self.edge_weight)
+            num_nodes = len(self.network.nodes)
+            num_edges = len(self.network.edges)
+            if num_edges != self.prev_num_edges or num_nodes != self.prev_num_nodes:
+                self.prev_num_nodes = num_nodes
+                self.prev_num_edges = num_edges
+                self.embedding.fit(self.network, weight=self.edge_weight)
 
     def _predict(self, x):
         self.brain.eval()
@@ -111,7 +121,7 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         if self.embedding is None:
             return np.array(node)
         else:
-            return self.embedding.get_embedding(node).astype(np.float32)
+            return self.embedding.transform(node).astype(np.float32)
 
     def _getNNState(self, pkg: Package):
         n = len(self.nodes)
