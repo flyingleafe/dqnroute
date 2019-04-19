@@ -35,17 +35,21 @@ settings:
   router_env:    
     pkg_process_delay: 5
   router:
-    learning_rate: 0.5
-    optimizer: 'rmsprop'
-    activation: 'relu'
-    # scope: 'per_pkg'
-    layers: [64, 64]
-    # additional_inputs:
-      # - tag: 'amatrix'
-    embedding:
-      dim: 4  
-    pkg_states: False
-    batch_size: 1
-    mem_capacity: 1
-    prioritized_xp: False
- 
+    simple_q:
+      learning_rate: 0.5
+    dqn: &dqn
+      optimizer: 'rmsprop'
+      activation: 'relu'
+      layers: [64, 64]
+      additional_inputs:
+        - tag: 'amatrix'
+      batch_size: 1
+      mem_capacity: 1
+    dqn_oneout:
+      <<: *dqn
+    dqn_emb:
+      <<: *dqn
+      additional_inputs: []
+      embedding:
+        alg: 'lap'
+        dim: 4 

@@ -36,17 +36,22 @@ settings:
       # choice_policy: 'softmax'
       beta_rate: 0.7
       gamma_rate: 0.9
-    dqn:
+    dqn: &dqn
       optimizer: 'rmsprop'
       activation: 'relu'
-      # scope: 'per_pkg'
       layers: [64, 64]
-      # additional_inputs:
-        # - tag: 'amatrix'
-      embedding:
-        dim: 4
-      pkg_states: False
+      additional_inputs:
+        - tag: 'amatrix'
       batch_size: 1
       mem_capacity: 1
-      prioritized_xp: False
+    dqn_oneout:
+      <<: *dqn
+    dqn_emb:
+      <<: *dqn
+      additional_inputs: []
+      embedding:
+        alg: 'lap'
+        dim: 4
+
+
  

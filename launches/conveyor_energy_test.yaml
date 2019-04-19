@@ -55,6 +55,7 @@ settings:
       # - tag: 'amatrix'
       # - tag: 'work_status'
     embedding:
+      alg: 'lap'
       dim: 5
     batch_size: 1
     mem_capacity: 1

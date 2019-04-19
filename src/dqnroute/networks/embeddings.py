@@ -5,6 +5,7 @@ import numpy as np
 from typing import Union
 import scipy.sparse.linalg as lg
 
+
 class Embedding(object):
     """
     Abstract class for graph node embeddings
@@ -17,6 +18,7 @@ class Embedding(object):
 
     def transform(self, nodes):
         raise NotImplementedError()
+
 
 class HOPEEmbedding(Embedding):
     def __init__(self, dim, proximity='katz', beta=0.01, **kwargs):
@@ -56,6 +58,7 @@ class HOPEEmbedding(Embedding):
     def transform(self, idx):
         return self._W[idx]
 
+
 class LaplacianEigenmap(Embedding):
     def __init__(self, dim, **kwargs):
         super().__init__(dim, **kwargs)
@@ -82,3 +85,16 @@ class LaplacianEigenmap(Embedding):
 
     def transform(self, idx):
         return self._X[idx]
+
+
+_emb_classes = {
+    'hope': HOPEEmbedding,
+    'lap': LaplacianEigenmap,
+}
+
+def get_embedding(alg: str, **kwargs):
+    try:
+        return _emb_classes[alg](**kwargs)
+    except KeyError:
+        raise Exception('Unsupported embedding algorithm: ' + alg)
+

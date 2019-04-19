@@ -18,12 +18,16 @@ _network_router_classes = {
     'simple_q': SimpleQRouterNetwork,
     'link_state': LinkStateRouter,
     'dqn': DQNRouterNetwork,
+    'dqn_oneout': DQNRouterOONetwork,
+    'dqn_emb': DQNRouterEmbNetwork,
 }
 
 _conveyors_router_classes = {
     'simple_q': SimpleQRouterConveyor,
     'link_state': LinkStateRouterConveyor,
     'dqn': DQNRouterConveyor,
+    'dqn_oneout': DQNRouterOOConveyor,
+    'dqn_emb': DQNRouterEmbConveyor,
 }
 
 def get_router_class(router_type: str, context: Optional[str] = None):
