@@ -45,17 +45,23 @@ settings:
   conveyor:
     stop_delay: 40
   router:
-    energy_reward_weight: 0.5
-    learning_rate: 0.5
-    optimizer: 'rmsprop'
-    scope: 'conveyor_test_ng'
-    activation: 'relu'
-    layers: [64, 64]
-    # additional_inputs:
-      # - tag: 'amatrix'
-      # - tag: 'work_status'
-    embedding:
-      alg: 'lap'
-      dim: 5
-    batch_size: 1
-    mem_capacity: 1
+    simple_q:
+      energy_reward_weight: 0.5
+      learning_rate: 0.5
+    dqn: &dqn
+      optimizer: 'rmsprop'
+      scope: 'conveyor_test_ng'
+      activation: 'relu'
+      layers: [64, 64]
+      additional_inputs:
+        - tag: 'amatrix'
+      batch_size: 1
+      mem_capacity: 1
+    dqn_oneout:
+      <<: *dqn
+    dqn_emb:
+      <<: *dqn
+      additional_inputs: []
+      embedding:
+        alg: 'lap'
+        dim: 5

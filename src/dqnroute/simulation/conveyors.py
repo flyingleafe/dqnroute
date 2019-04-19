@@ -250,7 +250,7 @@ class ConveyorsEnvironment(SimulationEnvironment):
             for i in range(0, period['bags_number']):
                 src = random.choice(cur_sources)
                 dst = random.choice(cur_sinks)
-                bag = Bag(bag_id, dst, env.now, None)
+                bag = Bag(bag_id, dst, self.env.now, None)
                 logger.debug("Sending random bag #{} from {} to {} at time {}"
                              .format(bag_id, src, dst, self.env.now))
                 self.sections_map[src].handle(InMessage(-1, src, PkgMessage(bag)))
