@@ -1,5 +1,8 @@
+import networkx as nx
+
 from typing import List
 from simpy import Environment, Event, Interrupt
+from ..event_series import EventSeries
 from ..messages import *
 from ..agents import *
 
@@ -32,8 +35,6 @@ class SimpyMessageEnv:
     def _msgEvent(self, msg: Message) -> Event:
         if isinstance(msg, DelayedMessage):
             proc = self.env.process(self._delayedHandle(msg.id, msg.inner_msg, msg.delay))
-            if msg.id in self.delayed_msgs:
-                raise Exception('okay well what the fuck? {}'.format(msg.id))
             self.delayed_msgs[msg.id] = proc
             return Event(self.env).succeed()
         elif isinstance(msg, DelayInterruptMessage):
@@ -46,40 +47,63 @@ class SimpyMessageEnv:
         else:
             raise UnsupportedMessageType(msg)
 
-def make_router_cfg(RouterClass, router_id, G, run_params):
+class SimulationEnvironment:
     """
-    Makes valid config for the router controller of a given class
-    """
-
-    out_routers = [v for (_, v) in G.out_edges(router_id)]
-    in_routers = [v for (v, _) in G.in_edges(router_id)]
-    router_cfg = {
-        'nodes': sorted(list(G.nodes())),
-        'out_neighbours': out_routers,
-        'in_neighbours': in_routers
-    }
-    router_cfg.update(run_params['settings']['router'])
-
-    if issubclass(RouterClass, LinkStateRouter):
-        router_cfg['adj_links'] = G.adj[router_id]
-    return router_cfg
-
-def run_env_progress(env: Environment, router_type: str, random_seed = None,
-                     progress_step = None, progress_queue = None):
-    """
-    Runs the environment, optionally reporting the progress to a given queue
+    Class which constructs an environment from given settings and runs it.
     """
 
-    if progress_queue is not None:
-        if progress_step is None:
-            env.run()
-            progress_queue.put((router_type, random_seed, progress_step))
+    def __init__(self, run_params, router_type: str, data_series: EventSeries, **kwargs):
+        self.run_params = run_params
+        self.router_type = router_type
+        self.data_series = data_series
+        self.context = None   # should be 'network' or 'conveyors' in descendants
+
+        self.G = self.makeGraph(run_params)
+        self.env = Environment()
+
+    def makeRouterCfg(self, router_id):
+        """
+        Makes valid config for the router controller of a given class
+        """
+        RouterClass = get_router_class(self.router_type, self.context)
+
+        out_routers = [v for (_, v) in self.G.out_edges(router_id)]
+        in_routers = [v for (v, _) in self.G.in_edges(router_id)]
+        router_cfg = {
+            'nodes': sorted(list(self.G.nodes())),
+            'out_neighbours': out_routers,
+            'in_neighbours': in_routers
+        }
+        router_cfg.update(self.run_params['settings']['router'].get(self.router_type, {}))
+
+        if issubclass(RouterClass, LinkStateRouter):
+            router_cfg['adj_links'] = self.G.adj[router_id]
+        return router_cfg
+
+    def run(self, random_seed = None, progress_step = None, progress_queue = None) -> EventSeries:
+        """
+        Runs the environment, optionally reporting the progress to a given queue
+        """
+        self.env.process(self.runProcess(random_seed))
+
+        if progress_queue is not None:
+            if progress_step is None:
+                self.env.run()
+                progress_queue.put((self.router_type, random_seed, progress_step))
+            else:
+                next_step = progress_step
+                while self.env.peek() != float('inf'):
+                    self.env.run(until=next_step)
+                    progress_queue.put((self.router_type, random_seed, progress_step))
+                    next_step += progress_step
+                progress_queue.put((self.router_type, random_seed, None))
         else:
-            next_step = progress_step
-            while env.peek() != float('inf'):
-                env.run(until=next_step)
-                progress_queue.put((router_type, random_seed, progress_step))
-                next_step += progress_step
-        progress_queue.put((router_type, random_seed, None))
-    else:
-        env.run()
+            self.env.run()
+
+        return self.data_series
+
+    def makeGraph(self, run_params) -> nx.DiGraph:
+        raise NotImplementedError()
+
+    def runProcess(self, random_seed):
+        raise NotImplementedError()

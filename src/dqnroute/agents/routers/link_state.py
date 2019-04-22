@@ -11,8 +11,8 @@ class AbstractLinkStateRouter(Router):
     A router which implements a link-state protocol where the notion
     of a link-state is abstracted out
     """
-    def __init__(self, env: DynamicEnv, **kwargs):
-        super().__init__(env, **kwargs)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self.seq_num = 0
         self.announcements = {}
 
@@ -66,9 +66,8 @@ class LinkStateRouter(AbstractLinkStateRouter):
     """
     Simple link-state router
     """
-    def __init__(self, env: DynamicEnv, adj_links,
-                 edge_weight='weight', **kwargs):
-        super().__init__(env, **kwargs)
+    def __init__(self, adj_links, edge_weight='weight', **kwargs):
+        super().__init__(**kwargs)
         self.network = nx.DiGraph()
         self.edge_weight = edge_weight
 
@@ -120,8 +119,8 @@ class LSConveyorMixin(object):
     in other classes.
     """
 
-    def __init__(self, env: DynamicEnv, **kwargs):
-        super().__init__(env, **kwargs)
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self.network.nodes[self.id]['works'] = False
 
     def _conveyorWorks(self) -> bool:

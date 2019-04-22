@@ -30,20 +30,28 @@ settings:
       - {pkg_number: 500, delta: 10, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
       - {action: 'restore_link', pause: 20, u: 4, v: 5}
       - {pkg_number: 500, delta: 10, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
-  logging:
-    delta: 500
   router_env:    
     pkg_process_delay: 5
   router:
-    learning_rate: 0.5
-    optimizer: 'rmsprop'
-    activation: 'relu'
-    # scope: 'per_pkg'
-    layers: [64, 64]
-    additional_inputs:
-      - tag: 'amatrix'
-    pkg_states: False
-    batch_size: 1
-    mem_capacity: 1
-    prioritized_xp: False
- 
+    simple_q:
+      learning_rate: 0.5
+    pred_q:
+      learning_rate: 1.0
+      beta: 0.7
+      gamma: 0.9
+    dqn: &dqn
+      optimizer: 'rmsprop'
+      activation: 'relu'
+      layers: [64, 64]
+      additional_inputs:
+        - tag: 'amatrix'
+      batch_size: 1
+      mem_capacity: 1
+    dqn_oneout:
+      <<: *dqn
+    dqn_emb:
+      <<: *dqn
+      additional_inputs: []
+      embedding:
+        alg: 'lap'
+        dim: 4 

@@ -12,7 +12,6 @@ class MessageHandler(object):
     Abstract class for the piece of code which interacts with its
     environment via messages.
     """
-
     def handle(self, msg: Message) -> List[Message]:
         raise UnsupportedMessageType(msg)
 
@@ -131,6 +130,7 @@ class RewardAgent(object):
     """
 
     def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self._pending_pkgs = {}
 
     def registerResentPkg(self, pkg: Package, Q_estimate: float, data) -> RewardMsg:
@@ -172,7 +172,7 @@ class ConveyorRewardAgent(RewardAgent):
     Agent which receives and processes rewards in conveyor networks
     """
 
-    def __init__(self, energy_reward_weight=1, **kwargs):
+    def __init__(self, energy_reward_weight, **kwargs):
         super().__init__(**kwargs)
         self._e_weight = energy_reward_weight
 
