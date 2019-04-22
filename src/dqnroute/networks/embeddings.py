@@ -1,9 +1,9 @@
 import warnings
 import networkx as nx
 import numpy as np
+import scipy.sparse as sp
 
 from typing import Union
-import scipy.sparse.linalg as lg
 
 
 class Embedding(object):
@@ -60,28 +60,47 @@ class HOPEEmbedding(Embedding):
 
 
 class LaplacianEigenmap(Embedding):
-    def __init__(self, dim, **kwargs):
+    def __init__(self, dim, renormalize_weights=True, weight_transform='heat',
+                 temp=1.0, **kwargs):
         super().__init__(dim, **kwargs)
+        self.renormalize_weights = renormalize_weights
+        self.weight_transform = weight_transform
+        self.temp = temp
         self._X = None
 
-    def fit(self, graph: Union[nx.DiGraph, np.ndarray], weight='weight', inv_weight=True):
+    def fit(self, graph: Union[nx.DiGraph, np.ndarray], weight='weight'):
         if type(graph) == np.ndarray:
             graph = nx.from_numpy_array(graph, create_using=nx.DiGraph)
             weight = 'weight'
 
         graph = graph.to_undirected()
 
-        if inv_weight:
+        if self.renormalize_weights:
+            sum_w = sum([ps[weight] for _, _, ps in graph.edges(data=True)])
+            avg_w = sum_w / len(graph.edges())
+            for u, v, ps in graph.edges(data=True):
+                graph[u][v][weight] /= avg_w
+
+        if self.weight_transform == 'inv':
             for u, v, ps in graph.edges(data=True):
                 graph[u][v][weight] = 1 / ps[weight]
+        elif self.weight_transform == 'heat':
+            for u, v, ps in graph.edges(data=True):
+                w = ps[weight]
+                graph[u][v][weight] = np.exp(-w*w)
 
-        L_sym = nx.normalized_laplacian_matrix(graph, nodelist=sorted(graph.nodes), weight=weight)
-        w, v = lg.eigs(L_sym, k=self.dim + 1, which='SM')
-        eigens = v[:, 1:]
-        if not np.allclose(np.imag(eigens), np.zeros(eigens.shape)):
-            warnings.warn('Imaginary values in my LAP embeddings!\n {}'
-                          .format(nx.to_numpy_array(graph, nodelist=sorted(graph.nodes))))
-        self._X = np.real(eigens)
+        A = nx.to_scipy_sparse_matrix(graph, nodelist=sorted(graph.nodes),
+                                      weight=weight, format='csr')
+        n, m = A.shape
+        diags = A.sum(axis=1)
+        D = sp.spdiags(diags.flatten(), [0], m, n, format='csr')
+        L = D - A
+
+        values, vectors = sp.linalg.eigsh(L, k=self.dim + 1, M=D, which='SM')
+        self._X = vectors[:, 1:]
+
+        if self.renormalize_weights:
+            self._X *= avg_w
 
     def transform(self, idx):
         return self._X[idx]

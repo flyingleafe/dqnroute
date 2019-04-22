@@ -1,0 +1,52 @@
+network:
+  - {u: 13, v: 2, latency: 1, bandwidth: 10240}
+  - {u: 11, v: 0, latency: 1, bandwidth: 10240}
+  - {u: 12, v: 1, latency: 1, bandwidth: 10240}
+  - {u: 2, v: 3, latency: 1, bandwidth: 10240}
+  - {u: 0, v: 3, latency: 1, bandwidth: 10240}
+  - {u: 0, v: 4, latency: 1, bandwidth: 10240}
+  - {u: 0, v: 6, latency: 1, bandwidth: 10240}
+  - {u: 1, v: 3, latency: 1, bandwidth: 10240}
+  - {u: 1, v: 4, latency: 1, bandwidth: 10240}
+  - {u: 1, v: 6, latency: 1, bandwidth: 10240}
+  - {u: 3, v: 14, latency: 1, bandwidth: 10240}
+  - {u: 3, v: 5, latency: 1, bandwidth: 10240}
+  - {u: 4, v: 5, latency: 1, bandwidth: 10240}
+  - {u: 4, v: 9, latency: 1, bandwidth: 10240}
+  - {u: 6, v: 7, latency: 1, bandwidth: 10240}
+  - {u: 7, v: 8, latency: 1, bandwidth: 10240}
+  - {u: 8, v: 9, latency: 1, bandwidth: 10240}
+  - {u: 9, v: 10, latency: 1, bandwidth: 10240}
+  - {u: 5, v: 14, latency: 1, bandwidth: 10240}
+  - {u: 5, v: 10, latency: 1, bandwidth: 10240}
+  - {u: 10, v: 14, latency: 1, bandwidth: 10240}
+
+settings:
+  pkg_distr:
+    sequence:
+      - {pkg_number: 600, delta: 4, sources: [11, 12, 13], dests: [14], simult_sources: 3}
+  router_env:    
+    pkg_process_delay: 1
+  router:
+    simple_q:
+      learning_rate: 0.5
+    pred_q:
+      learning_rate: 1.0
+      beta: 0.7
+      gamma: 0.9
+    dqn: &dqn
+      optimizer: 'rmsprop'
+      activation: 'relu'
+      layers: [64, 64]
+      additional_inputs:
+        - tag: 'amatrix'
+      batch_size: 1
+      mem_capacity: 1
+    dqn_oneout:
+      <<: *dqn
+    dqn_emb:
+      <<: *dqn
+      additional_inputs: []
+      embedding:
+        alg: 'lap'
+        dim: 4 

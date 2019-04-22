@@ -16,6 +16,7 @@ class UnsupportedRouterType(Exception):
 
 _network_router_classes = {
     'simple_q': SimpleQRouterNetwork,
+    'pred_q': PredictiveQRouterNetwork,
     'link_state': LinkStateRouter,
     'dqn': DQNRouterNetwork,
     'dqn_oneout': DQNRouterOONetwork,
@@ -24,6 +25,7 @@ _network_router_classes = {
 
 _conveyors_router_classes = {
     'simple_q': SimpleQRouterConveyor,
+    'pred_q': PredictiveQRouterConveyor,
     'link_state': LinkStateRouterConveyor,
     'dqn': DQNRouterConveyor,
     'dqn_oneout': DQNRouterOOConveyor,

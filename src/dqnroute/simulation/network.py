@@ -164,13 +164,15 @@ class NetworkEnvironment(SimulationEnvironment):
                 all_nodes = list(self.routers.keys())
                 sources = period.get("sources", all_nodes)
                 dests = period.get("dests", all_nodes)
+                simult_sources = period.get("simult_sources", 1)
 
-                for i in range(0, period["pkg_number"]):
-                    src = random.choice(sources)
-                    dst = random.choice(dests)
-                    pkg = Package(pkg_id, 1024, dst, self.env.now, None) # create empty packet
-                    logger.debug("Sending random pkg #{} from {} to {} at time {}"
-                                 .format(pkg_id, src, dst, self.env.now))
-                    self.routers[src].handle(InMessage(-1, src, PkgMessage(pkg)))
-                    pkg_id += 1
+                for i in range(0, period["pkg_number"] // simult_sources):
+                    srcs = random.sample(sources, simult_sources)
+                    for src in srcs:
+                        dst = random.choice(dests)
+                        pkg = Package(pkg_id, 1024, dst, self.env.now, None) # create empty packet
+                        logger.debug("Sending random pkg #{} from {} to {} at time {}"
+                                     .format(pkg_id, src, dst, self.env.now))
+                        self.routers[src].handle(InMessage(-1, src, PkgMessage(pkg)))
+                        pkg_id += 1
                     yield self.env.timeout(delta)
