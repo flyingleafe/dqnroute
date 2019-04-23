@@ -42,7 +42,7 @@ class SimpyRouterEnv(SimpyMessageEnv):
         self.handle(InitMessage(config))
 
     def _msgEvent(self, msg: Message) -> Event:
-        if isinstance(msg, (InitMessage, AddLinkMessage, RemoveLinkMessage)):
+        if isinstance(msg, (InitMessage, AddLinkMessage, RemoveLinkMessage, PkgEnqueuedMessage)):
             return Event(self.env).succeed(value=msg)
 
         elif isinstance(msg, OutMessage):
@@ -98,6 +98,7 @@ class SimpyRouterEnv(SimpyMessageEnv):
             return msg
 
         elif isinstance(inner_msg, PkgMessage):
+            self.handle(PkgEnqueuedMessage())
             with self.msgProcessingQueue.request() as req:
                 yield req
                 yield self.env.timeout(self.pkg_process_delay)
@@ -170,7 +171,7 @@ class NetworkEnvironment(SimulationEnvironment):
                     srcs = random.sample(sources, simult_sources)
                     for src in srcs:
                         dst = random.choice(dests)
-                        pkg = Package(pkg_id, 1024, dst, self.env.now, None) # create empty packet
+                        pkg = Package(pkg_id, DEF_PKG_SIZE, dst, self.env.now, None) # create empty packet
                         logger.debug("Sending random pkg #{} from {} to {} at time {}"
                                      .format(pkg_id, src, dst, self.env.now))
                         self.routers[src].handle(InMessage(-1, src, PkgMessage(pkg)))

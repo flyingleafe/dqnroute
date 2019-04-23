@@ -53,6 +53,9 @@ class Router(MessageHandler):
         elif isinstance(msg, InitMessage):
             return self.init(msg.config)
 
+        elif isinstance(msg, PkgEnqueuedMessage):
+            return self.detectEnqueuedPkg()
+
         elif isinstance(msg, AddLinkMessage):
             return self.addLink(**msg.getContents())
 
@@ -63,6 +66,9 @@ class Router(MessageHandler):
             return super().handle(msg)
 
     def init(self, config) -> List[Message]:
+        return []
+
+    def detectEnqueuedPkg(self) -> List[Message]:
         return []
 
     def addLink(self, to: int, direction: str, params={}) -> List[Message]:

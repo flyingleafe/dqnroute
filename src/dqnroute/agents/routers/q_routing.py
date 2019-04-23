@@ -15,7 +15,7 @@ class SimpleQRouter(Router, RewardAgent):
         super().__init__(**kwargs)
         self.learning_rate = learning_rate
         self.nodes = nodes
-        self.Q = {u: {v: 0 if u == v else random.randint(1, 10)
+        self.Q = {u: {v: 0 if u == v else 10
                       for v in self.out_neighbours}
                   for u in self.nodes}
 
@@ -24,7 +24,7 @@ class SimpleQRouter(Router, RewardAgent):
         if direction != 'in':
             for (u, dct) in self.Q.items():
                 if to not in dct:
-                    dct[to] = 0 if u == to else random.randint(1, 10)
+                    dct[to] = 0 if u == to else 10
         return msgs
 
     def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:

@@ -138,6 +138,12 @@ class PkgMessage(Message):
     def __init__(self, pkg: Package):
         super().__init__(pkg=pkg)
 
+class PkgEnqueuedMessage(Message):
+    """
+    Message which a router gets when a package is put into its queue
+    """
+    pass
+
 class PkgReceivedMessage(Message):
     """
     Message which router uses in case it was the package's

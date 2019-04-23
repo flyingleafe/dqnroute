@@ -25,8 +25,7 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     A router which implements DQN-routing algorithm
     """
     def __init__(self, batch_size: int, mem_capacity: int, nodes: List[int],
-                 embedding=None, optimizer='rmsprop',
-                 brain=None, additional_inputs=[], **kwargs):
+                 optimizer='rmsprop', brain=None, additional_inputs=[], **kwargs):
         super().__init__(**kwargs)
         self.batch_size = batch_size
         self.memory = Memory(mem_capacity)
@@ -97,20 +96,17 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         else:
             raise Exception('Unknown additional input: ' + tag)
 
-    def _nodeRepr(self, node):
-        if self.embedding is None:
-            return np.array(node)
-        else:
-            return self.embedding.transform(node).astype(np.float32)
-
-    def _getNNState(self, pkg: Package):
+    def _getNNState(self, pkg: Package, nbrs=None):
         n = len(self.nodes)
+
+        if nbrs is None:
+            nbrs = self.out_neighbours
 
         addr = np.array(self.id)
         dst = np.array(pkg.dst)
 
         neighbours = np.array(
-            list(map(lambda v: v in self.out_neighbours, self.nodes)),
+            list(map(lambda v: v in nbrs, self.nodes)),
             dtype=np.float32)
         input = [addr, dst, neighbours]
 
@@ -168,8 +164,11 @@ class DQNRouterOO(DQNRouter):
     def _nodeRepr(self, node):
         return np.array(node)
 
-    def _getNNState(self, pkg: Package):
+    def _getNNState(self, pkg: Package, nbrs=None):
         n = len(self.nodes)
+
+        if nbrs is None:
+            nbrs = sorted(list(self.out_neighbours))
 
         addr = self._nodeRepr(self.id)
         dst = self._nodeRepr(pkg.dst)

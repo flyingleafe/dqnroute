@@ -37,6 +37,9 @@ class AbstractLinkStateRouter(Router):
         return [OutMessage(self.id, v, deepcopy(announcement)) for v in self.all_neighbours]
 
     def _processStateAnnouncement(self, msg: StateAnnouncementMsg) -> bool:
+        if msg.node == self.id:
+            return False
+
         if msg.node not in self.announcements or self.announcements[msg.node].seq < msg.seq:
             self.announcements[msg.node] = msg
             res = self.processNewAnnouncement(msg.node, msg.state)
@@ -100,16 +103,56 @@ class LinkStateRouter(AbstractLinkStateRouter):
         return self.network.adj[self.id]
 
     def processNewAnnouncement(self, node: int, neighbours) -> bool:
+        changed = False
+
         for (m, params) in neighbours.items():
-            self.network.add_edge(node, m, **params)
+            if self.network.get_edge_data(node, m) != params:
+                self.network.add_edge(node, m, **params)
+                changed = True
 
         for m in set(self.network.nodes()) - set(neighbours.keys()):
             try:
                 self.network.remove_edge(node, m)
+                changed = True
             except nx.NetworkXError:
                 pass
 
-        return True
+        return changed
+
+class GlobalDynamicRouter(LinkStateRouter):
+    """
+    Router which routes packets accordingly to global-dynamic routing
+    strategy (path is weighted as a sum of queue lenghts on the nodes)
+    """
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.network.nodes[self.id]['q_len'] = 0
+
+    def _queueLength(self, node=None) -> int:
+        if node is None:
+            node = self.id
+        return self.network.nodes[node].get('q_len', 0)
+
+    def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
+        w_func = lambda u, v, ps: self._queueLength(v)
+        path = nx.dijkstra_path(self.network, self.id, pkg.dst,
+                                weight=w_func)
+        self.network.nodes[self.id]['q_len'] -= 1
+        return path[1], self._announceState()
+
+    def detectEnqueuedPkg(self) -> List[Message]:
+        self.network.nodes[self.id]['q_len'] += 1
+        return self._announceState()
+
+    def getState(self):
+        sub = super().getState()
+        return {'sub': sub, 'q_len': self._queueLength()}
+
+    def processNewAnnouncement(self, node: int, state) -> bool:
+        sub_ok = super().processNewAnnouncement(node, state['sub'])
+        q_changed = self._queueLength(node) != state['q_len']
+        self.network.nodes[node]['q_len'] = state['q_len']
+        return sub_ok or q_changed
 
 class LSConveyorMixin(object):
     """
@@ -123,8 +166,10 @@ class LSConveyorMixin(object):
         super().__init__(**kwargs)
         self.network.nodes[self.id]['works'] = False
 
-    def _conveyorWorks(self) -> bool:
-        return self.network.nodes[self.id]['works']
+    def _conveyorWorks(self, node=None) -> bool:
+        if node is None:
+            node = self.id
+        return self.network.nodes[node].get('works', False)
 
     def _setConveyorWorkStatus(self, works: bool) -> List[Message]:
         if self._conveyorWorks() != works:
@@ -138,8 +183,7 @@ class LSConveyorMixin(object):
         the destination
         """
         old_neighbours = self.out_neighbours
-        filter_func = lambda v: nx.has_path(self.network, v, pkg.dst)
-        self.out_neighbours = set(filter(filter_func, old_neighbours))
+        self.out_neighbours = set(only_reachable(self.network, pkg.dst, old_neighbours))
 
         to, msgs = super().route(sender, pkg)
         scheduled_stop_time = self.env.time() + self.env.stop_delay()
@@ -160,13 +204,17 @@ class LSConveyorMixin(object):
             return super().handleServiceMsg(sender, msg)
 
     def getState(self):
-        links = super().getState()
-        return {'links': links, 'works': self._conveyorWorks()}
+        sub = super().getState()
+        return {'sub': sub, 'works': self._conveyorWorks()}
 
     def processNewAnnouncement(self, node: int, state) -> bool:
-        links_ok = super().processNewAnnouncement(node, state['links'])
+        sub_ok = super().processNewAnnouncement(node, state['sub'])
+        works_changed = self._conveyorWorks(node) != state['works']
         self.network.nodes[node]['works'] = state['works']
-        return links_ok
+        return sub_ok or works_changed
 
 class LinkStateRouterConveyor(LSConveyorMixin, LinkStateRouter):
+    pass
+
+class GlobalDynamicRouterConveyor(LSConveyorMixin, GlobalDynamicRouter):
     pass

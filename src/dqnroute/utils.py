@@ -71,6 +71,10 @@ def make_conveyor_graph(layout) -> nx.DiGraph:
                 pass
     return DG
 
+def only_reachable(G, v, nodes, inv_paths=True):
+    filter_func = lambda u: nx.has_path(G, u, v) if inv_paths else nx.has_path(G, v, u)
+    return list(filter(filter_func, nodes))
+
 def mk_current_neural_state(G, time, pkg, node_addr, *add_data):
     n = len(G.nodes())
     k = node_addr

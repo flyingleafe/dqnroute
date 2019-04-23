@@ -11,6 +11,7 @@ setup(
         'more-itertools>=4.3.0',
         'networkx>=2.3',
         'numpy>=1.15.3',
+        'pandas>=0.23.4',
         'pyyaml>=4.2b1',
         'scikit-learn>=0.20.0',
         'scipy>=1.1.0',
