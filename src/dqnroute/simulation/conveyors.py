@@ -197,8 +197,8 @@ class ConveyorsEnvironment(SimulationEnvironment):
     simulation environment.
     """
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, data_dir=LOG_DATA_DIR+'/conveyors', **kwargs):
+        super().__init__(data_dir=data_dir, **kwargs)
 
         self.context = 'conveyors'
         self.sections_map = {}
@@ -232,6 +232,12 @@ class ConveyorsEnvironment(SimulationEnvironment):
 
     def makeGraph(self, run_params):
         return make_conveyor_graph(run_params['configuration']['layout'])
+
+    def relevantConfig(self):
+        ps = self.run_params
+        ss = ps['settings']
+        return (ps['configuration'], ss['bags_distr'], ss['conveyor_env'],
+                ss['conveyor'], ss['router'].get(self.router_type, {}))
 
     def runProcess(self, random_seed = None):
         if random_seed is not None:

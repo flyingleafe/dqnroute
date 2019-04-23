@@ -51,6 +51,13 @@ class EventSeries:
     def reset(self):
         self.records = self.records.iloc[0:0]
 
+    def load(self, csv_path):
+        self.records = pd.read_csv(csv_path, index_col=False)
+
+    def save(self, csv_path):
+        self.getSeries().to_csv(csv_path, index=False)
+
+
 class MultiEventSeries(EventSeries):
     def __init__(self, **series: Dict[str, EventSeries]):
         self.series = series
@@ -72,6 +79,15 @@ class MultiEventSeries(EventSeries):
     def reset(self):
         for s in self.series.values():
             s.reset()
+
+    def load(self, csv_path):
+        all_records = pd.read_csv(csv_path, index_col=False)
+        tags = set([col.split('_')[0] for col in all_records.columns])
+        for tag in tags:
+            df = all_records.loc[:, all_records.columns.str.startswith(tag)]
+            self.series[tag].records = df.rename(
+                columns=lambda c: '_'.join(c.split('_')[1:])
+            )
 
 def aggregator(f: Callable[[float, float], float], dv = None) -> Aggregator:
     """

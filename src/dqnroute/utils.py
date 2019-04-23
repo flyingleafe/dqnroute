@@ -1,4 +1,7 @@
 import random
+import struct
+import hashlib
+import base64
 import networkx as nx
 import numpy as np
 import torch
@@ -355,3 +358,32 @@ def sample_distr(distr: Distribution) -> int:
 
 def soft_argmax(arr, t=1.0) -> int:
     return sample_distr(softmax(arr, t=t))
+
+#
+# Simple datatypes serialization and hashing
+#
+
+def to_bytes(data):
+    if isinstance(data, bytes):
+        return data
+    elif isinstance(data, str):
+        return data.encode()
+    elif isinstance(data, int):
+        return struct.pack("!i", data)
+    elif isinstance(data, float):
+        return struct.pack("!f", data)
+
+    elif isinstance(data, (set, tuple, list)):
+        return b''.join([to_bytes(x) for x in data])
+
+    elif isinstance(data, dict):
+        return b''.join([to_bytes((k, v)) for k, v in sorted(data.items())])
+
+    else:
+        raise Exception('Unsupported type to serialize: {}'.format(type(data)))
+
+def data_digest(data):
+    ba = to_bytes(data)
+    m = hashlib.sha256()
+    m.update(ba)
+    return base64.b16encode(m.digest()).decode('utf-8')

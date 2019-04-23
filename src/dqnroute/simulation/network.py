@@ -113,8 +113,8 @@ class NetworkEnvironment(SimulationEnvironment):
     Class which constructs and runs scenarios in computer network simulation
     environment.
     """
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, data_dir=LOG_DATA_DIR+'/network', **kwargs):
+        super().__init__(data_dir=data_dir, **kwargs)
 
         self.context = 'network'
         self.routers = {}
@@ -137,6 +137,12 @@ class NetworkEnvironment(SimulationEnvironment):
 
     def makeGraph(self, run_params):
         return make_network_graph(run_params['network'])
+
+    def relevantConfig(self):
+        ps = self.run_params
+        ss = ps['settings']
+        return (ps['network'], ss['pkg_distr'], ss['router_env'],
+                ss['router'].get(self.router_type, {}))
 
     def runProcess(self, random_seed = None):
         if random_seed is not None:
