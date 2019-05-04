@@ -15,11 +15,7 @@ network:
 settings:
   pkg_distr:
     sequence:
-      # - {pkg_number: 1000, delta: 10} 
-      - {pkg_number: 100, delta: 10}
-      - {pkg_number: 500, delta: 10, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
-      - {pkg_number: 1500, delta: 3.5, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
-      - {pkg_number: 500, delta: 10, sources: [0, 1, 2, 6], dests: [3, 4, 5, 7]}
+      - {pkg_number: 2000, delta: 20}
   router_env:
     pkg_process_delay: 5
   router:
@@ -30,6 +26,7 @@ settings:
       beta: 0.7
       gamma: 0.9
     dqn: &dqn
+      random_init: true
       optimizer: 'rmsprop'
       activation: 'relu'
       layers: [64, 64]
@@ -45,6 +42,3 @@ settings:
       embedding:
         alg: 'lap'
         dim: 8
-
-
- 

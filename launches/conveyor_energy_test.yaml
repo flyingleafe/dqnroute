@@ -1,11 +1,11 @@
 configuration:
   layout:
-    - 0: {length: 1, upstream_neighbor: 2}
+    - 0: {length: 0, upstream_neighbor: 2}
       2: {length: 10, upstream_neighbor: 3, adjacent_neighbor: 11}
       3: {length: 10, upstream_neighbor: 4}
       4: {length: 10, upstream_neighbor: 17, adjacent_neighbor: 7}
-      17: {length: 1}
-    - 1: {length: 1, upstream_neighbor: 5}
+      17: {length: 0}
+    - 1: {length: 0, upstream_neighbor: 5}
       5: {length: 10, upstream_neighbor: 6, adjacent_neighbor: 12}
       6: {length: 10, upstream_neighbor: 21, adjacent_neighbor: 4}
       21: {length: 10, upstream_neighbor: 8}
@@ -19,9 +19,9 @@ configuration:
       14: {length: 10, upstream_neighbor: 15, adjacent_neighbor: 19}
       15: {length: 10, upstream_neighbor: 16, adjacent_neighbor: 18}
       16: {length: 10, upstream_neighbor: 17}
-    - 18: {length: 1}
-      19: {length: 1}
-      20: {length: 1}
+    - 18: {length: 0}
+      19: {length: 0}
+      20: {length: 0}
   sources: [0, 1]
   sinks: [17, 18, 19, 20]
 
@@ -41,14 +41,14 @@ settings:
     speed: 1
     energy_consumption: 1
     sec_process_time: 2
-    # common_brain: True
   conveyor:
     stop_delay: 40
   router:
     simple_q:
-      energy_reward_weight: 0.5
+      energy_reward_weight: 1
       learning_rate: 0.5
     dqn: &dqn
+      energy_reward_weight: 1
       optimizer: 'rmsprop'
       scope: 'conveyor_test_ng'
       activation: 'relu'
@@ -61,7 +61,8 @@ settings:
       <<: *dqn
     dqn_emb:
       <<: *dqn
+      energy_reward_weight: 0.5
       additional_inputs: []
       embedding:
         alg: 'lap'
-        dim: 5
+        dim: 10

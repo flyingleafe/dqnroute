@@ -1,5 +1,6 @@
 import logging
 import math
+import numpy as np
 import networkx as nx
 
 from typing import List, Callable, Dict, Tuple
@@ -107,9 +108,10 @@ class SimpyConveyorEnv(SimpyMessageEnv):
 
         self.sections = {}
         for (sec_id, section) in sections.items():
-            self.sections[sec_id] = {'resource': Resource(self.env, capacity=1),
-                                     'length': section['length']}
+            self.sections[sec_id] = {'resource': Resource(self.env, capacity=1)}
+            self.sections[sec_id].update(section)
 
+        self.num_bags = 0
         self.last_starting_time = -1
 
     def init(self, sections_map: Dict[int, SimpyMessageEnv], config):
@@ -128,6 +130,7 @@ class SimpyConveyorEnv(SimpyMessageEnv):
             # controller about it
             if isinstance(msg.inner_msg, PkgMessage) and to_env.id != self.id:
                 self.handle(InConveyorMsg(OutgoingBagMsg(msg.inner_msg.pkg)))
+                self.num_bags -= 1
 
             # All outgoing messages are transferred to next section immediately
             to_env.handle(new_msg)
@@ -141,7 +144,32 @@ class SimpyConveyorEnv(SimpyMessageEnv):
                 return Event(self.env).succeed(value=msg)
 
             elif isinstance(inner, PkgMessage):
-                return self.env.process(self._runSection(msg.from_node, msg.to_node, inner.pkg))
+                source = msg.from_node
+                nxt = msg.to_node
+                bag = inner.pkg
+                from_conveyor = -1 if source == -1 else self.sections_map[source].id
+
+                if source == -1:
+                    # Pass it on to the actual non-zero length section immediately,
+                    # and notify the conveyor that the bag has arrived
+                    self.handle(InConveyorMsg(IncomingBagMsg(bag)))
+                    self.num_bags += 1
+                    return Event(self.env).succeed(value=msg)
+
+                elif bag.dst == nxt:
+                    # If this section is a sink section, yield immediately, but tell a conveyor
+                    # that the bag has left if a sink section is its own
+                    if from_conveyor == self.id:
+                        self.handle(InConveyorMsg(OutgoingBagMsg(bag)))
+                        self.num_bags -= 1
+                    return Event(self.env).succeed(value=msg)
+
+                else:
+                    if from_conveyor != self.id:
+                        self.handle(InConveyorMsg(IncomingBagMsg(bag)))
+                        self.num_bags += 1
+
+                    return self.env.process(self._runSection(source, nxt, inner.pkg))
 
             else:
                 raise UnsupportedMessageType(inner)
@@ -166,8 +194,6 @@ class SimpyConveyorEnv(SimpyMessageEnv):
             logger.debug("Package #{} received at node {} at time {}"
                          .format(msg.pkg.id, self.id, self.env.now))
             self.time_series.logEvent(self.env.now, self.env.now - msg.pkg.start_time)
-            # Notify conveyor that a package has exited
-            self.handle(InConveyorMsg(OutgoingBagMsg(msg.pkg)))
 
         else:
             return super()._msgEvent(msg)
@@ -182,11 +208,10 @@ class SimpyConveyorEnv(SimpyMessageEnv):
             yield req
             yield self.env.timeout(self.sec_process_time)
 
-        from_conveyor = -1 if from_sec == -1 else self.sections_map[from_sec].id
-        if from_conveyor != self.id:
-            self.handle(InConveyorMsg(IncomingBagMsg(bag)))
+        # Hack to make conveyors slower when they have lots of bags
+        speed = max(self.speed - (np.log(self.num_bags + 1) / 7), 0.1)
 
-        yield self.env.timeout(section['length'] / self.speed)
+        yield self.env.timeout(section['length'] / speed)
 
     def _idle(self):
         return self.last_starting_time == -1
@@ -247,18 +272,23 @@ class ConveyorsEnvironment(SimulationEnvironment):
         sources = self.run_params['configuration']['sources']
         sinks = self.run_params['configuration']['sinks']
 
+        # Little pause in order to let all initialization messages settle
+        yield self.env.timeout(1)
+
         bag_id = 1
         for period in bag_distr['sequence']:
             delta = period['delta']
             cur_sources = period.get('sources', sources)
             cur_sinks = period.get('sinks', sinks)
+            simult_sources = period.get("simult_sources", 1)
 
-            for i in range(0, period['bags_number']):
-                src = random.choice(cur_sources)
-                dst = random.choice(cur_sinks)
-                bag = Bag(bag_id, dst, self.env.now, None)
-                logger.debug("Sending random bag #{} from {} to {} at time {}"
-                             .format(bag_id, src, dst, self.env.now))
-                self.sections_map[src].handle(InMessage(-1, src, PkgMessage(bag)))
-                bag_id += 1
+            for i in range(0, period['bags_number'] // simult_sources):
+                srcs = random.sample(cur_sources, simult_sources)
+                for src in srcs:
+                    dst = random.choice(cur_sinks)
+                    bag = Bag(bag_id, dst, self.env.now, None)
+                    logger.debug("Sending random bag #{} from {} to {} at time {}"
+                                 .format(bag_id, src, dst, self.env.now))
+                    self.sections_map[src].handle(InMessage(-1, src, PkgMessage(bag)))
+                    bag_id += 1
                 yield self.env.timeout(delta)

@@ -9,7 +9,7 @@ import itertools as it
 
 from typing import NewType
 
-from .constants import INFTY
+from .constants import INFTY, DEF_PKG_SIZE
 
 def set_random_seed(seed: int):
     """
@@ -52,27 +52,55 @@ def make_network_graph(edge_list) -> nx.DiGraph:
         DG.add_edge(v, u, **params)
     return DG
 
+def gen_network_graph(gen) -> nx.DiGraph:
+    """
+    Generates a random computer network graph given a
+    generator parameters
+    """
+    gen_type = gen['type']
+
+    if gen_type == 'barabasi-albert':
+        G = nx.barabasi_albert_graph(gen['n'], gen['m'], seed=gen['seed'])
+        np.random.seed(gen['seed'])
+        for u, v in G.edges():
+            G[u][v]['bandwidth'] = DEF_PKG_SIZE
+            G[u][v]['latency'] = np.random.randint(gen['min-latency'], gen['max-latency'])
+        return G.to_directed()
+    else:
+        raise Exception('Unsupported graph generator type: {}'.format(gen_type))
+
+
 def make_conveyor_graph(layout) -> nx.DiGraph:
     """
     Creates a conveyor network graph from conveyor system layout.
     """
 
     DG = nx.DiGraph()
-    for conveyor in layout:
-        for sec_id, section in conveyor.items():
-            length = section['length']
-            try:
-                upn = section['upstream_neighbor']
-                DG.add_edge(sec_id, upn, length=length)
-            except KeyError:
-                pass
+    sec_map = {}
+    for (i, conveyor) in enumerate(layout):
+        sec_map.update(conveyor)
+        for sec_id in conveyor.keys():
+            DG.add_node(sec_id, conveyor=i)
 
-            try:
-                ajn = section['adjacent_neighbor']
-                DG.add_edge(sec_id, ajn, length=length)
-            except KeyError:
-                pass
+    for sec_id, section in sec_map.items():
+        for nbr in sec_neighbors_list(section):
+            length = sec_map[nbr]['length']
+            DG.add_edge(sec_id, nbr, length=length)
+
     return DG
+
+def sec_neighbors_list(section_info):
+    res = []
+    try:
+        res.append(section_info['upstream_neighbor'])
+    except KeyError:
+        pass
+    try:
+        res.append(section_info['adjacent_neighbor'])
+    except KeyError:
+        pass
+    return res
+
 
 def only_reachable(G, v, nodes, inv_paths=True):
     filter_func = lambda u: nx.has_path(G, u, v) if inv_paths else nx.has_path(G, v, u)
@@ -242,16 +270,6 @@ def gen_conveyor_actions(sources, sinks, bags_distr):
         else:
             raise Exception('Unexpected action: ' + action)
 
-def sec_neighbors_list(section_info):
-    res = []
-    ups = section_info.get('upstream_neighbor', None)
-    if ups is not None:
-        res.append(ups)
-    adj = section_info.get('adjacent_neighbor', None)
-    if adj is not None:
-        res.append(adj)
-    return res
-
 def unique_everseen(iterable, key=None):
     "List unique elements, preserving order. Remember all elements ever seen."
     # unique_everseen('AAAABBBCCDAABBB') --> A B C D
@@ -372,6 +390,8 @@ def to_bytes(data):
         return struct.pack("!i", data)
     elif isinstance(data, float):
         return struct.pack("!f", data)
+    elif isinstance(data, bool):
+        return struct.pack("!?", data)
 
     elif isinstance(data, (set, tuple, list)):
         return b''.join([to_bytes(x) for x in data])

@@ -75,6 +75,7 @@ class SimulationEnvironment:
         in_routers = [v for (v, _) in self.G.in_edges(router_id)]
         router_cfg = {
             'nodes': sorted(list(self.G.nodes())),
+            'edges_num': len(self.G.edges()), # small hack to make link-state initialization simpler
             'out_neighbours': out_routers,
             'in_neighbours': in_routers
         }

@@ -33,9 +33,9 @@ def get_optimizer(name, params={}):
     else:
         raise Exception('Invalid optimizer: ' + str(name))
 
-def atleast_dim(x: torch.Tensor, dim: int) -> torch.Tensor:
+def atleast_dim(x: torch.Tensor, dim: int, axis=0) -> torch.Tensor:
     while x.dim() < dim:
-        x = x.unsqueeze(0)
+        x = x.unsqueeze(axis)
     return x
 
 def one_hot(indices, dim) -> torch.Tensor:
@@ -47,6 +47,10 @@ def one_hot(indices, dim) -> torch.Tensor:
     out = torch.zeros(indices.size()+torch.Size([dim]))
     d = len(indices.size())
     return out.scatter_(d, indices.unsqueeze(d).to(dtype=torch.int64), 1)
+
+def xavier_init(m: nn.Module):
+    if type(m) == nn.Linear:
+        nn.init.xavier_uniform_(m.weight)
 
 class FFNetwork(nn.Sequential):
     """

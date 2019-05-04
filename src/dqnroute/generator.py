@@ -1,13 +1,13 @@
 """
-Data generator for computer network
+Data generator for performing a supervised learning procedure
 """
 import numpy as np
 import networkx as nx
 import pandas as pd
 
-from ..utils import *
-from ..constants import *
-from ..agents import *
+from .utils import *
+from .constants import *
+from .agents import *
 
 def add_input_cols(tag, dim):
     if tag == 'amatrix':
@@ -28,6 +28,7 @@ def unsqueeze(arr):
 
 def gen_network_episodes(G: nx.DiGraph, num_episodes: int, RouterClass,
                          sinks = None, random_seed = None, additional_inputs=[], **kwargs) -> pd.DataFrame:
+
     if not issubclass(RouterClass, DQNRouter):
         raise Exception('Trying to generate pre-training dataset not for DQN-* router')
 

@@ -25,7 +25,7 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     A router which implements DQN-routing algorithm
     """
     def __init__(self, batch_size: int, mem_capacity: int, nodes: List[int],
-                 optimizer='rmsprop', brain=None, additional_inputs=[], **kwargs):
+                 optimizer='rmsprop', brain=None, random_init=False, additional_inputs=[], **kwargs):
         super().__init__(**kwargs)
         self.batch_size = batch_size
         self.memory = Memory(mem_capacity)
@@ -34,8 +34,12 @@ class DQNRouter(LinkStateRouter, RewardAgent):
 
         if brain is None:
             self.brain = self._makeBrain(additional_inputs=additional_inputs, **kwargs)
-            self.brain.restore()
-            logger.info('Restored model ' + self.brain._label)
+            if random_init:
+                self.brain.init_xavier()
+            else:
+                self.brain.restore()
+                logger.info('Restored model ' + self.brain._label)
+
         else:
             self.brain = brain
 
@@ -85,7 +89,7 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         self.optimizer.step()
         return float(loss)
 
-    def _getAddInput(self, tag):
+    def _getAddInput(self, tag, *args, **kwargs):
         if tag == 'amatrix':
             amatrix = nx.convert_matrix.to_numpy_array(
                 self.network, nodelist=self.nodes,
@@ -164,6 +168,9 @@ class DQNRouterOO(DQNRouter):
     def _nodeRepr(self, node):
         return np.array(node)
 
+    def _getAddInput(self, tag, nbr):
+        return super()._getAddInput(tag)
+
     def _getNNState(self, pkg: Package, nbrs=None):
         n = len(self.nodes)
 
@@ -173,9 +180,10 @@ class DQNRouterOO(DQNRouter):
         addr = self._nodeRepr(self.id)
         dst = self._nodeRepr(pkg.dst)
 
-        add_inputs = [self._getAddInput(inp['tag']) for inp in self.additional_inputs]
+        get_add_inputs = lambda nbr: [self._getAddInput(inp['tag'], nbr)
+                                      for inp in self.additional_inputs]
 
-        input = [[addr, dst, self._nodeRepr(v)] + add_inputs
+        input = [[addr, dst, self._nodeRepr(v)] + get_add_inputs(v)
                  for v in sorted(list(self.out_neighbours))]
         return stack_batch(input)
 
@@ -189,10 +197,11 @@ class DQNRouterEmb(DQNRouterOO):
     Variant of DQNRouter which uses graph embeddings instead of
     one-hot label encodings.
     """
-    def __init__(self, embedding: Union[dict, Embedding], **kwargs):
+    def __init__(self, embedding: Union[dict, Embedding], edges_num: int, **kwargs):
         # Those are used to only re-learn the embedding when the topology is changed
         self.prev_num_nodes = 0
         self.prev_num_edges = 0
+        self.init_edges_num = edges_num
 
         if type(embedding) == dict:
             self.embedding = get_embedding(**embedding)
@@ -209,16 +218,15 @@ class DQNRouterEmb(DQNRouterOO):
         return self.embedding.transform(node).astype(np.float32)
 
     def networkComplete(self):
-        return len(self.network.nodes) == len(self.nodes)
+        return len(self.network.nodes) == len(self.nodes) and len(self.network.edges) == self.init_edges_num
 
     def networkInit(self):
-        if self.embedding is not None:
-            num_nodes = len(self.network.nodes)
-            num_edges = len(self.network.edges)
-            if num_edges != self.prev_num_edges or num_nodes != self.prev_num_nodes:
-                self.prev_num_nodes = num_nodes
-                self.prev_num_edges = num_edges
-                self.embedding.fit(self.network, weight=self.edge_weight)
+        num_nodes = len(self.network.nodes)
+        num_edges = len(self.network.edges)
+        if num_edges != self.prev_num_edges or num_nodes != self.prev_num_nodes:
+            self.prev_num_nodes = num_nodes
+            self.prev_num_edges = num_edges
+            self.embedding.fit(self.network, weight=self.edge_weight)
 
 
 class DQNRouterNetwork(NetworkRewardAgent, DQNRouter):
@@ -235,13 +243,16 @@ class ConveyorAddInputMixin:
     """
     Mixing which adds conveyor-specific additional NN inputs support
     """
-    def _getAddInput(self, tag):
+    def _getAddInput(self, tag, nbr=None):
         if tag == 'work_status':
             return np.array(
                 list(map(lambda n: self.network.nodes[n].get('works', False), self.nodes)),
                 dtype=np.float32)
+        if tag == 'working':
+            nbr_works = 1 if self.network.nodes[nbr].get('works', False) else 0
+            return np.array(nbr_works, dtype=np.float32)
         else:
-            return super()._getAddInput(tag)
+            return super()._getAddInput(tag, nbr)
 
 
 class DQNRouterConveyor(LSConveyorMixin, ConveyorRewardAgent, ConveyorAddInputMixin, DQNRouter):
@@ -251,4 +262,10 @@ class DQNRouterOOConveyor(LSConveyorMixin, ConveyorRewardAgent, ConveyorAddInput
     pass
 
 class DQNRouterEmbConveyor(LSConveyorMixin, ConveyorRewardAgent, ConveyorAddInputMixin, DQNRouterEmb):
-    pass
+    def networkInit(self):
+        num_nodes = len(self.network.nodes)
+        num_edges = len(self.network.edges)
+        if num_edges != self.prev_num_edges or num_nodes != self.prev_num_nodes:
+            self.prev_num_nodes = num_nodes
+            self.prev_num_edges = num_edges
+            self.embedding.fit(self.network, weight=None) # only for this 'None' all the fuss

@@ -54,4 +54,4 @@ settings:
       additional_inputs: []
       embedding:
         alg: 'lap'
-        dim: 4 
+        dim: 8

@@ -32,17 +32,19 @@ settings:
       - {bags_number: 200, delta: 20}
       - {bags_number: 200, delta: 20, sinks: [17, 18]} 
       - {bags_number: 200, delta: 20}
-      - {bags_number: 400, delta: 10} 
-      - {bags_number: 440, delta: 9}
-      - {bags_number: 500, delta: 8}
-      - {bags_number: 570, delta: 7}
-      - {bags_number: 666, delta: 6}
+      - {bags_number: 200, delta: 10} 
+      - {bags_number: 400, delta: 10, simult_sources: 2}
+      - {bags_number: 600, delta: 7, simult_sources: 2}
+      - {bags_number: 800, delta: 4, simult_sources: 2}
+      - {bags_number: 1100, delta: 3, simult_sources: 2}
+      - {bags_number: 1200, delta: 2.5, simult_sources: 2}
+      # - {bags_number: 800, delta: 2, simult_sources: 2}
+      # - {bags_number: 666, delta: 4}
       # - {bags_number: 430, delta: 3}
   conveyor_env:
     speed: 1
     energy_consumption: 1
-    sec_process_time: 10
-    # common_brain: True
+    sec_process_time: 2
   conveyor:
     stop_delay: 40
   router:
@@ -51,6 +53,7 @@ settings:
       learning_rate: 0.5
     dqn: &dqn
       energy_reward_weight: 1
+      # energy_reward_weight: 0.8
       optimizer: 'rmsprop'
       scope: 'conveyor_test_ng'
       activation: 'relu'
@@ -63,4 +66,13 @@ settings:
       <<: *dqn
     dqn_emb:
       <<: *dqn
+      # energy_reward_weight: 0.2
+      energy_reward_weight: 0.4
       additional_inputs: []
+      # additional_inputs:
+        # - tag: 'working'
+          # dim: 1
+      embedding:
+        alg: 'lap'
+        dim: 10
+

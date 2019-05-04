@@ -7,4 +7,4 @@ from .messages import *
 from .utils import *
 from .agents import *
 from .simulation import *
-from .generators import *
+from .generator import *

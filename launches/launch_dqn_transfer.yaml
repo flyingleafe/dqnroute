@@ -1,0 +1,44 @@
+network:
+  generator:
+    type: 'barabasi-albert'
+    n: 10
+    m: 2
+    seed: 42
+    min-latency: 10
+    max-latency: 20
+
+settings:
+  pkg_distr:
+    sequence:
+      - {pkg_number: 2000, delta: 20}
+  router_env:
+    pkg_process_delay: 5
+  router:
+    simple_q:
+      learning_rate: 0.5
+    pred_q:
+      learning_rate: 1.0
+      beta: 0.7
+      gamma: 0.9
+    dqn: &dqn
+      # random_init: true
+      optimizer: 'rmsprop'
+      activation: 'relu'
+      layers: [64, 64]
+      additional_inputs:
+        - tag: 'amatrix'
+      batch_size: 1
+      mem_capacity: 1
+    dqn_oneout:
+      <<: *dqn
+    dqn_emb:
+      # random_init: true
+      optimizer: 'rmsprop'
+      activation: 'relu'
+      layers: [64, 64]
+      additional_inputs: []
+      batch_size: 1
+      mem_capacity: 1
+      embedding:
+        alg: 'lap'
+        dim: 8

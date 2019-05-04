@@ -43,19 +43,23 @@ class QNetwork(SaveableModel):
         else:
             input_dim += 2 * embedding_dim
 
+        output_dim = 1 if one_out else n
+
         self._scope = scope if len(scope) > 0 else None
         self._label = 'qnetwork{}{}_{}_{}_{}_{}_{}'.format(
             '-oneinp' if one_out else '',
             '-emb-{}'.format(embedding_dim) if self.uses_embedding else '',
             input_dim,
             '-'.join(map(str, layers)),
-            n,
+            output_dim,
             activation,
             '_'.join(map(lambda p: p[0]+'-'+str(p[1]), self.add_inputs)))
 
-        output_dim = 1 if one_out else n
 
         self.ff_net = FFNetwork(input_dim, output_dim, layers=layers, activation=activation)
+
+    def init_xavier(self):
+        self.ff_net.apply(xavier_init)
 
     def forward(self, addr, dst, neighbour, *others):
         if self.uses_embedding:
@@ -76,10 +80,15 @@ class QNetwork(SaveableModel):
 
             input_tensors = [addr_, dst_, neighbour_]
 
+        batch_dim = input_tensors[0].size()[0]
+
         for ((tag, dim), inp) in zip(self.add_inputs, others):
             inp = atleast_dim(inp, 2)
+            if inp.size()[0] != batch_dim:
+                inp = inp.transpose(0, 1)
+
             if inp.size()[1] != dim:
-                raise Exception('Wrong {} input dimension: expected {}, actual {}'
+                raise Exception('Wrong `{}` input dimension: expected {}, actual {}'
                                 .format(tag, dim, inp.size()[1]))
 
             if tag == 'amatrix':

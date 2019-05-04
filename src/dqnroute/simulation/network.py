@@ -136,7 +136,13 @@ class NetworkEnvironment(SimulationEnvironment):
             self.routers[node].init(out_routers, {})
 
     def makeGraph(self, run_params):
-        return make_network_graph(run_params['network'])
+        network = run_params['network']
+        if type(network) == list:
+            return make_network_graph(run_params['network'])
+        elif type(network) == dict:
+            return gen_network_graph(network['generator'])
+        else:
+            raise Exception('Invalid network config: {}'.format(network))
 
     def relevantConfig(self):
         ps = self.run_params
@@ -154,7 +160,7 @@ class NetworkEnvironment(SimulationEnvironment):
         for period in pkg_distr["sequence"]:
             try:
                 action = period["action"]
-                pause = period["pause"]
+                pause = period.get("pause", 0)
                 u = period["u"]
                 v = period["v"]
 

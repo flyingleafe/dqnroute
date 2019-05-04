@@ -75,22 +75,24 @@ class LaplacianEigenmap(Embedding):
 
         graph = graph.to_undirected()
 
-        if self.renormalize_weights:
-            sum_w = sum([ps[weight] for _, _, ps in graph.edges(data=True)])
-            avg_w = sum_w / len(graph.edges())
-            for u, v, ps in graph.edges(data=True):
-                graph[u][v][weight] /= avg_w
+        if weight is not None:
+            if self.renormalize_weights:
+                sum_w = sum([ps[weight] for _, _, ps in graph.edges(data=True)])
+                avg_w = sum_w / len(graph.edges())
+                for u, v, ps in graph.edges(data=True):
+                    graph[u][v][weight] /= avg_w
 
-        if self.weight_transform == 'inv':
-            for u, v, ps in graph.edges(data=True):
-                graph[u][v][weight] = 1 / ps[weight]
-        elif self.weight_transform == 'heat':
-            for u, v, ps in graph.edges(data=True):
-                w = ps[weight]
-                graph[u][v][weight] = np.exp(-w*w)
+            if self.weight_transform == 'inv':
+                for u, v, ps in graph.edges(data=True):
+                    graph[u][v][weight] = 1 / ps[weight]
+
+            elif self.weight_transform == 'heat':
+                for u, v, ps in graph.edges(data=True):
+                    w = ps[weight]
+                    graph[u][v][weight] = np.exp(-w*w)
 
         A = nx.to_scipy_sparse_matrix(graph, nodelist=sorted(graph.nodes),
-                                      weight=weight, format='csr')
+                                      weight=weight, format='csr', dtype=np.float32)
         n, m = A.shape
         diags = A.sum(axis=1)
         D = sp.spdiags(diags.flatten(), [0], m, n, format='csr')
@@ -99,7 +101,7 @@ class LaplacianEigenmap(Embedding):
         values, vectors = sp.linalg.eigsh(L, k=self.dim + 1, M=D, which='SM')
         self._X = vectors[:, 1:]
 
-        if self.renormalize_weights:
+        if weight is not None and self.renormalize_weights:
             self._X *= avg_w
 
     def transform(self, idx):
