@@ -15,29 +15,6 @@ from .common import *
 
 logger = logging.getLogger(DQNROUTE_LOGGER)
 
-class MultiHandler(MessageHandler):
-    """
-    Handler which distributes the messages across individual
-    sections' handlers and conveyor handler
-    """
-
-    def __init__(self, conveyor: MessageHandler, sections: Dict[int, MessageHandler]):
-        self._conveyor = conveyor
-        self._sections = sections
-
-    def handle(self, msg: Message) -> List[Message]:
-        if isinstance(msg, InMessage):
-            return self._sections[msg.to_node].handle(msg)
-
-        elif isinstance(msg, InitMessage):
-            return sum(map(lambda h: h.handle(msg), self._sections.values()), [])
-
-        elif isinstance(msg, InConveyorMsg):
-            msgs = self._conveyor.handle(msg.inner)
-            return msgs
-
-        else:
-            return super().handle(msg)
 
 class EnergySpender(object):
     """
@@ -60,163 +37,172 @@ class EnergySpender(object):
                                       self.consumption)
             self.time_started = -1
 
-class SimpyConveyorEnv(SimpyMessageEnv):
-    """
-    Conveyor environment which plays the role of outer world and
-    handles message passing between routers.
-    Passing a message to a router is done via `handle` method.
-    """
+# class SimpyConveyorEnv(SimpyMessageEnv):
+#     """
+#     Conveyor environment which plays the role of outer world and
+#     handles message passing between routers.
+#     Passing a message to a router is done via `handle` method.
+#     """
 
-    def __init__(self, env: Environment, ConveyorClass, RouterClass, conveyor_id: int, sections,
+#     def __init__(self, env: Environment, ConveyorClass, RouterClass, conveyor_id: int, sections,
+#                  time_series: EventSeries, energy_series: EventSeries,
+#                  speed: float = 1, energy_consumption: float = 1, sec_process_time: int = 10,
+#                  common_brain: bool = False, conveyor_init_args={}, routers_init_args={}, **kwargs):
+
+#         time_func = lambda: env.now
+#         energy_func = lambda: energy_consumption
+#         dyn_env = DynamicEnv(time=time_func, energy_consumption=energy_func)
+
+#         conveyor = ConveyorClass(env=dyn_env, conveyor_id=conveyor_id, **conveyor_init_args)
+
+#         if common_brain and issubclass(RouterClass, DQNRouter):
+#             common_router_args = next(iter(routers_init_args.values()))
+#             try:
+#                 embedding_dim = common_router_args['embedding']['dim']
+#             except KeyError:
+#                 embedding_dim = None
+#             n = len(common_router_args['nodes'])
+
+#             brain = QNetwork(n, embedding_dim=embedding_dim, **common_router_args)
+#             brain.restore()
+#             logger.info('Restored model ' + brain._label)
+#         else:
+#             brain = None
+
+#         section_routers = {
+#             sec_id: RouterClass(env=dyn_env, router_id=sec_id, brain=brain,
+#                                 **routers_init_args.get(sec_id, {}))
+#             for sec_id in sections.keys()
+#         }
+
+#         super().__init__(env, MultiHandler(conveyor, section_routers))
+
+#         self.id = conveyor_id
+#         self.time_series = time_series
+#         self.speed = speed
+#         self.sec_process_time = sec_process_time
+#         self.energy_spender = EnergySpender(env, energy_series, energy_consumption)
+
+#         self.sections = {}
+#         for (sec_id, section) in sections.items():
+#             self.sections[sec_id] = {'resource': Resource(self.env, capacity=1)}
+#             self.sections[sec_id].update(section)
+
+#         self.num_bags = 0
+#         self.last_starting_time = -1
+
+#     def init(self, sections_map: Dict[int, SimpyMessageEnv], config):
+#         self.sections_map = sections_map
+#         self.handle(InitMessage(config))
+
+#     def _msgEvent(self, msg: Message) -> Event:
+#         if isinstance(msg, InitMessage):
+#             return Event(self.env).succeed(value=msg)
+
+#         elif isinstance(msg, OutMessage):
+#             new_msg = InMessage(**msg.getContents())
+#             to_env = self.sections_map[msg.to_node]
+
+#             # If we are moving a bag out of our conveyor, notify conveyor
+#             # controller about it
+#             if isinstance(msg.inner_msg, PkgMessage) and to_env.id != self.id:
+#                 self.handle(InConveyorMsg(OutgoingBagMsg(msg.inner_msg.pkg)))
+#                 self.num_bags -= 1
+
+#             # All outgoing messages are transferred to next section immediately
+#             to_env.handle(new_msg)
+
+#             return Event(self.env).succeed(value=new_msg)
+
+#         elif isinstance(msg, InMessage):
+#             inner = msg.inner_msg
+
+#             if isinstance(inner, ServiceMessage):
+#                 return Event(self.env).succeed(value=msg)
+
+#             elif isinstance(inner, PkgMessage):
+#                 source = msg.from_node
+#                 nxt = msg.to_node
+#                 bag = inner.pkg
+#                 from_conveyor = -1 if source == -1 else self.sections_map[source].id
+
+#                 if source == -1:
+#                     # Pass it on to the actual non-zero length section immediately,
+#                     # and notify the conveyor that the bag has arrived
+#                     self.handle(InConveyorMsg(IncomingBagMsg(bag)))
+#                     self.num_bags += 1
+#                     return Event(self.env).succeed(value=msg)
+
+#                 elif bag.dst == nxt:
+#                     # If this section is a sink section, yield immediately, but tell a conveyor
+#                     # that the bag has left if a sink section is its own
+#                     if from_conveyor == self.id:
+#                         self.handle(InConveyorMsg(OutgoingBagMsg(bag)))
+#                         self.num_bags -= 1
+#                     return Event(self.env).succeed(value=msg)
+
+#                 else:
+#                     if from_conveyor != self.id:
+#                         self.handle(InConveyorMsg(IncomingBagMsg(bag)))
+#                         self.num_bags += 1
+
+#                     return self.env.process(self._runSection(source, nxt, inner.pkg))
+
+#             else:
+#                 raise UnsupportedMessageType(inner)
+
+#         elif isinstance(msg, OutConveyorMsg):
+#             new_msg = InConveyorMsg(msg.inner)
+#             self.handle(new_msg)
+#             return Event(self.env).succeed(value=msg)
+
+#         elif isinstance(msg, InConveyorMsg):
+#             inner = msg.inner
+#             if isinstance(inner, ConveyorStartMsg) and self._idle():
+#                 self.last_starting_time = self.env.now
+#                 self.energy_spender.start()
+#             elif isinstance(inner, ConveyorStopMsg):
+#                 self.last_starting_time = -1
+#                 self.energy_spender.stop()
+
+#             return Event(self.env).succeed(value=msg)
+
+#         elif isinstance(msg, PkgReceivedMessage):
+#             logger.debug("Package #{} received at node {} at time {}"
+#                          .format(msg.pkg.id, self.id, self.env.now))
+#             self.time_series.logEvent(self.env.now, self.env.now - msg.pkg.start_time)
+
+#         else:
+#             return super()._msgEvent(msg)
+
+#     def _runSection(self, from_sec: int, sec_id: int, bag: Bag):
+#         """
+#         Generator which models the process of a bag going along conveyor section
+#         """
+#         section = self.sections[sec_id]
+
+#         with section['resource'].request() as req:
+#             yield req
+#             yield self.env.timeout(self.sec_process_time)
+
+#         # Hack to make conveyors slower when they have lots of bags
+#         speed = max(self.speed - (np.log(self.num_bags + 1) / 7), 0.1)
+
+#         yield self.env.timeout(section['length'] / speed)
+
+#     def _idle(self):
+#         return self.last_starting_time == -1
+
+
+class ConveyorsEnvironment(MultiAgentEnv):
+    def __init__(self, RouterClass, ConveyorClass, sections,
                  time_series: EventSeries, energy_series: EventSeries,
                  speed: float = 1, energy_consumption: float = 1, sec_process_time: int = 10,
-                 common_brain: bool = False, conveyor_init_args={}, routers_init_args={}, **kwargs):
+                 mk_conveyor_args = lambda n: {}, mk_router_args = lambda n: {}, **kwargs):
+        pass
 
-        time_func = lambda: env.now
-        energy_func = lambda: energy_consumption
-        dyn_env = DynamicEnv(time=time_func, energy_consumption=energy_func)
 
-        conveyor = ConveyorClass(env=dyn_env, conveyor_id=conveyor_id, **conveyor_init_args)
-
-        if common_brain and issubclass(RouterClass, DQNRouter):
-            common_router_args = next(iter(routers_init_args.values()))
-            try:
-                embedding_dim = common_router_args['embedding']['dim']
-            except KeyError:
-                embedding_dim = None
-            n = len(common_router_args['nodes'])
-
-            brain = QNetwork(n, embedding_dim=embedding_dim, **common_router_args)
-            brain.restore()
-            logger.info('Restored model ' + brain._label)
-        else:
-            brain = None
-
-        section_routers = {
-            sec_id: RouterClass(env=dyn_env, router_id=sec_id, brain=brain,
-                                **routers_init_args.get(sec_id, {}))
-            for sec_id in sections.keys()
-        }
-
-        super().__init__(env, MultiHandler(conveyor, section_routers))
-
-        self.id = conveyor_id
-        self.time_series = time_series
-        self.speed = speed
-        self.sec_process_time = sec_process_time
-        self.energy_spender = EnergySpender(env, energy_series, energy_consumption)
-
-        self.sections = {}
-        for (sec_id, section) in sections.items():
-            self.sections[sec_id] = {'resource': Resource(self.env, capacity=1)}
-            self.sections[sec_id].update(section)
-
-        self.num_bags = 0
-        self.last_starting_time = -1
-
-    def init(self, sections_map: Dict[int, SimpyMessageEnv], config):
-        self.sections_map = sections_map
-        self.handle(InitMessage(config))
-
-    def _msgEvent(self, msg: Message) -> Event:
-        if isinstance(msg, InitMessage):
-            return Event(self.env).succeed(value=msg)
-
-        elif isinstance(msg, OutMessage):
-            new_msg = InMessage(**msg.getContents())
-            to_env = self.sections_map[msg.to_node]
-
-            # If we are moving a bag out of our conveyor, notify conveyor
-            # controller about it
-            if isinstance(msg.inner_msg, PkgMessage) and to_env.id != self.id:
-                self.handle(InConveyorMsg(OutgoingBagMsg(msg.inner_msg.pkg)))
-                self.num_bags -= 1
-
-            # All outgoing messages are transferred to next section immediately
-            to_env.handle(new_msg)
-
-            return Event(self.env).succeed(value=new_msg)
-
-        elif isinstance(msg, InMessage):
-            inner = msg.inner_msg
-
-            if isinstance(inner, ServiceMessage):
-                return Event(self.env).succeed(value=msg)
-
-            elif isinstance(inner, PkgMessage):
-                source = msg.from_node
-                nxt = msg.to_node
-                bag = inner.pkg
-                from_conveyor = -1 if source == -1 else self.sections_map[source].id
-
-                if source == -1:
-                    # Pass it on to the actual non-zero length section immediately,
-                    # and notify the conveyor that the bag has arrived
-                    self.handle(InConveyorMsg(IncomingBagMsg(bag)))
-                    self.num_bags += 1
-                    return Event(self.env).succeed(value=msg)
-
-                elif bag.dst == nxt:
-                    # If this section is a sink section, yield immediately, but tell a conveyor
-                    # that the bag has left if a sink section is its own
-                    if from_conveyor == self.id:
-                        self.handle(InConveyorMsg(OutgoingBagMsg(bag)))
-                        self.num_bags -= 1
-                    return Event(self.env).succeed(value=msg)
-
-                else:
-                    if from_conveyor != self.id:
-                        self.handle(InConveyorMsg(IncomingBagMsg(bag)))
-                        self.num_bags += 1
-
-                    return self.env.process(self._runSection(source, nxt, inner.pkg))
-
-            else:
-                raise UnsupportedMessageType(inner)
-
-        elif isinstance(msg, OutConveyorMsg):
-            new_msg = InConveyorMsg(msg.inner)
-            self.handle(new_msg)
-            return Event(self.env).succeed(value=msg)
-
-        elif isinstance(msg, InConveyorMsg):
-            inner = msg.inner
-            if isinstance(inner, ConveyorStartMsg) and self._idle():
-                self.last_starting_time = self.env.now
-                self.energy_spender.start()
-            elif isinstance(inner, ConveyorStopMsg):
-                self.last_starting_time = -1
-                self.energy_spender.stop()
-
-            return Event(self.env).succeed(value=msg)
-
-        elif isinstance(msg, PkgReceivedMessage):
-            logger.debug("Package #{} received at node {} at time {}"
-                         .format(msg.pkg.id, self.id, self.env.now))
-            self.time_series.logEvent(self.env.now, self.env.now - msg.pkg.start_time)
-
-        else:
-            return super()._msgEvent(msg)
-
-    def _runSection(self, from_sec: int, sec_id: int, bag: Bag):
-        """
-        Generator which models the process of a bag going along conveyor section
-        """
-        section = self.sections[sec_id]
-
-        with section['resource'].request() as req:
-            yield req
-            yield self.env.timeout(self.sec_process_time)
-
-        # Hack to make conveyors slower when they have lots of bags
-        speed = max(self.speed - (np.log(self.num_bags + 1) / 7), 0.1)
-
-        yield self.env.timeout(section['length'] / speed)
-
-    def _idle(self):
-        return self.last_starting_time == -1
-
-class ConveyorsEnvironment(SimulationEnvironment):
+class ConveyorsRunner(SimulationRunner):
     """
     Class which constructs and runs scenarios in conveyor network
     simulation environment.

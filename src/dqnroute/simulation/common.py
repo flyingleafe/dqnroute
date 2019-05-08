@@ -8,86 +8,142 @@ from ..messages import *
 from ..agents import *
 from ..utils import data_digest
 
-class SimpyMessageEnv:
+class MultiAgentEnv:
     """
-    Abstract class which represent an object which processes messages/entities
-    from the environment
+    Abstract class which simulates an environment with multiple agents,
+    where agents are connected accordingly to a given connection graph.
     """
-
-    def __init__(self, env: Environment, handler: MessageHandler):
+    def __init__(self, env: Environment, **kwargs):
         self.env = env
-        self.handler = handler
-        self.delayed_msgs = {}
+        self.conn_graph = self.makeConnGraph(**kwargs)
 
-    def handle(self, msg: Message) -> Event:
-        return self.env.process(self._handleGen(msg))
+        agent_ids = list(self.conn_graph.nodes)
+        self.handlers = {agent_id: self.makeHandler(agent_id) for agent_id in agent_ids}
+        self.delayed_msgs = {agent_id: {} for agent_id in agent_ids}
 
-    def _handleGen(self, msg: Message):
-        yield self._msgEvent(msg)
-        return [self._msgEvent(m) for m in self.handler.handle(msg)]
+    def makeConnGraph(self, **kwargs) -> nx.Graph:
+        """
+        A method which defines a connection graph for the system with
+        given params.
+        Should be overridden. The node labels of a resulting graph should be
+        `AgentId`s.
+        """
+        raise NotImplementedError()
 
-    def _delayedHandle(self, proc_id: int, msg: Message, delay: float):
-        try:
-            yield self.env.timeout(delay)
-            self._msgEvent(msg)
-        except Interrupt:
-            pass
-        del self.delayed_msgs[proc_id]
+    def makeHandler(self, agent_id: AgentId) -> MessageHandler:
+        """
+        A method which initializes the agent handler given the agent ID.
+        Should be overridden.
+        """
+        raise NotImplementedError()
 
-    def _msgEvent(self, msg: Message) -> Event:
+    def handle(self, from_agent: AgentId, event: WorldEvent) -> Event:
+        """
+        Main method which governs how events cause each other in the
+        environment. Not to be overridden in children: `handleAction` and
+        `handleWorldEvent` should be overridden instead.
+        """
+
+        if isinstance(event, Message):
+            return self.handleMessage(from_agent, event)
+        elif isinstance(event, Action):
+            return self.handleAction(from_agent, event)
+        elif from_agent[0] == 'world':
+            return handleWorldEvent(event)
+        else:
+            raise Exception('Non-world event: ' + str(event))
+
+    def handleMessage(self, from_agent: AgentId, msg: Message) -> Event:
+        """
+        Method which handles how messages should be dealt with. Is not meant to be
+        overridden.
+        """
+
         if isinstance(msg, DelayedMessage):
-            proc = self.env.process(self._delayedHandle(msg.id, msg.inner_msg, msg.delay))
-            self.delayed_msgs[msg.id] = proc
-            return Event(self.env).succeed()
+            proc = self.env.process(self._delayedHandleGen(from_agent, msg))
+            self.delayed_msgs[from_agent][msg.id] = proc
+            return proc
+
         elif isinstance(msg, DelayInterruptMessage):
             try:
-                self.delayed_msgs[msg.delay_id].interrupt()
+                self.delayed_msgs[from_agent][msg.delay_id].interrupt()
             except (KeyError, RuntimeError):
                 pass
-
             return Event(self.env).succeed()
+
+        elif isinstance(msg, WireOutMsg):
+            return self.env.process(self._handleOutMsgGen(from_agent, msg))
+
         else:
             raise UnsupportedMessageType(msg)
 
-class SimulationEnvironment:
+    def handleAction(self, from_agent: AgentId, action: Action) -> Event:
+        """
+        Method which governs how agents' actions influence the environment
+        Should be overridden by subclasses.
+        """
+        raise UnsupportedActionType(action)
+
+    def handleWorldEvent(self, event: WorldEvent) -> Event:
+        """
+        Method which governs how events from outside influence the environment.
+        Should be overridden by subclasses.
+        """
+        raise UnsupportedEventType(event)
+
+    def passToAgent(self, agent: AgentId, event: WorldEvent) -> Event:
+        """
+        Let an agent react on event and handle all events produced by agent as
+        a consequence.
+        """
+
+        for new_event in self.handlers[agent].handle(event):
+            self.handle(agent, new_event)
+        return Event(self.env).succeed()
+
+    def _delayedHandleGen(self, from_agent: AgentId, msg: DelayedMessage):
+        proc_id = msg.id
+        delay = msg.delay
+        inner = msg.inner_msg
+
+        try:
+            yield self.env.timeout(delay)
+            yield from self._handleOutMsgGen(from_agent, inner)
+        except Interrupt:
+            pass
+        del self.delayed_msgs[from_agent][proc_id]
+
+    def _handleOutMsgGen(self, from_agent: AgentId, msg: WireOutMsg):
+        int_id = msg.interface
+        inner = msg.payload
+
+        if int_id == -1:
+            to_agent = from_agent
+            to_interface = -1
+        else:
+            to_agent = list(self.conn_graph.edges(from_agent))[int_id][1]
+            to_interface = list(self.conn_graph.edges(to_agent)).index((to_agent, from_agent))
+
+        yield self.passToAgent(to_agent, WireInMsg(to_interface, inner))
+
+
+class SimulationRunner:
     """
     Class which constructs an environment from given settings and runs it.
     """
 
-    def __init__(self, run_params, router_type: str, data_series: EventSeries,
-                 data_dir: str, **kwargs):
+    def __init__(self, run_params, data_series: EventSeries, data_dir: str, **kwargs):
         self.run_params = run_params
-        self.router_type = router_type
         self.data_series = data_series
         self.data_dir = data_dir
-        self.context = None   # should be 'network' or 'conveyors' in descendants
 
-        self.G = self.makeGraph(run_params)
+        # Makes a world simulation
         self.env = Environment()
-
-    def makeRouterCfg(self, router_id):
-        """
-        Makes valid config for the router controller of a given class
-        """
-        RouterClass = get_router_class(self.router_type, self.context)
-
-        out_routers = [v for (_, v) in self.G.out_edges(router_id)]
-        in_routers = [v for (v, _) in self.G.in_edges(router_id)]
-        router_cfg = {
-            'nodes': sorted(list(self.G.nodes())),
-            'edges_num': len(self.G.edges()), # small hack to make link-state initialization simpler
-            'out_neighbours': out_routers,
-            'in_neighbours': in_routers
-        }
-        router_cfg.update(self.run_params['settings']['router'].get(self.router_type, {}))
-
-        if issubclass(RouterClass, LinkStateRouter):
-            router_cfg['adj_links'] = self.G.adj[router_id]
-        return router_cfg
+        self.world = self.makeMultiAgentEnv(**kwargs)
 
     def runDataPath(self, random_seed) -> str:
         cfg = self.relevantConfig()
-        return '{}/{}-{}-{}.csv'.format(self.data_dir, data_digest(cfg), self.router_type, random_seed)
+        return '{}/{}-{}.csv'.format(self.data_dir, data_digest(cfg), self.makeRunId(random_seed))
 
     def run(self, random_seed = None, ignore_saved = False,
             progress_step = None, progress_queue = None) -> EventSeries:
@@ -95,10 +151,12 @@ class SimulationEnvironment:
         Runs the environment, optionally reporting the progress to a given queue
         """
         data_path = self.runDataPath(random_seed)
+        run_id = self.makeRunId(random_seed)
+
         if not ignore_saved and os.path.isfile(data_path):
             self.data_series.load(data_path)
             if progress_queue is not None:
-                progress_queue.put((self.router_type, random_seed, None))
+                progress_queue.put((run_id, None))
 
         else:
             self.env.process(self.runProcess(random_seed))
@@ -106,14 +164,14 @@ class SimulationEnvironment:
             if progress_queue is not None:
                 if progress_step is None:
                     self.env.run()
-                    progress_queue.put((self.router_type, random_seed, progress_step))
+                    progress_queue.put((run_id, progress_step))
                 else:
                     next_step = progress_step
                     while self.env.peek() != float('inf'):
                         self.env.run(until=next_step)
-                        progress_queue.put((self.router_type, random_seed, progress_step))
+                        progress_queue.put((run_id, progress_step))
                         next_step += progress_step
-                    progress_queue.put((self.router_type, random_seed, None))
+                    progress_queue.put((run_id, None))
             else:
                 self.env.run()
 
@@ -122,11 +180,47 @@ class SimulationEnvironment:
 
         return self.data_series
 
-    def makeGraph(self, run_params) -> nx.DiGraph:
+    def makeMultiAgentEnv(self, **kwargs) -> MultiAgentEnv:
+        """
+        Initializes a world environment.
+        """
         raise NotImplementedError()
 
     def relevantConfig(self):
+        """
+        Defines a part of `run_params` which is used to calculate
+        run hash (for data saving).
+        """
+        raise NotImplementedError()
+
+    def makeRunId(self, random_seed):
+        """
+        Run identificator, which depends on random seed and some run params.
+        """
         raise NotImplementedError()
 
     def runProcess(self, random_seed):
+        """
+        Generator which generates a series of test scenario events in
+        the world environment.
+        """
         raise NotImplementedError()
+
+
+def make_router_cfg(G, RouterClass, router_id, default_cfg={}):
+    """
+    Helper which makes valid config for the router controller of a given class
+    """
+    out_routers = [v for (_, v) in G.out_edges(router_id)]
+    in_routers = [v for (v, _) in G.in_edges(router_id)]
+    router_cfg = {
+        'nodes': sorted(list(G.nodes())),
+        'edges_num': len(G.edges()), # small hack to make link-state initialization simpler
+        'out_neighbours': out_routers,
+        'in_neighbours': in_routers
+    }
+    router_cfg.update(default_cfg)
+
+    if issubclass(RouterClass, LinkStateRouter):
+        router_cfg['adj_links'] = G.adj[router_id]
+    return router_cfg

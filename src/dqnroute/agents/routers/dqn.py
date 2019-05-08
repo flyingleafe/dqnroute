@@ -24,7 +24,7 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     """
     A router which implements DQN-routing algorithm
     """
-    def __init__(self, batch_size: int, mem_capacity: int, nodes: List[int],
+    def __init__(self, batch_size: int, mem_capacity: int, nodes: List[AgentId],
                  optimizer='rmsprop', brain=None, random_init=False, additional_inputs=[], **kwargs):
         super().__init__(**kwargs)
         self.batch_size = batch_size
@@ -46,19 +46,19 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         self.optimizer = get_optimizer(optimizer)(self.brain.parameters())
         self.loss_func = nn.MSELoss()
 
-    def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
+    def route(self, sender: AgentId, pkg: Package) -> Tuple[AgentId, List[Message]]:
         to, estimate, saved_state = self._act(pkg)
         reward = self.registerResentPkg(pkg, estimate, saved_state)
-        return to, [OutMessage(self.id, sender, reward)] if sender != -1 else []
+        return to, [OutMessage(self.id, sender, reward)] if sender[0] != 'world' else []
 
-    def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
+    def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[Message]:
         if isinstance(msg, RewardMsg):
             Q_new, prev_state = self.receiveReward(msg)
-            self.memory.add((prev_state, sender, -Q_new))
+            self.memory.add((prev_state, sender[1], -Q_new))
             self._replay()
             return []
         else:
-            return super().handleServiceMsg(sender, msg)
+            return super().handleMsgFrom(sender, msg)
 
     def _makeBrain(self, additional_inputs=[], **kwargs):
         return QNetwork(len(self.nodes), additional_inputs=additional_inputs,
@@ -69,11 +69,11 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         prediction = self._predict(state)[0]
 
         to = -1
-        while to not in self.out_neighbours:
+        while ('router', to) not in self.out_neighbours:
             to = soft_argmax(prediction, MIN_TEMP)
 
         estimate = -np.max(prediction)
-        return to, estimate, state
+        return ('router', to), estimate, state
 
     def _predict(self, x):
         self.brain.eval()
@@ -106,8 +106,8 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         if nbrs is None:
             nbrs = self.out_neighbours
 
-        addr = np.array(self.id)
-        dst = np.array(pkg.dst)
+        addr = np.array(self.id[1])
+        dst = np.array(pkg.dst[1])
 
         neighbours = np.array(
             list(map(lambda v: v in nbrs, self.nodes)),
@@ -177,13 +177,13 @@ class DQNRouterOO(DQNRouter):
         if nbrs is None:
             nbrs = sorted(list(self.out_neighbours))
 
-        addr = self._nodeRepr(self.id)
-        dst = self._nodeRepr(pkg.dst)
+        addr = self._nodeRepr(self.id[1])
+        dst = self._nodeRepr(pkg.dst[1])
 
         get_add_inputs = lambda nbr: [self._getAddInput(inp['tag'], nbr)
                                       for inp in self.additional_inputs]
 
-        input = [[addr, dst, self._nodeRepr(v)] + get_add_inputs(v)
+        input = [[addr, dst, self._nodeRepr(v[1])] + get_add_inputs(v)
                  for v in sorted(list(self.out_neighbours))]
         return stack_batch(input)
 
@@ -202,6 +202,7 @@ class DQNRouterEmb(DQNRouterOO):
         self.prev_num_nodes = 0
         self.prev_num_edges = 0
         self.init_edges_num = edges_num
+        self.network_initialized = False
 
         if type(embedding) == dict:
             self.embedding = get_embedding(**embedding)
@@ -217,13 +218,14 @@ class DQNRouterEmb(DQNRouterOO):
     def _nodeRepr(self, node):
         return self.embedding.transform(node).astype(np.float32)
 
-    def networkComplete(self):
-        return len(self.network.nodes) == len(self.nodes) and len(self.network.edges) == self.init_edges_num
-
-    def networkInit(self):
+    def networkStateChanged(self):
         num_nodes = len(self.network.nodes)
         num_edges = len(self.network.edges)
-        if num_edges != self.prev_num_edges or num_nodes != self.prev_num_nodes:
+
+        if not self.network_initialized and num_nodes == len(self.nodes) and num_edges == self.init_edges_num:
+            self.network_initialized = True
+
+        if self.network_initialized and (num_edges != self.prev_num_edges or num_nodes != self.prev_num_nodes):
             self.prev_num_nodes = num_nodes
             self.prev_num_edges = num_edges
             self.embedding.fit(self.network, weight=self.edge_weight)
@@ -262,10 +264,14 @@ class DQNRouterOOConveyor(LSConveyorMixin, ConveyorRewardAgent, ConveyorAddInput
     pass
 
 class DQNRouterEmbConveyor(LSConveyorMixin, ConveyorRewardAgent, ConveyorAddInputMixin, DQNRouterEmb):
-    def networkInit(self):
+    def networStateChanged(self):
         num_nodes = len(self.network.nodes)
         num_edges = len(self.network.edges)
-        if num_edges != self.prev_num_edges or num_nodes != self.prev_num_nodes:
+
+        if not self.network_initialized and num_nodes == len(self.nodes) and num_edges == self.init_edges_num:
+            self.network_initialized = True
+
+        if self.network_initialized and (num_edges != self.prev_num_edges or num_nodes != self.prev_num_nodes):
             self.prev_num_nodes = num_nodes
             self.prev_num_edges = num_edges
             self.embedding.fit(self.network, weight=None) # only for this 'None' all the fuss

@@ -4,7 +4,7 @@ import numpy as np
 import scipy.sparse as sp
 
 from typing import Union
-
+from ..utils import agent_idx
 
 class Embedding(object):
     """
@@ -73,7 +73,7 @@ class LaplacianEigenmap(Embedding):
             graph = nx.from_numpy_array(graph, create_using=nx.DiGraph)
             weight = 'weight'
 
-        graph = graph.to_undirected()
+        graph = nx.relabel_nodes(graph.to_undirected(), agent_idx)
 
         if weight is not None:
             if self.renormalize_weights:

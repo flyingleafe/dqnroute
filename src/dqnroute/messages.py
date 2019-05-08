@@ -1,11 +1,20 @@
 from functools import total_ordering
 from copy import deepcopy
+from typing import Tuple
 # import pandas as pd
 # import numpy as np
 
-class Message:
+##
+# Elementary datatypes
+#
+
+AgentId = Tuple[str, int]
+InterfaceId = int
+
+class WorldEvent:
     """
-    Base class for all messages used in the system
+    Utility class, which allows access to arbitrary attrs defined
+    at object creation. Base class for `Message` and `Action`.
     """
 
     def __init__(self, **kwargs):
@@ -26,6 +35,26 @@ class Message:
     def getContents(self):
         return self.contents
 
+
+class Message(WorldEvent):
+    """
+    Event which is a message from some other agent
+    """
+    pass
+
+class Action(WorldEvent):
+    """
+    Event which is some agent's action in the physical world
+    """
+    pass
+
+class UnsupportedEventType(Exception):
+    """
+    Exception which is thrown by event handlers on encounter of
+    unknown event type
+    """
+    pass
+
 class UnsupportedMessageType(Exception):
     """
     Exception which is thrown by message handlers on encounter of
@@ -33,10 +62,38 @@ class UnsupportedMessageType(Exception):
     """
     pass
 
+class UnsupportedActionType(Exception):
+    """
+    Exception which is thrown by the environment on encounter of
+    unknown agent action type
+    """
+    pass
+
+##
+# Core messages, handled by `ConnectionModel`
+#
+
+class WireTransferMsg(Message):
+    """
+    Message which has a payload and a number of interface which it relates to
+    (which it came from or which it is going to).
+    The `ConnectionModel` deals only with those messages. Interface id -1 is a
+    loopback interface.
+    """
+    def __init__(self, interface: InterfaceId, payload: Message):
+        super().__init__(interface=interface, payload=payload)
+
+class WireOutMsg(WireTransferMsg):
+    pass
+
+class WireInMsg(WireTransferMsg):
+    pass
+
+
 class DelayedMessage(Message):
     """
     Special wrapper message which should be handled not immediately,
-    but after some time.
+    but after some time. Models the timeout logic in agents themselves.
     """
     def __init__(self, id: int, delay: float, inner_msg: Message):
         super().__init__(id=id, delay=delay, inner_msg=inner_msg)
@@ -49,6 +106,10 @@ class DelayInterruptMessage(Message):
     def __init__(self, delay_id: int):
         super().__init__(delay_id=delay_id)
 
+##
+# Basic message classes on a `MessageHandler` level.
+#
+
 class InitMessage(Message):
     """
     Message which router receives as environment starts
@@ -56,32 +117,25 @@ class InitMessage(Message):
     def __init__(self, config):
         super().__init__(config=config)
 
-class _TransferMessage(Message):
+class TransferMessage(Message):
     """
     Wrapper message which is used to send data between nodes
     """
-    def __init__(self, from_node: int, to_node: int, inner_msg: Message):
+    def __init__(self, from_node: AgentId, to_node: AgentId, inner_msg: Message):
         super().__init__(from_node=from_node, to_node=to_node, inner_msg=inner_msg)
 
-class InMessage(_TransferMessage):
+class InMessage(TransferMessage):
     """
     Wrapper message which has came from the outside.
     """
     pass
 
-class OutMessage(_TransferMessage):
+class OutMessage(TransferMessage):
     """
     Wrapper message which is sent to a neighbor through the interface
     with given ID.
     """
     pass
-
-class SectionMessage(Message):
-    """
-    Wrapper message which targets a particular subhandler
-    """
-    def __init__(self, section: int, inner_msg: Message):
-        super().__init__(section=section, inner_msg=inner_msg)
 
 class ServiceMessage(Message):
     """
@@ -89,6 +143,17 @@ class ServiceMessage(Message):
     contains no destination.
     """
     pass
+
+class ActionMessage(Message):
+    """
+    Message which contains `Action` which an agent should perform.
+    """
+    def __init__(self, action: Action):
+        super().__init__(action=action)
+
+##
+# Computer network events/actions
+#
 
 # Packages
 @total_ordering
@@ -124,54 +189,64 @@ class Package:
     def __lt__(self, other):
         return self.id < other.id
 
+class PkgEnqueuedEvent(WorldEvent):
+    """
+    Some package got enqueued into the router
+    """
+    def __init__(self, sender: AgentId, recipient: AgentId, pkg: Package):
+        super().__init__(sender=sender, recipient=recipient, pkg=pkg)
+
+class PkgProcessingEvent(WorldEvent):
+    """
+    Some package is now ready to be routed further
+    """
+    def __init__(self, sender: AgentId, recipient: AgentId, pkg: Package):
+        super().__init__(sender=sender, recipient=recipient, pkg=pkg)
+
+class PkgReceiveAction(Action):
+    """
+    A destination router has received a package.
+    """
+    def __init__(self, pkg: Package):
+        super().__init__(pkg=pkg)
+
+class PkgRouteAction(Action):
+    """
+    Router has re-routed a package to a neighbour
+    """
+    def __init__(self, to: AgentId, pkg: Package):
+        super().__init__(to=to, pkg=pkg)
+
+class LinkUpdateEvent(WorldEvent):
+    """
+    A link between nodes has appeared or disappeared
+    """
+    def __init__(self, u: AgentId, v: AgentId, **kwargs):
+        super().__init__(u=u, v=v, **kwargs)
+
+class AddLinkEvent(LinkUpdateEvent):
+    """
+    Event which router receives when a link is connected (or restored).
+    """
+    def __init__(self, u: AgentId, v: AgentId, params={}):
+        super().__init__(u, v, params=params)
+
+class RemoveLinkEvent(LinkUpdateEvent):
+    """
+    Event which router receives when link breakage is detected
+    """
+    def __init__(self, u: AgentId, v: AgentId):
+        super().__init__(u, v)
+
+##
+# Conveyors events/actions
+#
+
 class Bag(Package):
     def __init__(self, bag_id, dst, start_time, contents):
         super().__init__(bag_id, 0, dst, start_time, contents)
         self.energy_overhead = 0
         self.last_redirected = 0
-
-class PkgMessage(Message):
-    """
-    Message which contains a package which has a particular
-    destination.
-    """
-    def __init__(self, pkg: Package):
-        super().__init__(pkg=pkg)
-
-class PkgEnqueuedMessage(Message):
-    """
-    Message which a router gets when a package is put into its queue
-    """
-    pass
-
-class PkgReceivedMessage(Message):
-    """
-    Message which router uses in case it was the package's
-    destination
-    """
-    def __init__(self, pkg: Package):
-        super().__init__(pkg=pkg)
-
-class LinkUpdateMessage(Message):
-    """
-    Message which router receives when graph topology is changed
-    """
-    def __init__(self, to: int, direction='both', **kwargs):
-        super().__init__(to=to, direction=direction, **kwargs)
-
-class AddLinkMessage(LinkUpdateMessage):
-    """
-    Message which router receives when a link is connected (or restored).
-    """
-    def __init__(self, to: int, direction='both', params={}):
-        super().__init__(to, direction, params=params)
-
-class RemoveLinkMessage(LinkUpdateMessage):
-    """
-    Message which router receives when link breakage is detected
-    """
-    def __init__(self, to: int, direction='both'):
-        super().__init__(to, direction)
 
 #
 # Service messages
@@ -191,23 +266,14 @@ class ConveyorRewardMsg(RewardMsg):
         super().__init__(bag_id, Q_estimate, (time_processed, energy_gap))
 
 class StateAnnouncementMsg(ServiceMessage):
-    def __init__(self, node: int, seq: int, state):
+    def __init__(self, node: AgentId, seq: int, state):
         super().__init__(node=node, seq=seq, state=state)
 
 #
 # Conveyor control messages
 #
 
-class ConveyorServiceMsg(ServiceMessage):
-    pass
-
-class ConveyorStartMsg(ConveyorServiceMsg):
-    pass
-
-class ConveyorStopMsg(ConveyorServiceMsg):
-    pass
-
-class ConveyorBagMsg(ConveyorServiceMsg):
+class ConveyorBagMsg(ServiceMessage):
     def __init__(self, bag: Bag):
         super().__init__(bag=bag)
 
@@ -217,16 +283,6 @@ class IncomingBagMsg(ConveyorBagMsg):
 class OutgoingBagMsg(ConveyorBagMsg):
     pass
 
-class StopTimeUpdMsg(ConveyorServiceMsg):
+class StopTimeUpdMsg(ServiceMessage):
     def __init__(self, time: float):
         super().__init__(time=time)
-
-class ConveyorMessage(Message):
-    def __init__(self, inner: ConveyorServiceMsg):
-        super().__init__(inner=inner)
-
-class InConveyorMsg(ConveyorMessage):
-    pass
-
-class OutConveyorMsg(ConveyorMessage):
-    pass

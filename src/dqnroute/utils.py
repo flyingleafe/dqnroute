@@ -48,8 +48,8 @@ def make_network_graph(edge_list) -> nx.DiGraph:
     DG = nx.DiGraph()
     for e in edge_list:
         u, v, params = read_edge(e)
-        DG.add_edge(u, v, **params)
-        DG.add_edge(v, u, **params)
+        DG.add_edge(('router', u), ('router', v), **params)
+        DG.add_edge(('router', v), ('router', u), **params)
     return DG
 
 def gen_network_graph(gen) -> nx.DiGraph:
@@ -69,6 +69,15 @@ def gen_network_graph(gen) -> nx.DiGraph:
     else:
         raise Exception('Unsupported graph generator type: {}'.format(gen_type))
 
+def agent_type(aid):
+    if type(aid) == tuple:
+        return aid[0]
+    return aid
+
+def agent_idx(aid):
+    if type(aid) == tuple:
+        return aid[1]
+    return aid
 
 def make_conveyor_graph(layout) -> nx.DiGraph:
     """

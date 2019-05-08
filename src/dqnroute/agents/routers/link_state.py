@@ -20,7 +20,7 @@ class AbstractLinkStateRouter(Router):
         msgs = super().init(config)
         return msgs + self._announceState()
 
-    def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
+    def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[Message]:
         if isinstance(msg, StateAnnouncementMsg):
             if self._processStateAnnouncement(msg):
                 return [OutMessage(self.id, v, deepcopy(msg))
@@ -28,7 +28,7 @@ class AbstractLinkStateRouter(Router):
             return []
 
         else:
-            return super().handleServiceMsg(sender, msg)
+            return super().handleMsgFrom(sender, msg)
 
     def _announceState(self) -> List[Message]:
         state = self.getState()
@@ -43,21 +43,17 @@ class AbstractLinkStateRouter(Router):
         if msg.node not in self.announcements or self.announcements[msg.node].seq < msg.seq:
             self.announcements[msg.node] = msg
             res = self.processNewAnnouncement(msg.node, msg.state)
-
-            # Do some action if initial announcements exchange is complete
-            if self.networkComplete():
-                self.networkInit()
+            self.networkStateChanged()
             return res
         return False
 
-    def networkComplete(self):
+    def networkStateChanged(self):
         """
-        Never call `networkInit` by default
+        Check if relevant network state has been changed and perform
+        some action accordingly.
+        Do nothing by default; should be overridden in subclasses.
         """
-        return False
-
-    def networkInit(self):
-        raise NotImplementedError()
+        pass
 
     def getState(self):
         raise NotImplementedError()
@@ -78,23 +74,19 @@ class LinkStateRouter(AbstractLinkStateRouter):
         for (m, params) in adj_links.items():
             self.network.add_edge(self.id, m, **params)
 
-    def addLink(self, to: int, direction: str, params={}) -> List[Message]:
-        msgs = super().addLink(to, direction, params)
-        if direction != 'out':
-            self.network.add_edge(to, self.id, **params)
-        if direction != 'in':
-            self.network.add_edge(self.id, to, **params)
+    def addLink(self, to: AgentId, params={}) -> List[Message]:
+        msgs = super().addLink(to, params)
+        self.network.add_edge(to, self.id, **params)
+        self.network.add_edge(self.id, to, **params)
         return msgs + self._announceState()
 
-    def removeLink(self, to: int, direction: str) -> List[Message]:
-        msgs = super().removeLink(to, direction)
-        if direction != 'out':
-            self.network.remove_edge(to, self.id)
-        if direction != 'in':
-            self.network.remove_edge(self.id, to)
+    def removeLink(self, to: int) -> List[Message]:
+        msgs = super().removeLink(to)
+        self.network.remove_edge(to, self.id)
+        self.network.remove_edge(self.id, to)
         return msgs + self._announceState()
 
-    def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
+    def route(self, sender: AgentId, pkg: Package) -> Tuple[AgentId, List[Message]]:
         path = nx.dijkstra_path(self.network, self.id, pkg.dst,
                                 weight=self.edge_weight)
         return path[1], []
@@ -102,7 +94,7 @@ class LinkStateRouter(AbstractLinkStateRouter):
     def getState(self):
         return self.network.adj[self.id]
 
-    def processNewAnnouncement(self, node: int, neighbours) -> bool:
+    def processNewAnnouncement(self, node: AgentId, neighbours) -> bool:
         changed = False
 
         for (m, params) in neighbours.items():
@@ -133,7 +125,7 @@ class GlobalDynamicRouter(LinkStateRouter):
             node = self.id
         return self.network.nodes[node].get('q_len', 0)
 
-    def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
+    def route(self, sender: AgentId, pkg: Package) -> Tuple[AgentId, List[Message]]:
         w_func = lambda u, v, ps: self._queueLength(v)
         path = nx.dijkstra_path(self.network, self.id, pkg.dst,
                                 weight=w_func)
@@ -148,7 +140,7 @@ class GlobalDynamicRouter(LinkStateRouter):
         sub = super().getState()
         return {'sub': sub, 'q_len': self._queueLength()}
 
-    def processNewAnnouncement(self, node: int, state) -> bool:
+    def processNewAnnouncement(self, node: AgentId, state) -> bool:
         sub_ok = super().processNewAnnouncement(node, state['sub'])
         q_changed = self._queueLength(node) != state['q_len']
         self.network.nodes[node]['q_len'] = state['q_len']
@@ -177,7 +169,7 @@ class LSConveyorMixin(object):
             return self._announceState()
         return []
 
-    def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
+    def route(self, sender: AgentId, pkg: Package) -> Tuple[AgentId, List[Message]]:
         """
         Makes sure that bags are not sent to the path which can not lead to
         the destination
@@ -192,7 +184,7 @@ class LSConveyorMixin(object):
         self.out_neighbours = old_neighbours
         return to, msgs
 
-    def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
+    def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[Message]:
         if isinstance(msg, ConveyorServiceMsg):
             if isinstance(msg, ConveyorStartMsg):
                 self.scheduled_stop_time = self.env.time()
@@ -201,7 +193,7 @@ class LSConveyorMixin(object):
                 return self._setConveyorWorkStatus(False)
             return []
         else:
-            return super().handleServiceMsg(sender, msg)
+            return super().handleMsgFrom(sender, msg)
 
     def getState(self):
         sub = super().getState()
