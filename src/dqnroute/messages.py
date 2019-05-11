@@ -245,8 +245,26 @@ class RemoveLinkEvent(LinkUpdateEvent):
 class Bag(Package):
     def __init__(self, bag_id, dst, start_time, contents):
         super().__init__(bag_id, 0, dst, start_time, contents)
-        self.energy_overhead = 0
-        self.last_redirected = 0
+
+class BagAppearanceEvent(WorldEvent):
+    def __init__(self, src_id: int, bag: Bag):
+        super().__init__(src_id=src_id, bag=bag)
+
+class BagDetectionEvent(WorldEvent):
+    def __init__(self, bag: Bag):
+        super().__init__(bag=bag)
+
+class BagReceiveAction(Action):
+    def __init__(self, bag: Bag):
+        super().__init__(bag=bag)
+
+class DiverterKickAction(Action):
+    def __init__(self):
+        super().__init__()
+
+class ConveyorSpeedChangeAction(Action):
+    def __init__(self, new_speed: float):
+        super().__init__(new_speed=new_speed)
 
 #
 # Service messages
@@ -268,6 +286,13 @@ class ConveyorRewardMsg(RewardMsg):
 class StateAnnouncementMsg(ServiceMessage):
     def __init__(self, node: AgentId, seq: int, state):
         super().__init__(node=node, seq=seq, state=state)
+
+class WrappedRouterMsg(ServiceMessage):
+    """
+    Wrapped message which allows to reuse router code in conveyors
+    """
+    def __init__(self, inner: Message):
+        super().__init__(inner=inner)
 
 #
 # Conveyor control messages

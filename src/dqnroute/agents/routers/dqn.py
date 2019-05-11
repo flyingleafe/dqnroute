@@ -48,13 +48,13 @@ class DQNRouter(LinkStateRouter, RewardAgent):
 
     def route(self, sender: AgentId, pkg: Package) -> Tuple[AgentId, List[Message]]:
         to, estimate, saved_state = self._act(pkg)
-        reward = self.registerResentPkg(pkg, estimate, saved_state)
+        reward = self.registerResentPkg(pkg, estimate, to, saved_state)
         return to, [OutMessage(self.id, sender, reward)] if sender[0] != 'world' else []
 
     def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[Message]:
         if isinstance(msg, RewardMsg):
-            Q_new, prev_state = self.receiveReward(msg)
-            self.memory.add((prev_state, sender[1], -Q_new))
+            action, Q_new, prev_state = self.receiveReward(msg)
+            self.memory.add((prev_state, action[1], -Q_new))
             self._replay()
             return []
         else:

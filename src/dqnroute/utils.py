@@ -79,37 +79,112 @@ def agent_idx(aid):
         return aid[1]
     return aid
 
-def make_conveyor_graph(layout) -> nx.DiGraph:
+def make_conveyor_topology_graph(config) -> nx.DiGraph:
     """
     Creates a conveyor network graph from conveyor system layout.
     """
+    sources = config['sources']
+    conveyors = config['conveyors']
+    diverters = config['diverters']
+
+    conv_sections = {conv_id: [] for conv_id in conveyors.keys()}
+
+    for (src_id, src) in sources.items():
+        conv = src['upstream_conv']
+        conv_sections[conv].append(('source', src_id, 0))
+
+    for (dv_id, dv) in diverters.items():
+        conv = dv['conveyor']
+        pos = dv['pos']
+        up_conv = dv['upstream_conv']
+        conv_sections[conv].append(('diverter', dv_id, pos))
+        conv_sections[up_conv].append(('diverter', dv_id, 0))
+
+    junction_idx = 0
+    for (conv_id, conv) in conveyors.items():
+        l = conv['length']
+        up = conv['upstream']
+
+        if up['type'] == 'sink':
+            conv_sections[conv_id].append(('sink', up['idx'], l))
+        elif up['type'] == 'conveyor':
+            up_id = up['idx']
+            up_pos = up['pos']
+            conv_sections[conv_id].append(('junction', junction_idx, l))
+            conv_sections[up_id].append(('junction', junction_idx, up_pos))
+            junction_idx += 1
+        else:
+            raise Exception('Invalid conveyor upstream type: ' + up['type'])
 
     DG = nx.DiGraph()
-    sec_map = {}
-    for (i, conveyor) in enumerate(layout):
-        sec_map.update(conveyor)
-        for sec_id in conveyor.keys():
-            DG.add_node(sec_id, conveyor=i)
+    for (conv_id, sections) in conv_sections.items():
+        sections.sort(key=lambda s: s[2])
+        assert sections[0][2] == 0, \
+            "No node at the beginning of conveyor!"
+        assert sections[-1][2] == conveyors[conv_id]['length'], \
+            "No node at the end of conveyor!"
 
-    for sec_id, section in sec_map.items():
-        for nbr in sec_neighbors_list(section):
-            length = sec_map[nbr]['length']
-            DG.add_edge(sec_id, nbr, length=length)
+        for i in range(1, len(sections)):
+            u = sections[i-1][:-1]
+            v = sections[i][:-1]
+            u_pos = sections[i-1][-1]
+            v_pos = sections[i][-1]
+            edge_len = v_pos - u_pos
+
+            assert edge_len >= 2, "Conveyor section is way too short!"
+            DG.add_edge(u, v, length=edge_len)
+
+            DG.nodes[u]['conveyor'] = conv_id
+            DG.nodes[u]['conveyor_pos'] = u_pos
+            if (i < len(sections) - 1) or (v[0] != 'junction'):
+                DG.nodes[v]['conveyor'] = conv_id
+                DG.nodes[v]['conveyor_pos'] = v_pos
 
     return DG
 
-def sec_neighbors_list(section_info):
-    res = []
-    try:
-        res.append(section_info['upstream_neighbor'])
-    except KeyError:
-        pass
-    try:
-        res.append(section_info['adjacent_neighbor'])
-    except KeyError:
-        pass
-    return res
+def make_conveyor_conn_graph(config) -> nx.Graph:
+    """
+    Creates a connection graph between controllers in conveyor system.
+    """
+    G = nx.Graph()
+    sinks = config['sinks']
+    sources = config['sources']
+    conveyors = config['conveyors']
+    diverters = config['diverters']
 
+    for sink in sinks:
+        G.add_node(('sink', sink))
+    for src in sources.keys():
+        G.add_node(('source', src))
+    for conv in conveyors.keys():
+        G.add_node(('conveyor', conv))
+    for dv in diverters.keys():
+        G.add_node(('diverter', dv))
+
+    for src_id, src in sources.items():
+        G.add_edge(('source', src_id), ('conveyor', src['upstream_conv']))
+    for conv_id, conv in conveyors.items():
+        up = conv['upstream']
+        G.add_edge(('conveyor', conv_id), (up['type'], up['idx']))
+    for dv_id, dv in diverters.items():
+        G.add_edge(('diverter', dv_id), ('conveyor', dv['conveyor']))
+        G.add_edge(('diverter', dv_id), ('conveyor', dv['upstream_conv']))
+
+    return G
+
+def make_router_cfg(G, router_id):
+    """
+    Helper which makes valid config for the router controller of a given class
+    """
+    out_routers = [v for (_, v) in G.out_edges(router_id)]
+    in_routers = [v for (v, _) in G.in_edges(router_id)]
+    router_cfg = {
+        'nodes': sorted(list(G.nodes())),
+        'edges_num': len(G.edges()), # small hack to make link-state initialization simpler
+        'out_neighbours': out_routers,
+        'in_neighbours': in_routers
+    }
+    return router_cfg
 
 def only_reachable(G, v, nodes, inv_paths=True):
     filter_func = lambda u: nx.has_path(G, u, v) if inv_paths else nx.has_path(G, v, u)

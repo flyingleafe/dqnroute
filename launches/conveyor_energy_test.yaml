@@ -1,29 +1,113 @@
+# configuration:
+#   layout:
+#     - 0: {length: 0, upstream_neighbor: 2}
+#       2: {length: 10, upstream_neighbor: 3, adjacent_neighbor: 11}
+#       3: {length: 10, upstream_neighbor: 4}
+#       4: {length: 10, upstream_neighbor: 17, adjacent_neighbor: 7}
+#       17: {length: 0}
+#     - 1: {length: 0, upstream_neighbor: 5}
+#       5: {length: 10, upstream_neighbor: 6, adjacent_neighbor: 12}
+#       6: {length: 10, upstream_neighbor: 21, adjacent_neighbor: 4}
+#       21: {length: 10, upstream_neighbor: 8}
+#     - 7: {length: 10, upstream_neighbor: 8}
+#       8: {length: 10, upstream_neighbor: 9, adjacent_neighbor: 18}
+#       9: {length: 10, upstream_neighbor: 10, adjacent_neighbor: 19}
+#       10: {length: 10, upstream_neighbor: 20}
+#     - 11: {length: 10, upstream_neighbor: 12}
+#       12: {length: 10, upstream_neighbor: 13}
+#     - 13: {length: 10, upstream_neighbor: 14, adjacent_neighbor: 20}
+#       14: {length: 10, upstream_neighbor: 15, adjacent_neighbor: 19}
+#       15: {length: 10, upstream_neighbor: 16, adjacent_neighbor: 18}
+#       16: {length: 10, upstream_neighbor: 17}
+#     - 18: {length: 0}
+#       19: {length: 0}
+#       20: {length: 0}
+#   sources: [0, 1]
+#   sinks: [17, 18, 19, 20]
+
 configuration:
-  layout:
-    - 0: {length: 0, upstream_neighbor: 2}
-      2: {length: 10, upstream_neighbor: 3, adjacent_neighbor: 11}
-      3: {length: 10, upstream_neighbor: 4}
-      4: {length: 10, upstream_neighbor: 17, adjacent_neighbor: 7}
-      17: {length: 0}
-    - 1: {length: 0, upstream_neighbor: 5}
-      5: {length: 10, upstream_neighbor: 6, adjacent_neighbor: 12}
-      6: {length: 10, upstream_neighbor: 21, adjacent_neighbor: 4}
-      21: {length: 10, upstream_neighbor: 8}
-    - 7: {length: 10, upstream_neighbor: 8}
-      8: {length: 10, upstream_neighbor: 9, adjacent_neighbor: 18}
-      9: {length: 10, upstream_neighbor: 10, adjacent_neighbor: 19}
-      10: {length: 10, upstream_neighbor: 20}
-    - 11: {length: 10, upstream_neighbor: 12}
-      12: {length: 10, upstream_neighbor: 13}
-    - 13: {length: 10, upstream_neighbor: 14, adjacent_neighbor: 20}
-      14: {length: 10, upstream_neighbor: 15, adjacent_neighbor: 19}
-      15: {length: 10, upstream_neighbor: 16, adjacent_neighbor: 18}
-      16: {length: 10, upstream_neighbor: 17}
-    - 18: {length: 0}
-      19: {length: 0}
-      20: {length: 0}
-  sources: [0, 1]
-  sinks: [17, 18, 19, 20]
+  sinks: [0, 1, 2, 3]
+  sources:
+    0: {upstream_conv: 0}
+    1: {upstream_conv: 1}
+  conveyors:
+    0:
+      length: 40
+      upstream: {type: 'sink', idx: 0}
+    1:
+      length: 30
+      upstream: {type: 'conveyor', idx: 5, pos: 10}
+    2:
+      length: 30
+      upstream: {type: 'conveyor', idx: 3, pos: 0}
+    3:
+      length: 30
+      upstream: {type: 'conveyor', idx: 4, pos: 0}
+    4:
+      length: 20
+      upstream: {type: 'sink', idx: 0}
+    5:
+      length: 43
+      upstream: {type: 'sink', idx: 3}
+    6:
+      length: 10
+      upstream: {type: 'conveyor', idx: 0, pos: 20}
+    7:
+      length: 10
+      upstream: {type: 'conveyor', idx: 2, pos: 10}
+    8:
+      length: 3
+      upstream: {type: 'sink', idx: 1}
+    9:
+      length: 3
+      upstream: {type: 'sink', idx: 1}
+    10:
+      length: 3
+      upstream: {type: 'sink', idx: 2}
+    11:
+      length: 3
+      upstream: {type: 'sink', idx: 2}
+    12:
+      length: 3
+      upstream: {type: 'sink', idx: 3}
+  diverters:
+    0:
+      conveyor: 0
+      pos: 10
+      upstream_conv: 2
+    1:
+      conveyor: 0
+      pos: 30
+      upstream_conv: 5
+    2:
+      conveyor: 1
+      pos: 10
+      upstream_conv: 7
+    3:
+      conveyor: 1
+      pos: 20
+      upstream_conv: 6
+    4:
+      conveyor: 3
+      pos: 10
+      upstream_conv: 12
+    5:
+      conveyor: 3
+      pos: 20
+      upstream_conv: 11
+    6:
+      conveyor: 4
+      pos: 10
+      upstream_conv: 9
+    7:
+      conveyor: 5
+      pos: 20
+      upstream_conv: 8
+    8:
+      conveyor: 5
+      pos: 30
+      upstream_conv: 10
+
 
 settings:
   bags_distr:

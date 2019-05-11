@@ -205,22 +205,3 @@ class SimulationRunner:
         the world environment.
         """
         raise NotImplementedError()
-
-
-def make_router_cfg(G, RouterClass, router_id, default_cfg={}):
-    """
-    Helper which makes valid config for the router controller of a given class
-    """
-    out_routers = [v for (_, v) in G.out_edges(router_id)]
-    in_routers = [v for (v, _) in G.in_edges(router_id)]
-    router_cfg = {
-        'nodes': sorted(list(G.nodes())),
-        'edges_num': len(G.edges()), # small hack to make link-state initialization simpler
-        'out_neighbours': out_routers,
-        'in_neighbours': in_routers
-    }
-    router_cfg.update(default_cfg)
-
-    if issubclass(RouterClass, LinkStateRouter):
-        router_cfg['adj_links'] = G.adj[router_id]
-    return router_cfg

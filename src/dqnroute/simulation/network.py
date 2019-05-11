@@ -47,11 +47,15 @@ class NetworkEnvironment(MultiAgentEnv):
 
         dyn_env = DynamicEnv(time=lambda: self.env.now)
         neighbours = [v for _, v in self.conn_graph.edges(agent_id)]
-        kwargs = make_router_cfg(self.conn_graph.to_directed(), self.RouterClass,
-                                 agent_id, self.default_router_cfg)
-        kwargs['edge_weight'] = 'latency'
 
-        return self.RouterClass(env=dyn_env, id=agent_id, neighbours=neighbours, **kwargs)
+        G = self.conn_graph.to_directed()
+        kwargs = make_router_cfg(G, agent_id)
+        kwargs.update(self.default_router_cfg)
+        if issubclass(self.RouterClass, LinkStateRouter):
+            kwargs['adj_links'] = G.adj[agent_id]
+
+        return self.RouterClass(env=dyn_env, id=agent_id, neighbours=neighbours,
+                                edge_weight='latency', **kwargs)
 
     def handleAction(self, from_agent: AgentId, action: Action) -> Event:
         if isinstance(action, PkgRouteAction):

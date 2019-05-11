@@ -36,9 +36,14 @@ class MessageHandler(EventHandler):
 
     def _wireMsg(self, event: WorldEvent) -> WorldEvent:
         if isinstance(event, Message):
-            if isinstance(event, OutMessage) and event.from_node == self.id:
+            if isinstance(event, DelayInterruptMessage):
+                return event
+            elif isinstance(event, DelayedMessage):
+                return DelayedMessage(event.id, event.delay, self._wireMsg(event.inner_msg))
+            elif isinstance(event, OutMessage) and event.from_node == self.id:
                 return WireOutMsg(self.interface_inv_map[event.to_node], event.inner_msg)
-            return WireOutMsg(-1, event)
+            else:
+                return WireOutMsg(-1, event)
         else:
             return event
 
@@ -165,9 +170,9 @@ class Conveyor(MessageHandler):
     """
     def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[WorldEvent]:
         if isinstance(msg, IncomingBagMsg):
-            return self.handleIncomingBag(msg.bag)
+            return self.handleIncomingBag(sender, msg.bag)
         elif isinstance(msg, OutgoingBagMsg):
-            return self.handleOutgoingBag(msg.bag)
+            return self.handleOutgoingBag(sender, msg.bag)
         else:
             return super().handleMsgFrom(sender, msg)
 
@@ -177,10 +182,32 @@ class Conveyor(MessageHandler):
     def stop(self) -> List[WorldEvent]:
         raise NotImplementedError()
 
-    def handleIncomingBag(self, bag: Bag) -> List[WorldEvent]:
+    def handleIncomingBag(self, notifier: AgentId, bag: Bag) -> List[WorldEvent]:
         raise NotImplementedError()
 
-    def handleOutgoingBag(self, bag: Bag) -> List[WorldEvent]:
+    def handleOutgoingBag(self, notifier: AgentId, bag: Bag) -> List[WorldEvent]:
+        raise NotImplementedError()
+
+
+class Diverter(MessageHandler):
+    """
+    Base class which implements a diverter controller, which detects
+    incoming bags and either kicks them out or not.
+    """
+    def __init__(self, host_conveyor: AgentId, **kwargs):
+        super().__init__(**kwargs)
+        self.host_conveyor = host_conveyor
+
+    def handleEvent(self, event: WorldEvent) -> List[WorldEvent]:
+        if isinstance(event, BagDetectionEvent):
+            kick, msgs = self.divert(event.bag)
+            if kick:
+                msgs.append(DiverterKickAction())
+            return msgs
+        else:
+            raise UnsupportedEventType(event)
+
+    def divert(self, bag: Bag) -> Tuple[bool, List[Message]]:
         raise NotImplementedError()
 
 
@@ -193,15 +220,15 @@ class RewardAgent(object):
         super().__init__(**kwargs)
         self._pending_pkgs = {}
 
-    def registerResentPkg(self, pkg: Package, Q_estimate: float, data) -> RewardMsg:
+    def registerResentPkg(self, pkg: Package, Q_estimate: float, action, data) -> RewardMsg:
         rdata = self._getRewardData(pkg, data)
-        self._pending_pkgs[pkg.id] = (rdata, data)
+        self._pending_pkgs[pkg.id] = (action, rdata, data)
         return self._mkReward(pkg.id, Q_estimate, rdata)
 
     def receiveReward(self, msg: RewardMsg):
-        old_reward_data, saved_data = self._pending_pkgs.pop(msg.pkg_id)
+        action, old_reward_data, saved_data = self._pending_pkgs.pop(msg.pkg_id)
         reward = self._computeReward(msg, old_reward_data)
-        return reward, saved_data
+        return action, reward, saved_data
 
     def _computeReward(self, msg: RewardMsg, old_reward_data):
         raise NotImplementedError()

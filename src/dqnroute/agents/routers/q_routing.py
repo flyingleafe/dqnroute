@@ -29,14 +29,14 @@ class SimpleQRouter(Router, RewardAgent):
     def route(self, sender: AgentId, pkg: Package) -> Tuple[AgentId, List[Message]]:
         Qs = self._Q(pkg.dst)
         to, estimate = dict_min(Qs)
-        reward_msg = self.registerResentPkg(pkg, estimate, pkg.dst)
+        reward_msg = self.registerResentPkg(pkg, estimate, to, pkg.dst)
 
         return to, [OutMessage(self.id, sender, reward_msg)] if sender[0] != 'world' else []
 
     def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[Message]:
         if isinstance(msg, RewardMsg):
-            Q_new, dst = self.receiveReward(msg)
-            self.Q[dst][sender] += self.learning_rate * (Q_new - self.Q[dst][sender])
+            action, Q_new, dst = self.receiveReward(msg)
+            self.Q[dst][action] += self.learning_rate * (Q_new - self.Q[dst][action])
             return []
         else:
             return super().handleMsgFrom(sender, msg)
@@ -75,25 +75,25 @@ class PredictiveQRouter(SimpleQRouter, RewardAgent):
         Qs_altered = self._Q_altered(pkg.dst)
         to, _ = dict_min(Qs_altered)
         estimate = min(Qs.values())
-        reward_msg = self.registerResentPkg(pkg, estimate, pkg.dst)
+        reward_msg = self.registerResentPkg(pkg, estimate, to, pkg.dst)
 
         return to, [OutMessage(self.id, sender, reward_msg)] if sender[0] != 'world' else []
 
     def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[Message]:
         if isinstance(msg, RewardMsg):
-            Q_new, dst = self.receiveReward(msg)
-            dQ = Q_new - self.Q[dst][sender]
-            self.Q[dst][sender] += self.learning_rate * dQ
-            self.B[dst][sender] = min(self.B[dst][sender], self.Q[dst][sender])
+            action, Q_new, dst = self.receiveReward(msg)
+            dQ = Q_new - self.Q[dst][action]
+            self.Q[dst][action] += self.learning_rate * dQ
+            self.B[dst][action] = min(self.B[dst][action], self.Q[dst][action])
 
             now = self.env.time()
             if dQ < 0:
-                dR = dQ / (now - self.U[dst][sender])
-                self.R[dst][sender] += self.beta * dR
+                dR = dQ / (now - self.U[dst][action])
+                self.R[dst][action] += self.beta * dR
             elif dQ > 0:
-                self.R[dst][sender] *= self.gamma
+                self.R[dst][action] *= self.gamma
 
-            self.U[dst][sender] = now
+            self.U[dst][action] = now
             return []
         else:
             return super().handleMsgFrom(sender, msg)
