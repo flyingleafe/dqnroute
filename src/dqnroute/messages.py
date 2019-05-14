@@ -144,12 +144,26 @@ class ServiceMessage(Message):
     """
     pass
 
+class EventMessage(Message):
+    """
+    Message which contains `Event` which should be handled
+    """
+    def __init__(self, event: WorldEvent):
+        super().__init__(event=event)
+
 class ActionMessage(Message):
     """
     Message which contains `Action` which an agent should perform.
     """
     def __init__(self, action: Action):
         super().__init__(action=action)
+
+class SlaveEvent(WorldEvent):
+    """
+    An event detected by a slave controller with given ID
+    """
+    def __init__(self, slave_id: AgentId, inner: WorldEvent):
+        super().__init__(slave_id=slave_id, inner=inner)
 
 ##
 # Computer network events/actions

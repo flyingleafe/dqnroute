@@ -36,26 +36,35 @@ class NetworkEnvironment(MultiAgentEnv):
 
     def makeConnGraph(self, network_cfg, **kwargs) -> nx.Graph:
         if type(network_cfg) == list:
-            return make_network_graph(network_cfg)
+            G = make_network_graph(network_cfg)
         elif type(network_cfg) == dict:
-            return gen_network_graph(network_cfg['generator'])
+            G = gen_network_graph(network_cfg['generator'])
         else:
             raise Exception('Invalid network config: {}'.format(network_cfg))
+
+        if issubclass(self.RouterClass, CentralizedRouter):
+            dyn_env = DynamicEnv(time=lambda: self.env.now)
+            self.master_router = self.RouterClass(env=dyn_env, network=G.to_directed(),
+                                                  edge_weight='latency', **self.default_router_cfg)
+        return G
 
     def makeHandler(self, agent_id: AgentId) -> MessageHandler:
         assert agent_id[0] == 'router', "Only routers are allowed in computer network"
 
-        dyn_env = DynamicEnv(time=lambda: self.env.now)
-        neighbours = [v for _, v in self.conn_graph.edges(agent_id)]
+        if issubclass(self.RouterClass, CentralizedRouter):
+            return SlaveHandler(id=agent_id, master=self.master_router)
+        else:
+            dyn_env = DynamicEnv(time=lambda: self.env.now)
+            neighbours = [v for _, v in self.conn_graph.edges(agent_id)]
 
-        G = self.conn_graph.to_directed()
-        kwargs = make_router_cfg(G, agent_id)
-        kwargs.update(self.default_router_cfg)
-        if issubclass(self.RouterClass, LinkStateRouter):
-            kwargs['adj_links'] = G.adj[agent_id]
+            G = self.conn_graph.to_directed()
+            kwargs = make_router_cfg(G, agent_id)
+            kwargs.update(self.default_router_cfg)
+            if issubclass(self.RouterClass, LinkStateRouter):
+                kwargs['adj_links'] = G.adj[agent_id]
 
-        return self.RouterClass(env=dyn_env, id=agent_id, neighbours=neighbours,
-                                edge_weight='latency', **kwargs)
+            return self.RouterClass(env=dyn_env, id=agent_id, neighbours=neighbours,
+                                    edge_weight='latency', **kwargs)
 
     def handleAction(self, from_agent: AgentId, action: Action) -> Event:
         if isinstance(action, PkgRouteAction):

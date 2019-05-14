@@ -33,10 +33,9 @@ def memoize(func):
 def empty_gen():
     yield from ()
 
-def make_network_graph(edge_list) -> nx.DiGraph:
+def make_network_graph(edge_list) -> nx.Graph:
     """
-    Creates a computer network graph (with symmetric edges)
-    from edge list
+    Creates a computer network graph from edge list
     """
 
     def read_edge(e):
@@ -45,14 +44,13 @@ def make_network_graph(edge_list) -> nx.DiGraph:
         v = new_e.pop('v')
         return (u, v, new_e)
 
-    DG = nx.DiGraph()
+    G = nx.Graph()
     for e in edge_list:
         u, v, params = read_edge(e)
-        DG.add_edge(('router', u), ('router', v), **params)
-        DG.add_edge(('router', v), ('router', u), **params)
-    return DG
+        G.add_edge(('router', u), ('router', v), **params)
+    return G
 
-def gen_network_graph(gen) -> nx.DiGraph:
+def gen_network_graph(gen) -> nx.Graph:
     """
     Generates a random computer network graph given a
     generator parameters
@@ -65,7 +63,7 @@ def gen_network_graph(gen) -> nx.DiGraph:
         for u, v in G.edges():
             G[u][v]['bandwidth'] = DEF_PKG_SIZE
             G[u][v]['latency'] = np.random.randint(gen['min-latency'], gen['max-latency'])
-        return G.to_directed()
+        return G
     else:
         raise Exception('Unsupported graph generator type: {}'.format(gen_type))
 

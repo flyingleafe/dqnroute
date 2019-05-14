@@ -94,6 +94,43 @@ class MessageHandler(EventHandler):
         raise UnsupportedEventType(event)
 
 
+class MasterHandler(MessageHandler):
+    """
+    A handler which controls all the nodes in the system in a centralized way.
+    """
+    def __init__(self, **kwargs):
+        super().__init__(id=('master', 0), neighbours=[], **kwargs)
+        self.slaves = {}
+
+    def handleEvent(self, event: WorldEvent) -> List[WorldEvent]:
+        if isinstance(event, SlaveEvent):
+            return self.handleSlaveEvent(event.slave_id, event.inner)
+        else:
+            return super().handleEvent(event)
+
+    def registerSlave(self, slave_id: AgentId, slave):
+        self.slaves[slave_id] = slave
+
+    def handleSlaveEvent(self, slave_id: AgentId, event: WorldEvent):
+        raise NotImplementedError()
+
+
+class SlaveHandler(MessageHandler):
+    """
+    Agent which is controlled in a centralized way via master handler.
+    Should not be connected to anything.
+    """
+    def __init__(self, id: AgentId, master: MasterHandler):
+        super().__init__(id=id, env=DynamicEnv(), neighbours=[])
+        self.master = master
+
+    def init(self, config):
+        self.master.registerSlave(self.id, self)
+        return []
+
+    def handleEvent(self, event: WorldEvent) -> List[WorldEvent]:
+        return self.master.handleEvent(SlaveEvent(self.id, event))
+
 class Router(MessageHandler):
     """
     Agent which routes packages and service messages.

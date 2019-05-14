@@ -28,7 +28,7 @@ _conveyors_router_classes = {
     'simple_q': SimpleQRouterConveyor,
     'pred_q': PredictiveQRouterConveyor,
     'link_state': LinkStateRouterConveyor,
-    'glob_dyn': GlobalDynamicRouterConveyor,
+    # 'glob_dyn': GlobalDynamicRouterConveyor,
     'dqn': DQNRouterConveyor,
     'dqn_oneout': DQNRouterOOConveyor,
     'dqn_emb': DQNRouterEmbConveyor,

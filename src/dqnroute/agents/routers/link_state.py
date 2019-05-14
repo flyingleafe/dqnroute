@@ -111,40 +111,6 @@ class LinkStateRouter(AbstractLinkStateRouter):
 
         return changed
 
-class GlobalDynamicRouter(LinkStateRouter):
-    """
-    Router which routes packets accordingly to global-dynamic routing
-    strategy (path is weighted as a sum of queue lenghts on the nodes)
-    """
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.network.nodes[self.id]['q_len'] = 0
-
-    def _queueLength(self, node=None) -> int:
-        if node is None:
-            node = self.id
-        return self.network.nodes[node].get('q_len', 0)
-
-    def route(self, sender: AgentId, pkg: Package) -> Tuple[AgentId, List[Message]]:
-        w_func = lambda u, v, ps: self._queueLength(v)
-        path = nx.dijkstra_path(self.network, self.id, pkg.dst,
-                                weight=w_func)
-        self.network.nodes[self.id]['q_len'] -= 1
-        return path[1], self._announceState()
-
-    def detectEnqueuedPkg(self) -> List[Message]:
-        self.network.nodes[self.id]['q_len'] += 1
-        return self._announceState()
-
-    def getState(self):
-        sub = super().getState()
-        return {'sub': sub, 'q_len': self._queueLength()}
-
-    def processNewAnnouncement(self, node: AgentId, state) -> bool:
-        sub_ok = super().processNewAnnouncement(node, state['sub'])
-        q_changed = self._queueLength(node) != state['q_len']
-        self.network.nodes[node]['q_len'] = state['q_len']
-        return sub_ok or q_changed
 
 class LSConveyorMixin(object):
     """
@@ -206,7 +172,4 @@ class LSConveyorMixin(object):
         return sub_ok or works_changed
 
 class LinkStateRouterConveyor(LSConveyorMixin, LinkStateRouter):
-    pass
-
-class GlobalDynamicRouterConveyor(LSConveyorMixin, GlobalDynamicRouter):
     pass
