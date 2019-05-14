@@ -7,6 +7,7 @@ from typing import List, Callable, Dict, Tuple
 from functools import reduce
 from simpy import Environment, Event, Resource, Process, Interrupt
 from ..utils import *
+from ..conveyor_model import *
 from ..messages import *
 from ..event_series import *
 from ..agents import *
@@ -193,18 +194,6 @@ class EnergySpender(object):
 #     def _idle(self):
 #         return self.last_starting_time == -1
 
-class BagCollisionException(Exception):
-    """
-    Thrown when a bag collision is detected
-    """
-
-    def __init__(self, conv_idx, bag1, bag2):
-        super().__init__('Collision on conveyor #{} between bags {} and {}'
-                        .format(conv_idx, bag1, bag2))
-        self.conv_idx = conv_idx
-        self.bag1 = bag1
-        self.bag2 = bag2
-
 
 class ConveyorsEnvironment(MultiAgentEnv):
     """
@@ -213,7 +202,7 @@ class ConveyorsEnvironment(MultiAgentEnv):
     TODO: now bags are represented as dots, they should be represented as areas
     """
 
-    def __init__(self, RouterClass, ConveyorClass, conveyors_layout,
+    def __init__(self, env: Environment, RouterClass, ConveyorClass, conveyors_layout,
                  time_series: EventSeries, energy_series: EventSeries,
                  speed: float = 1, energy_consumption: float = 1,
                  default_conveyor_args = {}, default_router_args = {}, **kwargs):
@@ -229,7 +218,13 @@ class ConveyorsEnvironment(MultiAgentEnv):
 
         self.topology_graph = make_conveyor_topology_graph(conveyors_layout)
 
-        super().__init__(conveyors_layout=conveyors_layout, **kwargs)
+        if issubclass(self.RouterClass, MasterHandler):
+            dyn_env = DynamicEnv(time=lambda: env.now)
+            master_cfg = {**self.default_conveyor_cfg, **self.default_router_cfg}
+            self.master_handler = self.RouterClass(env=dyn_env, topology=self.topology_graph,
+                                                   layout=self.layout, **master_cfg)
+
+        super().__init__(env=env, conveyors_layout=conveyors_layout, **kwargs)
 
         # Initialize conveyor-wise state dictionaries
         conv_ids = list(self.layout['conveyors'].keys())
@@ -264,28 +259,31 @@ class ConveyorsEnvironment(MultiAgentEnv):
         return make_conveyor_conn_graph(conveyors_layout)
 
     def makeHandler(self, agent_id: AgentId) -> MessageHandler:
-        time_func = lambda: env.now
-        energy_func = lambda: energy_consumption
-        dyn_env = DynamicEnv(time=time_func, energy_consumption=energy_func)
-        neighbours = [v for (_, v) in self.conn_graph.edges(agent_id)]
-        a_type = agent_type(agent_id)
-
-        if a_type == 'conveyor':
-            routers = [] # TODO: fill those in
-            return SimpleConveyor(env=dyn_env, id=agent_id, neighbours=neighbours, routers=routers,
-                                  **self.default_conveyor_cfg)
-        elif a_type == 'source':
-            return ItemSource(env=dyn_env, id=agent_id, neighbours=neighbours)
-        elif a_type == 'sink':
-            return ItemSink(env=dyn_env, id=agent_id, neighbours=neighbours)
-        elif a_type == 'diverter':
-            host_conv_idx = self.topology_graph.nodes[agent_id]['conveyor']
-            return RouterDiverter(env=dyn_env, id=agent_id, neighbours=neighbours,
-                                  topology_graph=self.topology_graph,
-                                  RouterClass=self.RouterClass, host_conveyor=('conveyor', host_conv_idx),
-                                  router_args=self.default_router_cfg)
+        if issubclass(self.RouterClass, MasterHandler):
+            return SlaveHandler(id=agent_id, master=self.master_router)
         else:
-            raise Exception('Unknown agent type: ' + a_type)
+            time_func = lambda: self.env.now
+            energy_func = lambda: energy_consumption
+            dyn_env = DynamicEnv(time=time_func, energy_consumption=energy_func)
+            neighbours = [v for (_, v) in self.conn_graph.edges(agent_id)]
+            a_type = agent_type(agent_id)
+
+            if a_type == 'conveyor':
+                routers = [] # TODO: fill those in
+                return SimpleConveyor(env=dyn_env, id=agent_id, neighbours=neighbours, routers=routers,
+                                      **self.default_conveyor_cfg)
+            elif a_type == 'source':
+                return ItemSource(env=dyn_env, id=agent_id, neighbours=neighbours)
+            elif a_type == 'sink':
+                return ItemSink(env=dyn_env, id=agent_id, neighbours=neighbours)
+            elif a_type == 'diverter':
+                host_conv_idx = self.topology_graph.nodes[agent_id]['conveyor']
+                return RouterDiverter(env=dyn_env, id=agent_id, neighbours=neighbours,
+                                      topology_graph=self.topology_graph,
+                                      RouterClass=self.RouterClass, host_conveyor=('conveyor', host_conv_idx),
+                                      router_args=self.default_router_cfg)
+            else:
+                raise Exception('Unknown agent type: ' + a_type)
 
     def handleAction(self, from_agent: AgentId, action: Action) -> Event:
         if isinstance(action, BagReceiveAction):
@@ -378,13 +376,13 @@ class ConveyorsEnvironment(MultiAgentEnv):
     def _putBagOnConveyorGen(self, conv_idx, bag, pos):
         """
         Puts a bag on a given position to a given conveyor. If there is currently
-        some other bag on a conveyor, throws a `BagCollisionException`
+        some other bag on a conveyor, throws a `CollisionException`
         """
 
         yield self._interruptMovement(conv_idx)
         for (bid, status) in self.conveyor_bags[conv_idx].items():
             if status['pos'] == pos:
-                raise BagCollisionException(conv_idx, bag, status['bag'])
+                raise CollisionException(bag, status['bag'], pos)
 
         self.conveyor_bags[conv_idx][bag.id] = {'bag': bag, 'pos': pos}
         yield self._resumeMovement(conv_idx)
@@ -494,7 +492,7 @@ class ConveyorsRunner(SimulationRunner):
         super().__init__(data_dir=data_dir, **kwargs)
 
     def makeMultiAgentEnv(self) -> MultiAgentEnv:
-        ChosenRouter = get_router_class(self.router_type, 'network')
+        ChosenRouter = get_router_class(self.router_type, 'conveyors')
         router_cfg = self.run_params['settings']['router'].get(self.router_type, {})
         conveyor_cfg = self.run_params['settings']['conveyor']
 
@@ -519,6 +517,10 @@ class ConveyorsRunner(SimulationRunner):
     def runProcess(self, random_seed = None):
         if random_seed is not None:
             set_random_seed(random_seed)
+
+        all_nodes = list(self.world.conn_graph.nodes)
+        for node in all_nodes:
+            self.world.passToAgent(node, WireInMsg(-1, InitMessage({})))
 
         bag_distr = self.run_params['settings']['bags_distr']
         sources = list(self.run_params['configuration']['sources'].keys())

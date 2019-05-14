@@ -19,7 +19,7 @@ class MultiAgentEnv:
 
         agent_ids = list(self.conn_graph.nodes)
         self.handlers = {agent_id: self.makeHandler(agent_id) for agent_id in agent_ids}
-        self.delayed_msgs = {agent_id: {} for agent_id in agent_ids}
+        self.delayed_evs = {agent_id: {} for agent_id in agent_ids}
 
     def makeConnGraph(self, **kwargs) -> nx.Graph:
         """
@@ -43,13 +43,27 @@ class MultiAgentEnv:
         environment. Not to be overridden in children: `handleAction` and
         `handleWorldEvent` should be overridden instead.
         """
-
         if isinstance(event, Message):
             return self.handleMessage(from_agent, event)
+
         elif isinstance(event, Action):
             return self.handleAction(from_agent, event)
+
+        elif isinstance(event, DelayedEvent):
+            proc = self.env.process(self._delayedHandleGen(from_agent, event))
+            self.delayed_evs[from_agent][event.id] = proc
+            return proc
+
+        elif isinstance(event, DelayInterrupt):
+            try:
+                self.delayed_evs[from_agent][event.delay_id].interrupt()
+            except (KeyError, RuntimeError):
+                pass
+            return Event(self.env).succeed()
+
         elif from_agent[0] == 'world':
             return handleWorldEvent(event)
+
         else:
             raise Exception('Non-world event: ' + str(event))
 
@@ -58,22 +72,8 @@ class MultiAgentEnv:
         Method which handles how messages should be dealt with. Is not meant to be
         overridden.
         """
-
-        if isinstance(msg, DelayedMessage):
-            proc = self.env.process(self._delayedHandleGen(from_agent, msg))
-            self.delayed_msgs[from_agent][msg.id] = proc
-            return proc
-
-        elif isinstance(msg, DelayInterruptMessage):
-            try:
-                self.delayed_msgs[from_agent][msg.delay_id].interrupt()
-            except (KeyError, RuntimeError):
-                pass
-            return Event(self.env).succeed()
-
-        elif isinstance(msg, WireOutMsg):
+        if isinstance(msg, WireOutMsg):
             return self.env.process(self._handleOutMsgGen(from_agent, msg))
-
         else:
             raise UnsupportedMessageType(msg)
 
@@ -101,29 +101,22 @@ class MultiAgentEnv:
             self.handle(agent, new_event)
         return Event(self.env).succeed()
 
-    def _delayedHandleGen(self, from_agent: AgentId, msg: DelayedMessage):
-        proc_id = msg.id
-        delay = msg.delay
-        inner = msg.inner_msg
+    def _delayedHandleGen(self, from_agent: AgentId, event: DelayedEvent):
+        proc_id = event.id
+        delay = event.delay
+        inner = event.inner
 
         try:
             yield self.env.timeout(delay)
-            yield from self._handleOutMsgGen(from_agent, inner)
+            self.handle(from_agent, inner)
         except Interrupt:
             pass
-        del self.delayed_msgs[from_agent][proc_id]
+        del self.delayed_evs[from_agent][proc_id]
 
     def _handleOutMsgGen(self, from_agent: AgentId, msg: WireOutMsg):
         int_id = msg.interface
         inner = msg.payload
-
-        if int_id == -1:
-            to_agent = from_agent
-            to_interface = -1
-        else:
-            to_agent = list(self.conn_graph.edges(from_agent))[int_id][1]
-            to_interface = list(self.conn_graph.edges(to_agent)).index((to_agent, from_agent))
-
+        to_agent, to_interface = resolve_interface(self.conn_graph, from_agent, int_id)
         yield self.passToAgent(to_agent, WireInMsg(to_interface, inner))
 
 

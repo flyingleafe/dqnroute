@@ -1,6 +1,6 @@
 import logging
 
-from typing import List, Tuple
+from typing import List, Tuple, Callable
 from ..messages import *
 from ..utils import *
 from ..constants import DQNROUTE_LOGGER
@@ -34,16 +34,18 @@ class MessageHandler(EventHandler):
             self.interface_map[i] = n
             self.interface_inv_map[n] = i
 
+        # delays functionality
+        self._delay_seq = 0
+        self._pending_delayed = {}
+
     def _wireMsg(self, event: WorldEvent) -> WorldEvent:
         if isinstance(event, Message):
-            if isinstance(event, DelayInterruptMessage):
-                return event
-            elif isinstance(event, DelayedMessage):
-                return DelayedMessage(event.id, event.delay, self._wireMsg(event.inner_msg))
-            elif isinstance(event, OutMessage) and event.from_node == self.id:
+            if isinstance(event, OutMessage) and event.from_node == self.id:
                 return WireOutMsg(self.interface_inv_map[event.to_node], event.inner_msg)
             else:
                 return WireOutMsg(-1, event)
+        elif isinstance(event, DelayedEvent):
+            return DelayedEvent(event.id, event.delay, self._wireMsg(event.inner))
         else:
             return event
 
@@ -54,6 +56,19 @@ class MessageHandler(EventHandler):
         if int_id == -1:
             return inner
         return InMessage(self.interface_map[int_id], self.id, inner)
+
+    def delayed(self, delay: float, callback: Callable[[], List[WorldEvent]]) -> DelayedEvent:
+        """
+        Schedule an action returning a list of `WorldEvent`s after some time.
+        """
+        delay_id = self._delay_seq
+        self._delay_seq += 1
+        self._pending_delayed[delay_id] = callback
+        return DelayedEvent(delay_id, delay, DelayTriggerMsg(delay_id))
+
+    def cancelDelayed(self, delay_id: int) -> DelayInterrupt:
+        del self._pending_delayed[delay_id]
+        return DelayInterrupt(delay_id)
 
     def handle(self, event: WorldEvent) -> List[WorldEvent]:
         if isinstance(event, WireInMsg):
@@ -67,13 +82,17 @@ class MessageHandler(EventHandler):
         if isinstance(msg, InitMessage):
             return self.init(msg.config)
 
+        elif isinstance(msg, DelayTriggerMsg):
+            callback = self._pending_delayed.pop(msg.delay_id)
+            return callback()
+
         elif isinstance(msg, InMessage):
             assert self.id == msg.to_node, \
                 "Wrong recipient of InMessage!"
             return self.handleMsgFrom(msg.from_node, msg.inner_msg)
 
         else:
-            raise UnsupportedMessageType(msg)
+            return self.handleMsgFrom(self.id, msg)
 
     def init(self, config) -> List[WorldEvent]:
         """
@@ -112,7 +131,7 @@ class MasterHandler(MessageHandler):
         self.slaves[slave_id] = slave
 
     def handleSlaveEvent(self, slave_id: AgentId, event: WorldEvent):
-        raise NotImplementedError()
+        raise UnsupportedEventType(event)
 
 
 class SlaveHandler(MessageHandler):
@@ -200,6 +219,20 @@ class Router(MessageHandler):
         raise NotImplementedError()
 
 
+class BagDetector(MessageHandler):
+    """
+    Base class for `Source`s and `Sink`s. Only reacts to `BagDetectionEvent`.
+    """
+    def handleEvent(self, event: WorldEvent) -> List[WorldEvent]:
+        if isinstance(event, BagDetectionEvent):
+            return self.bagDetection(event.bag)
+        else:
+            return super().handleEvent(event)
+
+    def bagDetection(self, bag: Bag) -> List[WorldEvent]:
+        raise NotImplementedError()
+
+
 class Conveyor(MessageHandler):
     """
     Base class which implements a conveyor controller, which can start
@@ -210,14 +243,10 @@ class Conveyor(MessageHandler):
             return self.handleIncomingBag(sender, msg.bag)
         elif isinstance(msg, OutgoingBagMsg):
             return self.handleOutgoingBag(sender, msg.bag)
+        elif isinstance(msg, PassedBagMsg):
+            return self.handlePassedBag(sender, msg.bag)
         else:
             return super().handleMsgFrom(sender, msg)
-
-    def start(self) -> List[WorldEvent]:
-        raise NotImplementedError()
-
-    def stop(self) -> List[WorldEvent]:
-        raise NotImplementedError()
 
     def handleIncomingBag(self, notifier: AgentId, bag: Bag) -> List[WorldEvent]:
         raise NotImplementedError()
@@ -225,24 +254,20 @@ class Conveyor(MessageHandler):
     def handleOutgoingBag(self, notifier: AgentId, bag: Bag) -> List[WorldEvent]:
         raise NotImplementedError()
 
+    def handlePassedBag(self, notifier: AgentId, bag: Bag) -> List[WorldEvent]:
+        raise NotImplementedError()
 
-class Diverter(MessageHandler):
+
+class Diverter(BagDetector):
     """
     Base class which implements a diverter controller, which detects
     incoming bags and either kicks them out or not.
     """
-    def __init__(self, host_conveyor: AgentId, **kwargs):
-        super().__init__(**kwargs)
-        self.host_conveyor = host_conveyor
-
-    def handleEvent(self, event: WorldEvent) -> List[WorldEvent]:
-        if isinstance(event, BagDetectionEvent):
-            kick, msgs = self.divert(event.bag)
-            if kick:
-                msgs.append(DiverterKickAction())
-            return msgs
-        else:
-            raise UnsupportedEventType(event)
+    def bagDetection(self, bag: Bag) -> List[WorldEvent]:
+        kick, msgs = self.divert(bag)
+        if kick:
+            msgs.append(DiverterKickAction())
+        return msgs
 
     def divert(self, bag: Bag) -> Tuple[bool, List[Message]]:
         raise NotImplementedError()

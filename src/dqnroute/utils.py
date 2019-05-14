@@ -7,9 +7,20 @@ import numpy as np
 import torch
 import itertools as it
 
-from typing import NewType
+from typing import NewType, Tuple, TypeVar, Union, List, Callable, Optional
 
 from .constants import INFTY, DEF_PKG_SIZE
+
+##
+# Some ubuquitous type aliases
+#
+
+AgentId = Tuple[str, int]
+InterfaceId = int
+
+##
+# Misc
+#
 
 def set_random_seed(seed: int):
     """
@@ -32,6 +43,10 @@ def memoize(func):
 
 def empty_gen():
     yield from ()
+
+##
+# Graph construction and config processing
+#
 
 def make_network_graph(edge_list) -> nx.Graph:
     """
@@ -130,10 +145,11 @@ def make_conveyor_topology_graph(config) -> nx.DiGraph:
             edge_len = v_pos - u_pos
 
             assert edge_len >= 2, "Conveyor section is way too short!"
-            DG.add_edge(u, v, length=edge_len)
+            DG.add_edge(u, v, length=edge_len, conveyor=conv_id)
 
-            DG.nodes[u]['conveyor'] = conv_id
-            DG.nodes[u]['conveyor_pos'] = u_pos
+            if (i > 1) or (u[0] != 'diverter'):
+                DG.nodes[u]['conveyor'] = conv_id
+                DG.nodes[u]['conveyor_pos'] = u_pos
             if (i < len(sections) - 1) or (v[0] != 'junction'):
                 DG.nodes[v]['conveyor'] = conv_id
                 DG.nodes[v]['conveyor_pos'] = v_pos
@@ -170,6 +186,21 @@ def make_conveyor_conn_graph(config) -> nx.Graph:
 
     return G
 
+def resolve_interface(conn_graph: nx.Graph, from_agent: AgentId, int_id: int) -> Tuple[AgentId, int]:
+    """
+    Given a connection graph, node ID and adjacent edge index, returns
+    a node on the other side of that edge and that edge's index
+    among other node's edges.
+    Edge index -1 is a loopback.
+    """
+    if int_id == -1:
+        to_agent = from_agent
+        to_interface = -1
+    else:
+        to_agent = list(conn_graph.edges(from_agent))[int_id][1]
+        to_interface = list(conn_graph.edges(to_agent)).index((to_agent, from_agent))
+    return to_agent, to_interface
+
 def make_router_cfg(G, router_id):
     """
     Helper which makes valid config for the router controller of a given class
@@ -187,6 +218,10 @@ def make_router_cfg(G, router_id):
 def only_reachable(G, v, nodes, inv_paths=True):
     filter_func = lambda u: nx.has_path(G, u, v) if inv_paths else nx.has_path(G, v, u)
     return list(filter(filter_func, nodes))
+
+##
+# Generation of training data and manipulations with it
+#
 
 def mk_current_neural_state(G, time, pkg, node_addr, *add_data):
     n = len(G.nodes())
@@ -489,3 +524,38 @@ def data_digest(data):
     m = hashlib.sha256()
     m.update(ba)
     return base64.b16encode(m.digest()).decode('utf-8')
+
+##
+# Algorithmic helpers
+#
+
+T = TypeVar('T')
+X = TypeVar('X')
+
+def binary_search(ls: List[T], diff_func: Callable[[T], X],
+                  return_index : bool = False) -> Union[Tuple[T, int], T]:
+    """
+    Binary search via predicate
+    """
+    l = 0
+    r = len(ls)
+    while l < r:
+        m = l + (r - l) // 2
+        cmp_res = diff_func(ls[m])
+        if cmp_res == 0:
+            return (ls[m], m) if return_index else ls[m]
+        elif cmp_res < 0:
+            r = m
+        else:
+            l = m + 1
+
+    if l > 0 and (abs(diff_func(ls[l-1])) < abs(diff_func(ls[l]))):
+        l -= 1
+    return (ls[l], l) if return_index else ls[l]
+
+def differs_from(x: T, using = None) -> Callable[[T], X]:
+    def _diff(y):
+        if using is not None:
+            y = using(y)
+        return x - y
+    return _diff

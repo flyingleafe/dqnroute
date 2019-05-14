@@ -1,15 +1,12 @@
 from functools import total_ordering
 from copy import deepcopy
 from typing import Tuple
-# import pandas as pd
-# import numpy as np
+
+from .utils import AgentId, InterfaceId
 
 ##
 # Elementary datatypes
 #
-
-AgentId = Tuple[str, int]
-InterfaceId = int
 
 class WorldEvent:
     """
@@ -70,6 +67,26 @@ class UnsupportedActionType(Exception):
     pass
 
 ##
+# Delays/timeouts
+#
+
+class DelayedEvent(WorldEvent):
+    """
+    Special wrapper event which should be handled not immediately,
+    but after some time. Models the timeout logic in agents themselves.
+    """
+    def __init__(self, id: int, delay: float, inner: WorldEvent):
+        super().__init__(id=id, delay=delay, inner=inner)
+
+class DelayInterrupt(WorldEvent):
+    """
+    Special event which is used to un-schedule the handling of
+    `DelayedEvent`
+    """
+    def __init__(self, delay_id: int):
+        super().__init__(delay_id=delay_id)
+
+##
 # Core messages, handled by `ConnectionModel`
 #
 
@@ -89,22 +106,6 @@ class WireOutMsg(WireTransferMsg):
 class WireInMsg(WireTransferMsg):
     pass
 
-
-class DelayedMessage(Message):
-    """
-    Special wrapper message which should be handled not immediately,
-    but after some time. Models the timeout logic in agents themselves.
-    """
-    def __init__(self, id: int, delay: float, inner_msg: Message):
-        super().__init__(id=id, delay=delay, inner_msg=inner_msg)
-
-class DelayInterruptMessage(Message):
-    """
-    Special message which is used to un-schedule the handling of
-    `DelayedMessage`
-    """
-    def __init__(self, delay_id: int):
-        super().__init__(delay_id=delay_id)
 
 ##
 # Basic message classes on a `MessageHandler` level.
@@ -136,6 +137,15 @@ class OutMessage(TransferMessage):
     with given ID.
     """
     pass
+
+class DelayTriggerMsg(Message):
+    """
+    Utility message which is meant to be used only
+    with `DelayedEvent`, so that agent can plan some actions
+    for some time in the future
+    """
+    def __init__(self, delay_id: int):
+        super().__init__(delay_id=delay_id)
 
 class ServiceMessage(Message):
     """
@@ -305,8 +315,8 @@ class WrappedRouterMsg(ServiceMessage):
     """
     Wrapped message which allows to reuse router code in conveyors
     """
-    def __init__(self, inner: Message):
-        super().__init__(inner=inner)
+    def __init__(self, from_router: AgentId, to_router: AgentId, inner: Message):
+        super().__init__(from_router=from_router, to_router=to_router, inner=inner)
 
 #
 # Conveyor control messages
@@ -320,6 +330,12 @@ class IncomingBagMsg(ConveyorBagMsg):
     pass
 
 class OutgoingBagMsg(ConveyorBagMsg):
+    pass
+
+class PassedBagMsg(ConveyorBagMsg):
+    pass
+
+class ConveyorStopMsg(ServiceMessage):
     pass
 
 class StopTimeUpdMsg(ServiceMessage):
