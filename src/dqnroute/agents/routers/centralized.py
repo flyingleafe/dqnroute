@@ -48,11 +48,9 @@ class CentralizedRouter(MasterHandler):
 
     def addLink(self, u: AgentId, v: AgentId, params={}):
         self.network.add_edge(u, v, **params)
-        self.network.add_edge(v, u, **params)
 
     def removeLink(self, u: AgentId, v: AgentId):
         self.network.remove_edge(u, v)
-        self.network.remove_edge(v, u)
 
     def routeFrom(self, sender: AgentId, slave_id: AgentId, pkg: Package) -> AgentId:
         raise NotImplementedError()

@@ -6,7 +6,7 @@ from typing import List, Tuple, Dict
 from ..base import *
 from ...messages import *
 
-class AbstractLinkStateRouter(Router):
+class AbstractLinkStateHandler(MessageHandler):
     """
     A router which implements a link-state protocol where the notion
     of a link-state is abstracted out
@@ -16,15 +16,14 @@ class AbstractLinkStateRouter(Router):
         self.seq_num = 0
         self.announcements = {}
 
-    def init(self, config) -> List[Message]:
+    def init(self, config) -> List[WorldEvent]:
         msgs = super().init(config)
         return msgs + self._announceState()
 
-    def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[Message]:
+    def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[WorldEvent]:
         if isinstance(msg, StateAnnouncementMsg):
             if self._processStateAnnouncement(msg):
-                return [OutMessage(self.id, v, deepcopy(msg))
-                        for v in (self.all_neighbours - set([sender]))]
+                return self.broadcast(msg, exclude=[sender])
             return []
 
         else:
@@ -34,7 +33,7 @@ class AbstractLinkStateRouter(Router):
         state = self.getState()
         announcement = StateAnnouncementMsg(self.id, self.seq_num, state)
         self.seq_num += 1
-        return [OutMessage(self.id, v, deepcopy(announcement)) for v in self.all_neighbours]
+        return self.broadcast(announcement)
 
     def _processStateAnnouncement(self, msg: StateAnnouncementMsg) -> bool:
         if msg.node == self.id:
@@ -61,7 +60,7 @@ class AbstractLinkStateRouter(Router):
     def processNewAnnouncement(self, node: int, state) -> bool:
         raise NotImplementedError()
 
-class LinkStateRouter(AbstractLinkStateRouter):
+class LinkStateRouter(Router, AbstractLinkStateHandler):
     """
     Simple link-state router
     """
@@ -80,13 +79,13 @@ class LinkStateRouter(AbstractLinkStateRouter):
         self.network.add_edge(self.id, to, **params)
         return msgs + self._announceState()
 
-    def removeLink(self, to: int) -> List[Message]:
+    def removeLink(self, to: AgentId) -> List[Message]:
         msgs = super().removeLink(to)
         self.network.remove_edge(to, self.id)
         self.network.remove_edge(self.id, to)
         return msgs + self._announceState()
 
-    def route(self, sender: AgentId, pkg: Package) -> Tuple[AgentId, List[Message]]:
+    def route(self, sender: AgentId, pkg: Package, allowed_nbrs: List[AgentId]) -> Tuple[AgentId, List[Message]]:
         path = nx.dijkstra_path(self.network, self.id, pkg.dst,
                                 weight=self.edge_weight)
         return path[1], []
@@ -135,19 +134,10 @@ class LSConveyorMixin(object):
             return self._announceState()
         return []
 
-    def route(self, sender: AgentId, pkg: Package) -> Tuple[AgentId, List[Message]]:
-        """
-        Makes sure that bags are not sent to the path which can not lead to
-        the destination
-        """
-        old_neighbours = self.out_neighbours
-        self.out_neighbours = set(only_reachable(self.network, pkg.dst, old_neighbours))
-
-        to, msgs = super().route(sender, pkg)
+    def route(self, sender: AgentId, pkg: Package, allowed_nbrs: List[AgentId]) -> Tuple[AgentId, List[Message]]:
+        to, msgs = super().route(sender, pkg, allowed_nbrs)
         scheduled_stop_time = self.env.time() + self.env.stop_delay()
         msgs.append(OutConveyorMsg(StopTimeUpdMsg(scheduled_stop_time)))
-
-        self.out_neighbours = old_neighbours
         return to, msgs
 
     def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[Message]:

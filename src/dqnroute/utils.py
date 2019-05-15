@@ -186,6 +186,9 @@ def make_conveyor_conn_graph(config) -> nx.Graph:
 
     return G
 
+def interface_idx(conn_graph: nx.Graph, from_agent: AgentId, to_agent: AgentId) -> int:
+    return list(conn_graph.edges(from_agent)).index((from_agent, to_agent))
+
 def resolve_interface(conn_graph: nx.Graph, from_agent: AgentId, int_id: int) -> Tuple[AgentId, int]:
     """
     Given a connection graph, node ID and adjacent edge index, returns
@@ -198,20 +201,16 @@ def resolve_interface(conn_graph: nx.Graph, from_agent: AgentId, int_id: int) ->
         to_interface = -1
     else:
         to_agent = list(conn_graph.edges(from_agent))[int_id][1]
-        to_interface = list(conn_graph.edges(to_agent)).index((to_agent, from_agent))
+        to_interface = interface_idx(conn_graph, to_agent, from_agent)
     return to_agent, to_interface
 
 def make_router_cfg(G, router_id):
     """
     Helper which makes valid config for the router controller of a given class
     """
-    out_routers = [v for (_, v) in G.out_edges(router_id)]
-    in_routers = [v for (v, _) in G.in_edges(router_id)]
     router_cfg = {
         'nodes': sorted(list(G.nodes())),
-        'edges_num': len(G.edges()), # small hack to make link-state initialization simpler
-        'out_neighbours': out_routers,
-        'in_neighbours': in_routers
+        'edges_num': len(G.edges()) # small hack to make link-state initialization simpler
     }
     return router_cfg
 

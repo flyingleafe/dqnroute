@@ -89,9 +89,7 @@ class NetworkEnvironment(MultiAgentEnv):
             self.passToAgent(event.recipient, event)
             return self.env.process(self._inputQueue(event.sender, event.recipient, event.pkg))
         elif isinstance(event, LinkUpdateEvent):
-            u_ev = self.passToAgent(event.u, event)
-            v_ev = self.passToAgent(event.v, event)
-            return u_ev & v_ev
+            return self.handleConnGraphChange(event)
         else:
             return super().handleWorldEvent(event)
 
@@ -165,7 +163,7 @@ class NetworkRunner(SimulationRunner):
                 if action == 'break_link':
                     self.world.handleWorldEvent(RemoveLinkEvent(u, v))
                 elif action == 'restore_link':
-                    self.world.handleWorldEvent(AddLinkEvent(u, v, params=self.G.edges[u, v]))
+                    self.world.handleWorldEvent(AddLinkEvent(u, v, params=self.world.conn_graph.edges[u, v]))
                 yield self.env.timeout(pause)
 
             except KeyError:

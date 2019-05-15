@@ -101,6 +101,25 @@ class MultiAgentEnv:
             self.handle(agent, new_event)
         return Event(self.env).succeed()
 
+    def handleConnGraphChange(self, event: LinkUpdateEvent) -> Event:
+        """
+        Adds or removes the connection link and notifies the agents that
+        the corresponding intefaces changed availability.
+        Connection graph itself does not change to preserve interfaces numbering.
+        """
+        u = event.u
+        v = event.v
+        u_int = interface_idx(self.conn_graph, u, v)
+        v_int = interface_idx(self.conn_graph, v, u)
+
+        if isinstance(event, AddLinkEvent):
+            u_ev = InterfaceSetupEvent(u_int, v, event.params)
+            v_ev = InterfaceSetupEvent(v_int, u, event.params)
+        elif isinstance(event, RemoveLinkEvent):
+            u_ev = InterfaceShutdownEvent(u_int)
+            v_ev = InterfaceShutdownEvent(v_int)
+        return self.passToAgent(u, u_ev) & self.passToAgent(v, v_ev)
+
     def _delayedHandleGen(self, from_agent: AgentId, event: DelayedEvent):
         proc_id = event.id
         delay = event.delay

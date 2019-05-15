@@ -46,8 +46,8 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         self.optimizer = get_optimizer(optimizer)(self.brain.parameters())
         self.loss_func = nn.MSELoss()
 
-    def route(self, sender: AgentId, pkg: Package) -> Tuple[AgentId, List[Message]]:
-        to, estimate, saved_state = self._act(pkg)
+    def route(self, sender: AgentId, pkg: Package, allowed_nbrs: List[AgentId]) -> Tuple[AgentId, List[Message]]:
+        to, estimate, saved_state = self._act(pkg, allowed_nbrs)
         reward = self.registerResentPkg(pkg, estimate, to, saved_state)
         return to, [OutMessage(self.id, sender, reward)] if sender[0] != 'world' else []
 
@@ -64,12 +64,12 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         return QNetwork(len(self.nodes), additional_inputs=additional_inputs,
                         one_out=False, **kwargs)
 
-    def _act(self, pkg: Package):
-        state = self._getNNState(pkg)
+    def _act(self, pkg: Package, allowed_nbrs: List[AgentId]):
+        state = self._getNNState(pkg, allowed_nbrs)
         prediction = self._predict(state)[0]
 
         to = -1
-        while ('router', to) not in self.out_neighbours:
+        while ('router', to) not in allowed_nbrs:
             to = soft_argmax(prediction, MIN_TEMP)
 
         estimate = -np.max(prediction)
@@ -100,12 +100,8 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         else:
             raise Exception('Unknown additional input: ' + tag)
 
-    def _getNNState(self, pkg: Package, nbrs=None):
+    def _getNNState(self, pkg: Package, nbrs: List[AgentId]):
         n = len(self.nodes)
-
-        if nbrs is None:
-            nbrs = self.out_neighbours
-
         addr = np.array(self.id[1])
         dst = np.array(pkg.dst[1])
 
@@ -155,14 +151,14 @@ class DQNRouterOO(DQNRouter):
         return QNetwork(len(self.nodes), additional_inputs=additional_inputs,
                         one_out=True, **kwargs)
 
-    def _act(self, pkg: Package):
-        state = self._getNNState(pkg)
+    def _act(self, pkg: Package, allowed_nbrs: List[AgentId]):
+        state = self._getNNState(pkg, allowed_nbrs)
         prediction = self._predict(state).flatten()
         to_idx = soft_argmax(prediction, MIN_TEMP)
         estimate = -np.max(prediction)
 
         saved_state = [s[to_idx] for s in state]
-        to = sorted(list(self.out_neighbours))[to_idx]
+        to = sorted(allowed_nbrs)[to_idx]
         return to, estimate, saved_state
 
     def _nodeRepr(self, node):
@@ -171,12 +167,8 @@ class DQNRouterOO(DQNRouter):
     def _getAddInput(self, tag, nbr):
         return super()._getAddInput(tag)
 
-    def _getNNState(self, pkg: Package, nbrs=None):
+    def _getNNState(self, pkg: Package, nbrs: List[AgentId]):
         n = len(self.nodes)
-
-        if nbrs is None:
-            nbrs = sorted(list(self.out_neighbours))
-
         addr = self._nodeRepr(self.id[1])
         dst = self._nodeRepr(pkg.dst[1])
 
@@ -184,7 +176,7 @@ class DQNRouterOO(DQNRouter):
                                       for inp in self.additional_inputs]
 
         input = [[addr, dst, self._nodeRepr(v[1])] + get_add_inputs(v)
-                 for v in sorted(list(self.out_neighbours))]
+                 for v in sorted(nbrs)]
         return stack_batch(input)
 
     def _replay(self):

@@ -87,6 +87,62 @@ class DelayInterrupt(WorldEvent):
         super().__init__(delay_id=delay_id)
 
 ##
+# Changes in connection graph
+#
+
+# Global
+
+class LinkUpdateEvent(WorldEvent):
+    """
+    A link between nodes has appeared or disappeared
+    """
+    def __init__(self, u: AgentId, v: AgentId, **kwargs):
+        super().__init__(u=u, v=v, **kwargs)
+
+class AddLinkEvent(LinkUpdateEvent):
+    """
+    Event which router receives when a link is connected (or restored).
+    """
+    def __init__(self, u: AgentId, v: AgentId, params={}):
+        super().__init__(u, v, params=params)
+
+class RemoveLinkEvent(LinkUpdateEvent):
+    """
+    Event which router receives when link breakage is detected
+    """
+    def __init__(self, u: AgentId, v: AgentId):
+        super().__init__(u, v)
+
+def swapUV(event: LinkUpdateEvent) -> LinkUpdateEvent:
+    kwargs = event.getContents()
+    u = kwargs.pop('u')
+    v = kwargs.pop('v')
+    return event.__class__(v, u, **kwargs)
+
+# Handler-level
+
+class InterfaceUpdateEvent(WorldEvent):
+    """
+    An interface is up or down
+    """
+    def __init__(self, interface: InterfaceId, **kwargs):
+        super().__init__(interface=interface, **kwargs)
+
+class InterfaceSetupEvent(InterfaceUpdateEvent):
+    """
+    A new interface is set up
+    """
+    def __init__(self, interface: InterfaceId, neighbour: AgentId, params={}):
+        super().__init__(interface, neighbour=neighbour, params=params)
+
+class InterfaceShutdownEvent(InterfaceUpdateEvent):
+    """
+    An interface is shut down
+    """
+    def __init__(self, interface: InterfaceId):
+        super().__init__(interface)
+
+##
 # Core messages, handled by `ConnectionModel`
 #
 
@@ -224,8 +280,8 @@ class PkgProcessingEvent(WorldEvent):
     """
     Some package is now ready to be routed further
     """
-    def __init__(self, sender: AgentId, recipient: AgentId, pkg: Package):
-        super().__init__(sender=sender, recipient=recipient, pkg=pkg)
+    def __init__(self, sender: AgentId, recipient: AgentId, pkg: Package, allowed_nbrs=None):
+        super().__init__(sender=sender, recipient=recipient, pkg=pkg, allowed_nbrs=allowed_nbrs)
 
 class PkgReceiveAction(Action):
     """
@@ -240,27 +296,6 @@ class PkgRouteAction(Action):
     """
     def __init__(self, to: AgentId, pkg: Package):
         super().__init__(to=to, pkg=pkg)
-
-class LinkUpdateEvent(WorldEvent):
-    """
-    A link between nodes has appeared or disappeared
-    """
-    def __init__(self, u: AgentId, v: AgentId, **kwargs):
-        super().__init__(u=u, v=v, **kwargs)
-
-class AddLinkEvent(LinkUpdateEvent):
-    """
-    Event which router receives when a link is connected (or restored).
-    """
-    def __init__(self, u: AgentId, v: AgentId, params={}):
-        super().__init__(u, v, params=params)
-
-class RemoveLinkEvent(LinkUpdateEvent):
-    """
-    Event which router receives when link breakage is detected
-    """
-    def __init__(self, u: AgentId, v: AgentId):
-        super().__init__(u, v)
 
 ##
 # Conveyors events/actions

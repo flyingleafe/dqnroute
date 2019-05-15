@@ -16,7 +16,7 @@ class SimpleQRouter(Router, RewardAgent):
         self.learning_rate = learning_rate
         self.nodes = nodes
         self.Q = {u: {v: 0 if u == v else 10
-                      for v in self.out_neighbours}
+                      for v in self.interface_map.values()}
                   for u in self.nodes}
 
     def addLink(self, to: AgentId, params={}) -> List[Message]:
@@ -26,8 +26,8 @@ class SimpleQRouter(Router, RewardAgent):
                 dct[to] = 0 if u == to else 10
         return msgs
 
-    def route(self, sender: AgentId, pkg: Package) -> Tuple[AgentId, List[Message]]:
-        Qs = self._Q(pkg.dst)
+    def route(self, sender: AgentId, pkg: Package, allowed_nbrs: List[AgentId]) -> Tuple[AgentId, List[Message]]:
+        Qs = self._Q(pkg.dst, allowed_nbrs)
         to, estimate = dict_min(Qs)
         reward_msg = self.registerResentPkg(pkg, estimate, to, pkg.dst)
 
@@ -41,11 +41,11 @@ class SimpleQRouter(Router, RewardAgent):
         else:
             return super().handleMsgFrom(sender, msg)
 
-    def _Q(self, d: int) -> Dict[int, float]:
+    def _Q(self, d: int, allowed_nbrs: List[AgentId]) -> Dict[int, float]:
         """
         Returns a dict which only includes available neighbours
         """
-        return {n: self.Q[d][n] for n in self.out_neighbours}
+        return {n: self.Q[d][n] for n in allowed_nbrs}
 
 
 class PredictiveQRouter(SimpleQRouter, RewardAgent):
@@ -54,9 +54,9 @@ class PredictiveQRouter(SimpleQRouter, RewardAgent):
         self.beta = beta
         self.gamma = gamma
         self.B = deepcopy(self.Q)
-        self.R = {u: {v: 0 for v in self.out_neighbours}
+        self.R = {u: {v: 0 for v in self.interface_map.values()}
                   for u in self.nodes}
-        self.U = {u: {v: 0 for v in self.out_neighbours}
+        self.U = {u: {v: 0 for v in self.interface_map.values()}
                   for u in self.nodes}
 
     def addLink(self, to: AgentId, params={}) -> List[Message]:
@@ -70,9 +70,9 @@ class PredictiveQRouter(SimpleQRouter, RewardAgent):
                 self.U[u][to] = self.env.time()
         return msgs
 
-    def route(self, sender: AgentId, pkg: Package) -> Tuple[AgentId, List[Message]]:
-        Qs = self._Q(pkg.dst)
-        Qs_altered = self._Q_altered(pkg.dst)
+    def route(self, sender: AgentId, pkg: Package, allowed_nbrs: List[AgentId]) -> Tuple[AgentId, List[Message]]:
+        Qs = self._Q(pkg.dst, allowed_nbrs)
+        Qs_altered = self._Q_altered(pkg.dst, allowed_nbrs)
         to, _ = dict_min(Qs_altered)
         estimate = min(Qs.values())
         reward_msg = self.registerResentPkg(pkg, estimate, to, pkg.dst)
@@ -98,13 +98,13 @@ class PredictiveQRouter(SimpleQRouter, RewardAgent):
         else:
             return super().handleMsgFrom(sender, msg)
 
-    def _Q_altered(self, d: int) -> Dict[int, float]:
+    def _Q_altered(self, d: int, allowed_nbrs: List[AgentId]) -> Dict[int, float]:
         """
         Returns estimates for all available neighbours
         """
         now = self.env.time()
         res = {}
-        for n in self.out_neighbours:
+        for n in allowed_nbrs:
             dt = now - self.U[d][n]
             res[n] = max(self.Q[d][n] + dt * self.R[d][n], self.B[d][n])
         return res
