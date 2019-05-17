@@ -114,13 +114,13 @@ settings:
     sequence:
       # - {pkg_number: 1000, delta: 10} 
       # - {bags_number: 2000, delta: 10}
-      - {bags_number: 200, delta: 20, sinks: [17, 18]}
+      - {bags_number: 200, delta: 20, sinks: [0, 1]}
       - {bags_number: 200, delta: 20}
-      - {bags_number: 200, delta: 20, sinks: [17, 18]} 
+      - {bags_number: 200, delta: 20, sinks: [0, 1]} 
       - {bags_number: 200, delta: 20}
-      - {bags_number: 200, delta: 20, sinks: [17, 18]} 
+      - {bags_number: 200, delta: 20, sinks: [0, 1]} 
       - {bags_number: 200, delta: 20}
-      - {bags_number: 200, delta: 20, sinks: [17, 18]} 
+      - {bags_number: 200, delta: 20, sinks: [0, 1]} 
   conveyor_env:
     speed: 1
     energy_consumption: 1
@@ -129,7 +129,7 @@ settings:
     stop_delay: 40
   router:
     simple_q:
-      energy_reward_weight: 1
+      energy_reward_weight: 0.1
       learning_rate: 0.5
     dqn: &dqn
       energy_reward_weight: 1
@@ -145,7 +145,7 @@ settings:
       <<: *dqn
     dqn_emb:
       <<: *dqn
-      energy_reward_weight: 0.5
+      energy_reward_weight: 0.1
       additional_inputs: []
       embedding:
         alg: 'lap'

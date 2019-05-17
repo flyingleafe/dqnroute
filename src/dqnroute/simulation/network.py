@@ -12,15 +12,39 @@ from .common import *
 
 logger = logging.getLogger(DQNROUTE_LOGGER)
 
+class RouterFactory(HandlerFactory):
+    def __init__(self, router_type, router_cfg, context = None, **kwargs):
+        super().__init__(**kwargs)
+        self.router_type = router_type
+        self.RouterClass = get_router_class(router_type, context)
+        self.edge_weight = 'latency' if context == 'network' else 'length'
+        self.router_cfg = router_cfg
+        self.centralized = issubclass(self.RouterClass, MasterHandler)
+
+    def makeMasterHanlder(self) -> MasterHandler:
+        dyn_env = self.env.subset(['time'])
+        return self.RouterClass(
+            env=dyn_env, network=self.multi_env.conn_graph.to_directed(),
+            edge_weight='latency', **self.router_cfg)
+
+    def makeHandler(self, agent_id: AgentId, neighbours: List[AgentId]) -> MessageHandler:
+        assert agent_id[0] == 'router', "Only routers are allowed in computer network"
+
+        dyn_env = self.env.copy()
+        G = self.env.conn_graph.to_directed()
+        kwargs = make_router_cfg(G, agent_id)
+        kwargs.update(self.router_cfg)
+        if issubclass(self.RouterClass, LinkStateRouter):
+            kwargs['adj_links'] = G.adj[agent_id]
+
+        return self.RouterClass(env=dyn_env, id=agent_id, neighbours=neighbours,
+                                edge_weight=self.edge_weight, **kwargs)
 
 class NetworkEnvironment(MultiAgentEnv):
     """
     Class which simulates the behavior of computer network
     """
-    def __init__(self, RouterClass, data_series: EventSeries,
-                 pkg_process_delay: int = 0, default_router_cfg = {}, **kwargs):
-        self.RouterClass = RouterClass
-        self.default_router_cfg = default_router_cfg
+    def __init__(self, data_series: EventSeries, pkg_process_delay: int = 0, **kwargs):
         self.pkg_process_delay = pkg_process_delay
         self.data_series = data_series
 
@@ -36,35 +60,11 @@ class NetworkEnvironment(MultiAgentEnv):
 
     def makeConnGraph(self, network_cfg, **kwargs) -> nx.Graph:
         if type(network_cfg) == list:
-            G = make_network_graph(network_cfg)
+            return make_network_graph(network_cfg)
         elif type(network_cfg) == dict:
-            G = gen_network_graph(network_cfg['generator'])
+            return gen_network_graph(network_cfg['generator'])
         else:
             raise Exception('Invalid network config: {}'.format(network_cfg))
-
-        if issubclass(self.RouterClass, CentralizedRouter):
-            dyn_env = DynamicEnv(time=lambda: self.env.now)
-            self.master_router = self.RouterClass(env=dyn_env, network=G.to_directed(),
-                                                  edge_weight='latency', **self.default_router_cfg)
-        return G
-
-    def makeHandler(self, agent_id: AgentId) -> MessageHandler:
-        assert agent_id[0] == 'router', "Only routers are allowed in computer network"
-
-        if issubclass(self.RouterClass, CentralizedRouter):
-            return SlaveHandler(id=agent_id, master=self.master_router)
-        else:
-            dyn_env = DynamicEnv(time=lambda: self.env.now)
-            neighbours = [v for _, v in self.conn_graph.edges(agent_id)]
-
-            G = self.conn_graph.to_directed()
-            kwargs = make_router_cfg(G, agent_id)
-            kwargs.update(self.default_router_cfg)
-            if issubclass(self.RouterClass, LinkStateRouter):
-                kwargs['adj_links'] = G.adj[agent_id]
-
-            return self.RouterClass(env=dyn_env, id=agent_id, neighbours=neighbours,
-                                    edge_weight='latency', **kwargs)
 
     def handleAction(self, from_agent: AgentId, action: Action) -> Event:
         if isinstance(action, PkgRouteAction):
@@ -72,7 +72,8 @@ class NetworkEnvironment(MultiAgentEnv):
             if not self.conn_graph.has_edge(from_agent, to_agent):
                 raise Exception("Trying to route to a non-neighbor")
 
-            return self.env.process(self._edgeTransfer(from_agent, to_agent, action.pkg))
+            self.env.process(self._edgeTransfer(from_agent, to_agent, action.pkg))
+            return Event(self.env).succeed()
 
         elif isinstance(action, PkgReceiveAction):
             logger.debug("Package #{} received at node {} at time {}"
@@ -86,10 +87,8 @@ class NetworkEnvironment(MultiAgentEnv):
 
     def handleWorldEvent(self, event: WorldEvent) -> Event:
         if isinstance(event, PkgEnqueuedEvent):
-            self.passToAgent(event.recipient, event)
-            return self.env.process(self._inputQueue(event.sender, event.recipient, event.pkg))
-        elif isinstance(event, LinkUpdateEvent):
-            return self.handleConnGraphChange(event)
+            self.env.process(self._inputQueue(event.sender, event.recipient, event.pkg))
+            return self.passToAgent(event.recipient, event)
         else:
             return super().handleWorldEvent(event)
 
@@ -119,28 +118,26 @@ class NetworkRunner(SimulationRunner):
     Class which constructs and runs scenarios in computer network simulation
     environment.
     """
-    def __init__(self, router_type: str, data_dir=LOG_DATA_DIR+'/network', **kwargs):
-        self.router_type = router_type
+    def __init__(self, data_dir=LOG_DATA_DIR+'/network', **kwargs):
         super().__init__(data_dir=data_dir, **kwargs)
 
-    def makeMultiAgentEnv(self) -> MultiAgentEnv:
-        ChosenRouter = get_router_class(self.router_type, 'network')
-        router_cfg = self.run_params['settings']['router'].get(self.router_type, {})
+    def makeHandlerFactory(self, router_type: str, **kwargs):
+        routers_cfg = self.run_params['settings']['router'].get(router_type, {})
+        return RouterFactory(router_type, routers_cfg, 'network', **kwargs)
 
-        return NetworkEnvironment(env=self.env, RouterClass=ChosenRouter,
-                                  data_series=self.data_series,
+    def makeMultiAgentEnv(self, **kwargs) -> MultiAgentEnv:
+        return NetworkEnvironment(env=self.env, factory=self.factory, data_series=self.data_series,
                                   network_cfg=self.run_params['network'],
-                                  default_router_cfg=router_cfg,
                                   **self.run_params['settings']['router_env'])
 
     def relevantConfig(self):
         ps = self.run_params
         ss = ps['settings']
         return (ps['network'], ss['pkg_distr'], ss['router_env'],
-                ss['router'].get(self.router_type, {}))
+                ss['router'].get(self.factory.router_type, {}))
 
     def makeRunId(self, random_seed):
-        return '{}-{}'.format(self.router_type, random_seed)
+        return '{}-{}'.format(self.factory.router_type, random_seed)
 
     def runProcess(self, random_seed = None):
         if random_seed is not None:
@@ -161,9 +158,9 @@ class NetworkRunner(SimulationRunner):
                 v = ('router', period["v"])
 
                 if action == 'break_link':
-                    self.world.handleWorldEvent(RemoveLinkEvent(u, v))
+                    yield self.world.handleWorldEvent(RemoveLinkEvent(u, v))
                 elif action == 'restore_link':
-                    self.world.handleWorldEvent(AddLinkEvent(u, v, params=self.world.conn_graph.edges[u, v]))
+                    yield self.world.handleWorldEvent(AddLinkEvent(u, v, params=self.world.conn_graph.edges[u, v]))
                 yield self.env.timeout(pause)
 
             except KeyError:
@@ -187,6 +184,6 @@ class NetworkRunner(SimulationRunner):
                         pkg = Package(pkg_id, DEF_PKG_SIZE, dst, self.env.now, None) # create empty packet
                         logger.debug("Sending random pkg #{} from {} to {} at time {}"
                                      .format(pkg_id, src, dst, self.env.now))
-                        self.world.handleWorldEvent(PkgEnqueuedEvent(('world', 0), src, pkg))
+                        yield self.world.handleWorldEvent(PkgEnqueuedEvent(('world', 0), src, pkg))
                         pkg_id += 1
                     yield self.env.timeout(delta)

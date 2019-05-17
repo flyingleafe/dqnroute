@@ -1,90 +1,231 @@
+import pprint
+import networkx as nx
+
 from typing import List, Tuple
 from .common import *
 from ..base import *
 from ...messages import *
+from ...conveyor_model import *
 from ...utils import *
 
 
-class SimpleConveyor(Conveyor):
+class BaseConveyor(Conveyor, ConveyorStateHandler):
+    """
+    Conveyor which can handle its length and speed and can track the positions of bags.
+    Should be only used as a superclass.
+    """
+    def __init__(self, length: float, max_speed: float,
+                 checkpoints: List[Tuple[AgentId, float]], **kwargs):
+        super().__init__(**kwargs)
+        self.model = ConveyorModel(length, max_speed, checkpoints, model_id=self.id)
+        self.delayed_conv_update = -1
+
+    def handleBagMsg(self, sender: AgentId, msg: ConveyorBagMsg) -> List[WorldEvent]:
+        evs = self._interruptMovement()
+        bag = msg.bag
+
+        if isinstance(msg, IncomingBagMsg):
+            n_node, n_pos = self.notifierPos(sender)
+            # self.log('bag #{} arrives at {}, pos {}'.format(bag.id, arrival_node, arrival_pos))
+            self.model.putObject(bag.id, bag, n_pos)
+            evs += self.handleIncomingBag(n_node, bag)
+
+        elif isinstance(msg, OutgoingBagMsg):
+            assert agent_type(sender) == 'diverter', "only diverters send us such stuff!"
+            self.model.removeObject(bag.id)
+            evs += self.handleOutgoingBag(sender, bag)
+
+        elif isinstance(msg, PassedBagMsg):
+            assert agent_type(sender) == 'diverter', "only diverters send us such stuff!"
+            evs += self.handlePassedBag(sender, bag)
+
+        return evs + self._resolveAndResume()
+
+    def notifierPos(self, agent: AgentId) -> Tuple[float]:
+        raise NotImplementedError()
+
+    def handleIncomingBag(self, notifier: AgentId, bag: Bag) -> List[WorldEvent]:
+        raise NotImplementedError()
+
+    def handleOutgoingBag(self, notifier: AgentId, bag: Bag) -> List[WorldEvent]:
+        raise NotImplementedError()
+
+    def handlePassedBag(self, notifier: AgentId, bag: Bag) -> List[WorldEvent]:
+        raise NotImplementedError()
+
+    def checkpointReach(self, node: AgentId, bag: Bag) -> List[WorldEvent]:
+        raise NotImplementedError()
+
+    def start(self, speed=None) -> List[WorldEvent]:
+        if speed is None:
+            speed = self.model.max_speed
+        return self.setSpeed(speed)
+
+    def stop(self) -> List[WorldEvent]:
+        return self.setSpeed(0)
+
+    def setSpeed(self, new_speed: float) -> List[WorldEvent]:
+        if self.model.speed != new_speed:
+            self.model.setSpeed(new_speed)
+            return [ConveyorSpeedChangeAction(new_speed)] + self._announceState()
+        else:
+            return []
+
+    def getState(self):
+        return {'speed': self.model.speed}
+
+    def _resolveAndResume(self) -> List[WorldEvent]:
+        evs = []
+        if self.model.dirty():
+            self.model.startResolving()
+            conv_events = self.model.immediateEvents()
+            for bag, node, delay in conv_events:
+                if agent_type(node) == 'conv_end':
+                    self.model.removeObject(bag.id)
+                    evs += self.handleOutgoingBag(self.id, bag)
+                else:
+                    evs += self.checkpointReach(node, bag)
+            self.model.endResolving()
+
+        if not self.model.resolving():
+            evs += self._resumeMovement()
+        return evs
+
+    def _resumeMovement(self) -> List[WorldEvent]:
+        if self.hasDelayed(self.delayed_conv_update):
+            raise Exception('why it still has delayed?')
+
+        self.model.resume(self.env.time())
+        conv_events = self.model.nextEvents()
+
+        # if self.id[1] == 5 and (638 in self.model.objects):
+        # print(conv_events)
+
+        if len(conv_events) > 0:
+            self.conv_movement_start_time = self.env.time()
+            delay = conv_events[0][2]
+            ev = self.delayed(delay, self._pauseResolve)
+            self.delayed_conv_update = ev.id
+            return [ev]
+        else:
+            self.model.pause(self.env.time())
+            return []
+
+    def _interruptMovement(self) -> List[WorldEvent]:
+        if self.hasDelayed(self.delayed_conv_update):
+            self.model.pause(self.env.time())
+            return [self.cancelDelayed(self.delayed_conv_update)]
+        return []
+
+    def _pauseResolve(self) -> List[WorldEvent]:
+        self.model.pause(self.env.time())
+        return self._resolveAndResume()
+
+
+class SimpleConveyor(BaseConveyor):
     """
     Simple conveyor which stops after some time has passed
     since the last bag exited it. It is connected to routers
     (diverters) seated on it and notifies them when it starts or stops.
     """
-    def __init__(self, max_speed: float, stop_delay: float, **kwargs):
+    def __init__(self, stop_delay: float, **kwargs):
         super().__init__(**kwargs)
         self.stop_delay = stop_delay
-        self.max_speed = max_speed
-
-        self.current_bags = set()
-        self.speed = 0
-        self.delayed_stop = None
-        self.ann_seq = 0
-
-        self.env.register('stop_delay', lambda: self.stop_delay)
-        self.env.register('scheduled_stop', lambda: self.scheduled_stop)
+        self.delayed_stop = -1
 
     def handleIncomingBag(self, notifier: AgentId, bag: Bag) -> List[WorldEvent]:
-        self.current_bags.add(bag.id)
-        if self.speed == 0:
-            self.speed = self.max_speed
-            return [ConveyorSpeedChangeAction(self.max_speed)] + self._announceSpeed()
+        if self.model.speed == 0:
+            return self.start()
         else:
             return self._cancelDelayedStop()
 
     def handleOutgoingBag(self, notifier: AgentId, bag: Bag) -> List[WorldEvent]:
-        self.current_bags.remove(bag.id)
-        if len(self.current_bags) == 0:
+        if len(self.model.objects) == 0:
             ev = self.delayed(self.stop_delay, self.stop)
             self.delayed_stop = ev.id
+            # if self.delayed_stop > 2000 and self.delayed_stop % 100 == 0:
+            #     print('{}: super large delayed stops! ({})'.format(self.id, self.delayed_stop))
             return [ev]
         return []
 
     def handlePassedBag(self, notifier: AgentId, bag: Bag) -> List[WorldEvent]:
         return []
 
-    def stop(self) -> List[WorldEvent]:
-        self.speed = 0
-        self.delayed_stop = None
-        return [ConveyorSpeedChangeAction(0)] + self._announceSpeed()
-
     def _cancelDelayedStop(self) -> List[WorldEvent]:
-        if self.delayed_stop is not None:
-            ev = self.cancelDelayed(self.delayed_stop)
-            self.delayed_stop = None
-            return [ev]
+        if self.hasDelayed(self.delayed_stop):
+            return [self.cancelDelayed(self.delayed_stop)]
         return []
-
-    def _announceSpeed(self) -> List[Message]:
-        self.ann_seq += 1
-        return self._notifyNbrs(StateAnnouncementMsg(self.id, self.ann_seq, self.speed))
-
-    def _notifyNbrs(self, msg: Message) -> List[Message]:
-        return [OutMessage(self.id, nbr, msg) for nbr in self.interface_map.values()]
 
 
 class SimpleRouterConveyor(SimpleConveyor, RouterContainer):
     """
     Simple conveyor which also handles the logic of virtual junction routers.
     """
-    def __init__(self, **kwargs):
-        self.bag_statuses = {}
+    def __init__(self, id: AgentId, topology: nx.DiGraph, **kwargs):
+        checkpoints = conveyor_adj_nodes(topology, agent_idx(id), only_own=True,
+                                         data='conveyor_pos')
+        super().__init__(id=id, checkpoints=checkpoints,
+                         topology=topology, **kwargs)
 
-    def handleIncomingBag(self, notifier: AgentId, bag: Bag) -> List[WorldEvent]:
-        evs = super().handleIncomingBag(notifier, bag)
-        assert bag.id not in self.bag_statuses, \
-            "Existing bag comes onto conveyor again somehow!"
+        self.prev_convs_ups = {}
+        for node, _ in self.model.checkpoints:
+            prev = prev_adj_conv_node(self.topology, node)
+            if prev is not None:
+                _, cid = prev
+                self.prev_convs_ups[('conveyor', cid)] = node
 
-        n_type = agent_type(notifier)
-        bag_status = {'pos': -1, 'last_updated': self.env.time()}
+        conv_edges = conveyor_edges(self.topology, self.id[1])
+        self.downstream_node = conv_edges[0][0]
+        self.upstream_node = conv_edges[-1][1]
+        self._prev_junc_nodes = {}
 
-        if n_type in ('source', 'diverter'):
-            # sources and diverters are always in the beginning
-            bag_status['pos'] = 0
-            prev_node = notifier
-        elif n_type == 'conveyor':
-            pass
+    def handleOutgoingBag(self, node: AgentId, bag: Bag) -> List[WorldEvent]:
+        evs = super().handleOutgoingBag(node, bag)
+        if node == self.id:
+            if agent_type(self.upstream_node) != 'sink':
+                up_conv = ('conveyor', conveyor_idx(self.topology, self.upstream_node))
+                self.log('bag #{} leaves to upstream conv {}'.format(bag.id, up_conv))
+                evs += [OutMessage(self.id, up_conv, IncomingBagMsg(bag))]
+        return evs
+
+    def handleIncomingBag(self, node: AgentId, bag: Bag) -> List[WorldEvent]:
+        evs = super().handleIncomingBag(node, bag)
+        if agent_type(node) == 'junction':
+            prev_node, _ = prev_adj_conv_node(self.topology, node)
+            self._prev_junc_nodes[bag.id] = prev_node
+        return evs
+
+    def handlePassedBag(self, node: AgentId, bag: Bag) -> List[WorldEvent]:
+        return []
+
+    def checkpointReach(self, node: AgentId, bag: Bag) -> List[WorldEvent]:
+        if agent_type(node) == 'junction':
+            try:
+                prev_node = self._prev_junc_nodes.pop(bag.id)
+            except KeyError:
+                prev_node = prev_same_conv_node(self.topology, node)
+                if prev_node is None:    # junction in the beginning
+                    prev_node, _ = prev_adj_conv_node(self.topology, node)
+
+            self.log('bag #{} on checkpoint {} ({}m, prev: {})'
+                     .format(bag.id, node, self.model.checkpointPos(node), prev_node))
+
+            sender = self.node_mapping[prev_node]
+            router_id = self.node_mapping[node]
+
+            # if bag.id == 638:
+            #     print('HEY IT WAS HERE: {} - {}'.format(node, router_id))
+            return self.handleBagViaRouter(sender, router_id, bag)
         else:
-            raise Exception('Only source, diverter or conveyor can be an outside source of bag!')
+            return []
 
-        self.bag_statuses[bag.id] = bag_status
+    def notifierPos(self, notifier: AgentId) -> Tuple[AgentId, float]:
+        n_type = agent_type(notifier)
+        if n_type in ('source', 'diverter'):
+            return notifier, 0
+        elif n_type == 'conveyor':
+            arrival_node = self.prev_convs_ups[notifier]
+            assert agent_type(arrival_node) == 'junction', "hey wats up!!"
+            return arrival_node, self.model.checkpointPos(arrival_node)
+        else:
+            raise Exception('invalid notifier: {}'.format(notifier))

@@ -6,20 +6,63 @@ from simpy import Environment, Event, Interrupt
 from ..event_series import EventSeries
 from ..messages import *
 from ..agents import *
-from ..utils import data_digest
+from ..utils import *
 
-class MultiAgentEnv:
+class HandlerFactory:
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.centralized = False
+        self.master_handler = None
+
+    def _setEnv(self, env: DynamicEnv):
+        self.env = env
+        if self.centralized and (self.master_handler is None):
+            self.master_handler = self.makeMasterHandler()
+        self.ready()
+
+    def _makeHandler(self, agent_id: AgentId) -> MessageHandler:
+        if self.centralized:
+            return SlaveHandler(id=agent_id, master=self.master_handler)
+        else:
+            neighbours = [v for _, v in self.env.conn_graph.edges(agent_id)]
+            return self.makeHandler(agent_id, neighbours)
+
+    def makeMasterHandler(self) -> MasterHandler:
+        raise NotImplementedError()
+
+    def makeHandler(self, agent_id: AgentId, neighbours: List[AgentId]) -> MessageHandler:
+        raise NotImplementedError()
+
+    def handlerClass(self, handler_type: str):
+        raise NotImplementedError()
+
+    def ready(self):
+        pass
+
+class MultiAgentEnv(ToDynEnv, HasLog):
     """
     Abstract class which simulates an environment with multiple agents,
     where agents are connected accordingly to a given connection graph.
     """
-    def __init__(self, env: Environment, **kwargs):
+    def __init__(self, env: Environment, factory: HandlerFactory, **kwargs):
         self.env = env
+        self.factory = factory
         self.conn_graph = self.makeConnGraph(**kwargs)
 
         agent_ids = list(self.conn_graph.nodes)
-        self.handlers = {agent_id: self.makeHandler(agent_id) for agent_id in agent_ids}
+
+        self.factory._setEnv(self.toDynEnv())
+        self.handlers = {agent_id: self.factory._makeHandler(agent_id) for agent_id in agent_ids}
         self.delayed_evs = {agent_id: {} for agent_id in agent_ids}
+
+    def time(self):
+        return self.env.now
+
+    def logName(self):
+        return 'World'
+
+    def toDynEnv(self):
+        return DynamicEnv(conn_graph=self.conn_graph, time=self.time)
 
     def makeConnGraph(self, **kwargs) -> nx.Graph:
         """
@@ -27,13 +70,6 @@ class MultiAgentEnv:
         given params.
         Should be overridden. The node labels of a resulting graph should be
         `AgentId`s.
-        """
-        raise NotImplementedError()
-
-    def makeHandler(self, agent_id: AgentId) -> MessageHandler:
-        """
-        A method which initializes the agent handler given the agent ID.
-        Should be overridden.
         """
         raise NotImplementedError()
 
@@ -52,7 +88,7 @@ class MultiAgentEnv:
         elif isinstance(event, DelayedEvent):
             proc = self.env.process(self._delayedHandleGen(from_agent, event))
             self.delayed_evs[from_agent][event.id] = proc
-            return proc
+            return Event(self.env).succeed()
 
         elif isinstance(event, DelayInterrupt):
             try:
@@ -73,7 +109,11 @@ class MultiAgentEnv:
         overridden.
         """
         if isinstance(msg, WireOutMsg):
-            return self.env.process(self._handleOutMsgGen(from_agent, msg))
+            # Out message is considered to be handled as soon as its
+            # handling by the recipient is scheduled. We do not
+            # wait for other agent to handle them.
+            self.env.process(self._handleOutMsgGen(from_agent, msg))
+            return Event(self.env).succeed()
         else:
             raise UnsupportedMessageType(msg)
 
@@ -89,17 +129,20 @@ class MultiAgentEnv:
         Method which governs how events from outside influence the environment.
         Should be overridden by subclasses.
         """
-        raise UnsupportedEventType(event)
+        if isinstance(event, LinkUpdateEvent):
+            return self.handleConnGraphChange(event)
+        else:
+            raise UnsupportedEventType(event)
 
     def passToAgent(self, agent: AgentId, event: WorldEvent) -> Event:
         """
         Let an agent react on event and handle all events produced by agent as
         a consequence.
         """
-
+        evs = []
         for new_event in self.handlers[agent].handle(event):
-            self.handle(agent, new_event)
-        return Event(self.env).succeed()
+            evs.append(self.handle(agent, new_event))
+        return self.env.all_of(evs)
 
     def handleConnGraphChange(self, event: LinkUpdateEvent) -> Event:
         """
@@ -151,6 +194,7 @@ class SimulationRunner:
 
         # Makes a world simulation
         self.env = Environment()
+        self.factory = self.makeHandlerFactory(**kwargs)
         self.world = self.makeMultiAgentEnv(**kwargs)
 
     def runDataPath(self, random_seed) -> str:
@@ -191,6 +235,12 @@ class SimulationRunner:
             self.data_series.save(data_path)
 
         return self.data_series
+
+    def makeHandlerFactory(self, **kwargs) -> MultiAgentEnv:
+        """
+        Makes a handler factory
+        """
+        raise NotImplementedError()
 
     def makeMultiAgentEnv(self, **kwargs) -> MultiAgentEnv:
         """

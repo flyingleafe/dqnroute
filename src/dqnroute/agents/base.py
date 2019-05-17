@@ -18,16 +18,24 @@ class BrokenInterfaceError(Exception):
         self.msg = msg
 
 
-class EventHandler(object):
+class EventHandler(HasLog):
     """
     An abstract class which handles `WorldEvent`s and produces other `WorldEvent`s.
     """
-    def __init__(self, **kwargs):
+    def __init__(self, id: AgentId, env: DynamicEnv, **kwargs):
         # Simply ignores the parameters; done for convenience.
         super().__init__()
+        self.id = id
+        self.env = env
 
     def handle(self, event: WorldEvent) -> List[WorldEvent]:
         raise UnsupportedEventType(event)
+
+    def time(self):
+        return self.env.time()
+
+    def logName(self):
+        return '{}-{}'.format(self.id[0], self.id[1])
 
 
 class MessageHandler(EventHandler):
@@ -35,10 +43,8 @@ class MessageHandler(EventHandler):
     Abstract class for the agent which interacts with neighbours via messages.
     Performs mapping between outbound interfaces and neighbours IDs.
     """
-    def __init__(self, id: AgentId, env: DynamicEnv, neighbours: List[AgentId], **kwargs):
+    def __init__(self, neighbours: List[AgentId], **kwargs):
         super().__init__(**kwargs)
-        self.id = id
-        self.env = env
         self.interface_map = {}
         self.interface_inv_map = {}
 
@@ -76,27 +82,32 @@ class MessageHandler(EventHandler):
         return InMessage(self.interface_map[int_id], self.id, inner)
 
     def handle(self, event: WorldEvent) -> List[WorldEvent]:
-        if isinstance(event, WireInMsg):
-            evs = self.handleMsg(self._unwireMsg(event))
-        else:
-            evs = self.handleEvent(event)
+        try:
+            if isinstance(event, WireInMsg):
+                evs = self.handleMsg(self._unwireMsg(event))
+            else:
+                evs = self.handleEvent(event)
 
-        res = []
-        for m in evs:
-            try:
-                res.append(self._wireMsg(m))
-            except BrokenInterfaceError as err:
-                nbr = err.nbr
-                if nbr not in self._lost_msgs:
-                    self._lost_msgs[nbr] = []
-                self._lost_msgs[nbr].append(err.msg)
-        return res
+            res = []
+            for m in evs:
+                try:
+                    res.append(self._wireMsg(m))
+                except BrokenInterfaceError as err:
+                    nbr = err.nbr
+                    if nbr not in self._lost_msgs:
+                        self._lost_msgs[nbr] = []
+                    self._lost_msgs[nbr].append(err.msg)
+            return res
+        except:
+            self.log('exception while handling {}\n'.format(event), force=True)
+            raise
 
     def handleMsg(self, msg: Message) -> List[WorldEvent]:
         if isinstance(msg, InitMessage):
             return self.init(msg.config)
 
         elif isinstance(msg, DelayTriggerMsg):
+            # self.log('trigger delayed: {}'.format(msg.delay_id), force=True)
             callback = self._pending_delayed.pop(msg.delay_id)
             return callback()
 
@@ -157,15 +168,21 @@ class MessageHandler(EventHandler):
         """
         Schedule an action returning a list of `WorldEvent`s after some time.
         """
+        assert delay > 0, "Zero delays are prohibited"
         delay_id = self._delay_seq
         self._delay_seq += 1
         self._pending_delayed[delay_id] = callback
+        # self.log('made delayed: {}, {}s'.format(delay_id, delay), force=True)
         return DelayedEvent(delay_id, delay, DelayTriggerMsg(delay_id))
+
+    def hasDelayed(self, delay_id: int) -> bool:
+        return delay_id in self._pending_delayed
 
     def cancelDelayed(self, delay_id: int) -> DelayInterrupt:
         """
         Cancel a previously scheduled action before it's happened
         """
+        # self.log('cancel delayed: {}'.format(delay_id), force=True)
         del self._pending_delayed[delay_id]
         return DelayInterrupt(delay_id)
 
@@ -276,23 +293,13 @@ class Conveyor(MessageHandler):
     a conveyor or stop it.
     """
     def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[WorldEvent]:
-        if isinstance(msg, IncomingBagMsg):
-            return self.handleIncomingBag(sender, msg.bag)
-        elif isinstance(msg, OutgoingBagMsg):
-            return self.handleOutgoingBag(sender, msg.bag)
-        elif isinstance(msg, PassedBagMsg):
-            return self.handlePassedBag(sender, msg.bag)
+        if isinstance(msg, ConveyorBagMsg):
+            return self.handleBagMsg(sender, msg)
         else:
             return super().handleMsgFrom(sender, msg)
 
-    def handleIncomingBag(self, notifier: AgentId, bag: Bag) -> List[WorldEvent]:
-        raise NotImplementedError()
-
-    def handleOutgoingBag(self, notifier: AgentId, bag: Bag) -> List[WorldEvent]:
-        raise NotImplementedError()
-
-    def handlePassedBag(self, notifier: AgentId, bag: Bag) -> List[WorldEvent]:
-        raise NotImplementedError()
+    def handleBagMsg(self, sender: AgentId, msg: ConveyorBagMsg) -> List[WorldEvent]:
+        raise NotImplementedError
 
 
 class Diverter(BagDetector):
@@ -374,9 +381,9 @@ class ConveyorRewardAgent(RewardAgent):
 
     def _getRewardData(self, bag: Bag, data):
         cur_time = self.env.time()
-        delay = self.env.stop_delay()
+        delay = self.conv_stop_delay
         consumption = self.env.energy_consumption()
-        stop_time = self.env.scheduled_stop()
+        stop_time = self.env.get_scheduled_stop()
         time_gap = delay - max(0, stop_time - cur_time)
         energy_gap = consumption * time_gap
 

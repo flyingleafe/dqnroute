@@ -304,6 +304,7 @@ class PkgRouteAction(Action):
 class Bag(Package):
     def __init__(self, bag_id, dst, start_time, contents):
         super().__init__(bag_id, 0, dst, start_time, contents)
+        self.last_conveyor = -1
 
 class BagAppearanceEvent(WorldEvent):
     def __init__(self, src_id: int, bag: Bag):
@@ -368,6 +369,9 @@ class OutgoingBagMsg(ConveyorBagMsg):
     pass
 
 class PassedBagMsg(ConveyorBagMsg):
+    pass
+
+class ConveyorStartMsg(ServiceMessage):
     pass
 
 class ConveyorStopMsg(ServiceMessage):

@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import itertools as it
 
-from typing import NewType, Tuple, TypeVar, Union, List, Callable, Optional
+from typing import NewType, Tuple, TypeVar, Union, List, Callable, Optional, Any, Iterable
 
 from .constants import INFTY, DEF_PKG_SIZE
 
@@ -150,9 +150,6 @@ def make_conveyor_topology_graph(config) -> nx.DiGraph:
             if (i > 1) or (u[0] != 'diverter'):
                 DG.nodes[u]['conveyor'] = conv_id
                 DG.nodes[u]['conveyor_pos'] = u_pos
-            if (i < len(sections) - 1) or (v[0] != 'junction'):
-                DG.nodes[v]['conveyor'] = conv_id
-                DG.nodes[v]['conveyor_pos'] = v_pos
 
     return DG
 
@@ -217,6 +214,91 @@ def make_router_cfg(G, router_id):
 def only_reachable(G, v, nodes, inv_paths=True):
     filter_func = lambda u: nx.has_path(G, u, v) if inv_paths else nx.has_path(G, v, u)
     return list(filter(filter_func, nodes))
+
+##
+# Conveyor topology graph manipulation
+#
+
+def conveyor_idx(topology, node):
+    atype = agent_type(node)
+    if atype == 'conveyor':
+        return agent_idx(node)
+    elif atype == 'sink':
+        return -1
+    else:
+        return topology.nodes[node]['conveyor']
+
+def prev_same_conv_node(topology, node):
+    conv_idx = conveyor_idx(topology, node)
+    conv_in_edges = [v for v, _, cid in topology.in_edges(node, data='conveyor')
+                     if cid == conv_idx]
+    if len(conv_in_edges) > 0:
+        return conv_in_edges[0]
+    return None
+
+def next_same_conv_node(topology, node):
+    conv_idx = conveyor_idx(topology, node)
+    conv_out_edges = [v for _, v, cid in topology.out_edges(node, data='conveyor')
+                     if cid == conv_idx]
+    if len(conv_out_edges) > 0:
+        return conv_out_edges[0]
+    return None
+
+def prev_adj_conv_node(topology, node):
+    conv_idx = conveyor_idx(topology, node)
+    adj_in_edges = [(v, cid) for v, _, cid in topology.in_edges(node, data='conveyor')
+                    if cid != conv_idx]
+    if len(adj_in_edges) > 0:
+        return adj_in_edges[0]
+    return None
+
+def next_adj_conv_node(topology, node):
+    conv_idx = conveyor_idx(topology, node)
+    adj_out_edges = [(v, cid) for _, v, cid in topology.out_edges(node, data='conveyor')
+                     if cid != conv_idx]
+    if len(adj_out_edges) > 0:
+        return adj_out_edges[0]
+    return None
+
+def conveyor_edges(topology, conv_idx):
+    edges = [(u, v) for u, v, cid in topology.edges(data='conveyor')
+             if cid == conv_idx]
+    edges_sorted = [edges.pop()]
+    while len(edges) > 0:
+        u, _ = edges_sorted[0]
+        prev = find_by(edges, lambda e: e[1] == u, return_index=True)
+        if prev is None:
+            break
+        else:
+            e, i = prev
+            edges.pop(i)
+            edges_sorted.insert(0, e)
+    while len(edges) > 0:
+        _, u = edges_sorted[-1]
+        nxt = find_by(edges, lambda e: e[0] == v, return_index=True)
+        if nxt is None:
+            break
+        else:
+            e, i = nxt
+            edges.pop(i)
+            edges_sorted.append(e)
+    return edges_sorted
+
+def conveyor_adj_nodes(topology, conv_idx, only_own=False, data=False):
+    conv_edges = conveyor_edges(topology, conv_idx)
+    nodes = [conv_edges[0][0]]
+    for _, v in conv_edges:
+        nodes.append(v)
+
+    if only_own:
+        if agent_type(nodes[0]) != 'junction':
+            nodes.pop(0)
+        nodes.pop()
+
+    if data:
+        nodes = [(n, (topology.nodes[n][data] if type(data) != bool else topology.nodes[n]))
+                 for n in nodes]
+    return nodes
 
 ##
 # Generation of training data and manipulations with it
@@ -452,6 +534,7 @@ class DynamicEnv(object):
 
     def __init__(self, **attrs):
         self._attrs = attrs
+        self._vars = {}
 
     def __getattr__(self, name):
         try:
@@ -461,6 +544,57 @@ class DynamicEnv(object):
 
     def register(self, name, val):
         self._attrs[name] = val
+
+    def register_var(self, name, init_val):
+        """
+        Registers a _variable_ together with getter and setter
+        """
+        self._vars[name] = init_val
+
+        def _getter():
+            return self._vars[name]
+        def _setter(v):
+            self._vars[name] = v
+
+        self.register('get_'+name, _getter)
+        self.register('set_'+name, _setter)
+
+    def merge(self, other):
+        new = DynamicEnv(**self._attrs, **other._attrs)
+        new._vars = {**self._vars, **other._vars}
+        return new
+
+    def copy(self):
+        new = DynamicEnv(**self._attrs)
+        for name, v in self._vars.items():
+            new.register_var(name, v)
+        return new
+
+    def subset(self, attr_names, var_names=[]):
+        new = DynamicEnv(**{name: self._attrs[name] for name in attr_names})
+        for var in var_names:
+            new.register_var(var, self._vars[var])
+        return new
+
+class ToDynEnv:
+    """
+    Classes which can provide their read-only view as `DynamicEnv`
+    """
+    def toDynEnv(self) -> DynamicEnv:
+        raise NotImplementedError()
+
+class HasTime:
+    """
+    Classes which have the `time()` method.
+    """
+    def time(self) -> float:
+        raise NotImplementedError()
+
+class HasLog(HasTime):
+    def log(self, msg, force=False):
+        if force:
+            print('[ {} : {} ] {}'.format(self.logName().ljust(10),
+                                          '{}s'.format(self.time()).ljust(8), msg))
 
 #
 # Stochastic policy distribution
@@ -531,11 +665,30 @@ def data_digest(data):
 T = TypeVar('T')
 X = TypeVar('X')
 
+def find_by(ls: Iterable[T], pred: Callable[[T], bool],
+            return_index: bool = False) -> Union[Tuple[T, int], T, None]:
+    try:
+        i, v = next(filter(lambda x: pred(x[1]), enumerate(ls)))
+        return (v, i) if return_index else v
+    except StopIteration:
+        return None
+
 def binary_search(ls: List[T], diff_func: Callable[[T], X],
-                  return_index : bool = False) -> Union[Tuple[T, int], T]:
+                  return_index: bool = False,
+                  preference: str = 'nearest') -> Union[Tuple[T, int], T, None]:
     """
-    Binary search via predicate
+    Binary search via predicate.
+    preference param:
+    - 'nearest': with smallest diff, result always exists in non-empty list
+    - 'next': strictly larger
+    - 'prev': strictly smaller
     """
+    if preference not in ('nearest', 'next', 'prev'):
+        raise ValueError('binary search: invalid preference: ' + preference)
+
+    if len(ls) == 0:
+        return None
+
     l = 0
     r = len(ls)
     while l < r:
@@ -548,8 +701,22 @@ def binary_search(ls: List[T], diff_func: Callable[[T], X],
         else:
             l = m + 1
 
-    if l > 0 and (abs(diff_func(ls[l-1])) < abs(diff_func(ls[l]))):
+    if l >= len(ls):
         l -= 1
+
+    if (preference == 'nearest') and (l > 0) and (abs(diff_func(ls[l-1])) < abs(diff_func(ls[l]))):
+        l -= 1
+    elif (preference == 'prev') and (diff_func(ls[l]) < 0):
+        if l > 0:
+            l -= 1
+        else:
+            return None
+    elif (preference == 'next') and (diff_func(ls[l]) > 0):
+        if l < len(ls) - 1:
+            l += 1
+        else:
+            return None
+
     return (ls[l], l) if return_index else ls[l]
 
 def differs_from(x: T, using = None) -> Callable[[T], X]:
@@ -558,3 +725,19 @@ def differs_from(x: T, using = None) -> Callable[[T], X]:
             y = using(y)
         return x - y
     return _diff
+
+def flatten(ls: List[Any]):
+    res = []
+    for x in ls:
+        if type(x) == list:
+            res += flatten(x)
+        else:
+            res.append(x)
+    return res
+
+def def_list(ls, default=[]):
+    if ls is None:
+        return list(default)
+    elif isinstance(ls, Iterable) and not (type(ls) == str):
+        return list(ls)
+    return [ls]

@@ -1,4 +1,5 @@
 import random
+import pprint
 import networkx as nx
 
 from copy import deepcopy
@@ -6,10 +7,10 @@ from typing import List, Tuple, Dict
 from ..base import *
 from ...messages import *
 
-class AbstractLinkStateHandler(MessageHandler):
+class AbstractStateHandler(MessageHandler):
     """
-    A router which implements a link-state protocol where the notion
-    of a link-state is abstracted out
+    A router which implements a link-state protocol but the state is
+    not necessarily link-state and can be abstracted out.
     """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -31,6 +32,9 @@ class AbstractLinkStateHandler(MessageHandler):
 
     def _announceState(self) -> List[Message]:
         state = self.getState()
+        if state is None:
+            return []
+
         announcement = StateAnnouncementMsg(self.id, self.seq_num, state)
         self.seq_num += 1
         return self.broadcast(announcement)
@@ -55,12 +59,16 @@ class AbstractLinkStateHandler(MessageHandler):
         pass
 
     def getState(self):
+        """
+        Should be overridden by subclasses. If returned state is `None`,
+        no announcement is made.
+        """
         raise NotImplementedError()
 
     def processNewAnnouncement(self, node: int, state) -> bool:
         raise NotImplementedError()
 
-class LinkStateRouter(Router, AbstractLinkStateHandler):
+class LinkStateRouter(Router, AbstractStateHandler):
     """
     Simple link-state router
     """
@@ -119,8 +127,9 @@ class LSConveyorMixin(object):
     in other classes.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, conv_stop_delay: float, **kwargs):
         super().__init__(**kwargs)
+        self.conv_stop_delay = conv_stop_delay
         self.network.nodes[self.id]['works'] = False
 
     def _conveyorWorks(self, node=None) -> bool:
@@ -136,18 +145,15 @@ class LSConveyorMixin(object):
 
     def route(self, sender: AgentId, pkg: Package, allowed_nbrs: List[AgentId]) -> Tuple[AgentId, List[Message]]:
         to, msgs = super().route(sender, pkg, allowed_nbrs)
-        scheduled_stop_time = self.env.time() + self.env.stop_delay()
-        msgs.append(OutConveyorMsg(StopTimeUpdMsg(scheduled_stop_time)))
+        scheduled_stop_time = self.env.time() + self.conv_stop_delay
+        self.env.set_scheduled_stop(scheduled_stop_time)
         return to, msgs
 
     def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[Message]:
-        if isinstance(msg, ConveyorServiceMsg):
-            if isinstance(msg, ConveyorStartMsg):
-                self.scheduled_stop_time = self.env.time()
-                return self._setConveyorWorkStatus(True)
-            elif isinstance(msg, ConveyorStopMsg):
-                return self._setConveyorWorkStatus(False)
-            return []
+        if isinstance(msg, ConveyorStartMsg):
+            return self._setConveyorWorkStatus(True)
+        elif isinstance(msg, ConveyorStopMsg):
+            return self._setConveyorWorkStatus(False)
         else:
             return super().handleMsgFrom(sender, msg)
 
