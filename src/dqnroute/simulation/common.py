@@ -9,49 +9,45 @@ from ..agents import *
 from ..utils import *
 
 class HandlerFactory:
-    def __init__(self, **kwargs):
+    def __init__(self, env: Environment, conn_graph: nx.Graph, **kwargs):
         super().__init__()
-        self.centralized = False
-        self.master_handler = None
-
-    def _setEnv(self, env: DynamicEnv):
         self.env = env
-        if self.centralized and (self.master_handler is None):
+        self.conn_graph = conn_graph
+        if self.centralized():
             self.master_handler = self.makeMasterHandler()
-        self.ready()
 
-    def _makeHandler(self, agent_id: AgentId) -> MessageHandler:
-        if self.centralized:
+    def _makeHandler(self, agent_id: AgentId, **kwargs) -> MessageHandler:
+        if self.centralized():
             return SlaveHandler(id=agent_id, master=self.master_handler)
         else:
-            neighbours = [v for _, v in self.env.conn_graph.edges(agent_id)]
-            return self.makeHandler(agent_id, neighbours)
+            neighbours = [v for _, v in self.conn_graph.edges(agent_id)]
+            return self.makeHandler(agent_id, neighbours=neighbours, **kwargs)
 
     def makeMasterHandler(self) -> MasterHandler:
         raise NotImplementedError()
 
-    def makeHandler(self, agent_id: AgentId, neighbours: List[AgentId]) -> MessageHandler:
+    def makeHandler(self, agent_id: AgentId) -> MessageHandler:
         raise NotImplementedError()
 
     def handlerClass(self, handler_type: str):
         raise NotImplementedError()
 
-    def ready(self):
-        pass
+    def centralized(self):
+        raise NotImplementedError()
 
-class MultiAgentEnv(ToDynEnv, HasLog):
+
+class MultiAgentEnv(HasLog):
     """
     Abstract class which simulates an environment with multiple agents,
     where agents are connected accordingly to a given connection graph.
     """
-    def __init__(self, env: Environment, factory: HandlerFactory, **kwargs):
+    def __init__(self, env: Environment, **kwargs):
         self.env = env
-        self.factory = factory
         self.conn_graph = self.makeConnGraph(**kwargs)
+        self.factory = self.makeHandlerFactory(
+            env=self.env, conn_graph=self.conn_graph, **kwargs)
 
         agent_ids = list(self.conn_graph.nodes)
-
-        self.factory._setEnv(self.toDynEnv())
         self.handlers = {agent_id: self.factory._makeHandler(agent_id) for agent_id in agent_ids}
         self.delayed_evs = {agent_id: {} for agent_id in agent_ids}
 
@@ -61,15 +57,18 @@ class MultiAgentEnv(ToDynEnv, HasLog):
     def logName(self):
         return 'World'
 
-    def toDynEnv(self):
-        return DynamicEnv(conn_graph=self.conn_graph, time=self.time)
-
     def makeConnGraph(self, **kwargs) -> nx.Graph:
         """
         A method which defines a connection graph for the system with
         given params.
         Should be overridden. The node labels of a resulting graph should be
         `AgentId`s.
+        """
+        raise NotImplementedError()
+
+    def makeHandlerFactory(self, **kwargs) -> HandlerFactory:
+        """
+        Makes a handler factory
         """
         raise NotImplementedError()
 
@@ -194,7 +193,6 @@ class SimulationRunner:
 
         # Makes a world simulation
         self.env = Environment()
-        self.factory = self.makeHandlerFactory(**kwargs)
         self.world = self.makeMultiAgentEnv(**kwargs)
 
     def runDataPath(self, random_seed) -> str:
@@ -202,7 +200,7 @@ class SimulationRunner:
         return '{}/{}-{}.csv'.format(self.data_dir, data_digest(cfg), self.makeRunId(random_seed))
 
     def run(self, random_seed = None, ignore_saved = False,
-            progress_step = None, progress_queue = None) -> EventSeries:
+            progress_step = None, progress_queue = None, **kwargs) -> EventSeries:
         """
         Runs the environment, optionally reporting the progress to a given queue
         """
@@ -236,12 +234,6 @@ class SimulationRunner:
 
         return self.data_series
 
-    def makeHandlerFactory(self, **kwargs) -> MultiAgentEnv:
-        """
-        Makes a handler factory
-        """
-        raise NotImplementedError()
-
     def makeMultiAgentEnv(self, **kwargs) -> MultiAgentEnv:
         """
         Initializes a world environment.
@@ -267,3 +259,31 @@ class SimulationRunner:
         the world environment.
         """
         raise NotImplementedError()
+
+##
+# Small run utilities
+#
+
+def mk_job_id(router_type, seed):
+    return '{}-{}'.format(router_type, seed)
+
+def un_job_id(job_id):
+    [router_type, s_seed] = job_id.split('-')
+    return router_type, int(s_seed)
+
+def add_avg(df: pd.DataFrame):
+    df['avg'] = df['sum'] / df['count']
+    return df
+
+def add_cols(df, **cols):
+    for (col, val) in cols.items():
+        df.loc[:, col] = val
+
+class DummyProgressbarQueue:
+    def __init__(self, bar):
+        self.bar = bar
+
+    def put(self, val):
+        _, delta = val
+        if delta is not None:
+            self.bar.update(delta)

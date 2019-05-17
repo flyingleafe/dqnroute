@@ -33,6 +33,9 @@ class SimpleQRouter(Router, RewardAgent):
 
         return to, [OutMessage(self.id, sender, reward_msg)] if sender[0] != 'world' else []
 
+    def pathCost(self, to: AgentId) -> float:
+        return min(self._Q(to, list(self.interface_map.values())).values())
+
     def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[Message]:
         if isinstance(msg, RewardMsg):
             action, Q_new, dst = self.receiveReward(msg)

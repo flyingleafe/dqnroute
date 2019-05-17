@@ -73,9 +73,8 @@ class RouterContainer(MessageHandler):
         self.virt_conn_graph = nx.relabel_nodes(self.topology, self.node_mapping).to_undirected()
         self.routers = {}
 
-        self.env.register('conn_graph', self.virt_conn_graph)
-        router_factory._setEnv(self.env)
-
+        router_factory.conn_graph = self.virt_conn_graph
+        router_factory.useDynEnv(self.env)
         for rid in self.childrenRouters(self.id):
             self.routers[rid] = router_factory._makeHandler(rid)
 

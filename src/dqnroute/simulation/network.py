@@ -9,36 +9,72 @@ from ..event_series import *
 from ..agents import *
 from ..constants import *
 from .common import *
+from .training import TrainingRouterClass
 
 logger = logging.getLogger(DQNROUTE_LOGGER)
 
 class RouterFactory(HandlerFactory):
-    def __init__(self, router_type, router_cfg, context = None, **kwargs):
-        super().__init__(**kwargs)
-        self.router_type = router_type
-        self.RouterClass = get_router_class(router_type, context)
+    def __init__(self, router_type, routers_cfg, context = None,
+                 training_router_type = None, strict_guidance = False, **kwargs):
+        RouterClass = get_router_class(router_type, context)
+        self.router_cfg = routers_cfg.get(router_type, {})
         self.edge_weight = 'latency' if context == 'network' else 'length'
-        self.router_cfg = router_cfg
-        self.centralized = issubclass(self.RouterClass, MasterHandler)
+        self._dyn_env = None
+
+        if training_router_type is None:
+            self.training_mode = False
+            self.router_type = router_type
+            self.RouterClass = RouterClass
+        else:
+            self.training_mode = True
+            TrainerClass = get_router_class(training_router_type, context)
+            self.router_type = 'training__{}__{}'.format(router_type, training_router_type)
+            self.RouterClass = TrainingRouterClass(RouterClass, TrainerClass,
+                                                   strict_guidance=strict_guidance)
+        super().__init__(**kwargs)
+
+        if self.training_mode:
+            dummy = RouterClass(
+                **self._handlerArgs(('router', 0), neighbours=[], random_init=True))
+            self.brain = dummy.brain
+            self.router_cfg['brain'] = self.brain
+
+    def dynEnv(self):
+        if self._dyn_env is None:
+            return DynamicEnv(time=lambda: self.env.now)
+        else:
+            return self._dyn_env
+
+    def useDynEnv(self, env):
+        self._dyn_env = env
 
     def makeMasterHanlder(self) -> MasterHandler:
-        dyn_env = self.env.subset(['time'])
+        dyn_env = self.dynEnv()
         return self.RouterClass(
-            env=dyn_env, network=self.multi_env.conn_graph.to_directed(),
+            env=dyn_env, network=self.conn_graph.to_directed(),
             edge_weight='latency', **self.router_cfg)
 
-    def makeHandler(self, agent_id: AgentId, neighbours: List[AgentId]) -> MessageHandler:
-        assert agent_id[0] == 'router', "Only routers are allowed in computer network"
-
-        dyn_env = self.env.copy()
-        G = self.env.conn_graph.to_directed()
-        kwargs = make_router_cfg(G, agent_id)
+    def _handlerArgs(self, agent_id, **kwargs):
+        G = self.conn_graph.to_directed()
+        kwargs.update({
+            'env': self.dynEnv(),
+            'id': agent_id,
+            'edge_weight': self.edge_weight,
+            'nodes': sorted(list(G.nodes())),
+            'edges_num': len(G.edges()), # small hack to make link-state initialization simpler
+        })
         kwargs.update(self.router_cfg)
+
         if issubclass(self.RouterClass, LinkStateRouter):
             kwargs['adj_links'] = G.adj[agent_id]
+        return kwargs
 
-        return self.RouterClass(env=dyn_env, id=agent_id, neighbours=neighbours,
-                                edge_weight=self.edge_weight, **kwargs)
+    def makeHandler(self, agent_id: AgentId, **kwargs) -> MessageHandler:
+        assert agent_id[0] == 'router', "Only routers are allowed in computer network"
+        return self.RouterClass(**self._handlerArgs(agent_id, **kwargs))
+
+    def centralized(self):
+        return issubclass(self.RouterClass, MasterHandler)
 
 class NetworkEnvironment(MultiAgentEnv):
     """
@@ -65,6 +101,9 @@ class NetworkEnvironment(MultiAgentEnv):
             return gen_network_graph(network_cfg['generator'])
         else:
             raise Exception('Invalid network config: {}'.format(network_cfg))
+
+    def makeHandlerFactory(self, **kwargs):
+        return RouterFactory(context='network', **kwargs)
 
     def handleAction(self, from_agent: AgentId, action: Action) -> Event:
         if isinstance(action, PkgRouteAction):
@@ -121,23 +160,20 @@ class NetworkRunner(SimulationRunner):
     def __init__(self, data_dir=LOG_DATA_DIR+'/network', **kwargs):
         super().__init__(data_dir=data_dir, **kwargs)
 
-    def makeHandlerFactory(self, router_type: str, **kwargs):
-        routers_cfg = self.run_params['settings']['router'].get(router_type, {})
-        return RouterFactory(router_type, routers_cfg, 'network', **kwargs)
-
     def makeMultiAgentEnv(self, **kwargs) -> MultiAgentEnv:
-        return NetworkEnvironment(env=self.env, factory=self.factory, data_series=self.data_series,
+        return NetworkEnvironment(env=self.env, data_series=self.data_series,
                                   network_cfg=self.run_params['network'],
-                                  **self.run_params['settings']['router_env'])
+                                  routers_cfg=self.run_params['settings']['router'],
+                                  **self.run_params['settings']['router_env'], **kwargs)
 
     def relevantConfig(self):
         ps = self.run_params
         ss = ps['settings']
         return (ps['network'], ss['pkg_distr'], ss['router_env'],
-                ss['router'].get(self.factory.router_type, {}))
+                ss['router'].get(self.world.factory.router_type, {}))
 
     def makeRunId(self, random_seed):
-        return '{}-{}'.format(self.factory.router_type, random_seed)
+        return '{}-{}'.format(self.world.factory.router_type, random_seed)
 
     def runProcess(self, random_seed = None):
         if random_seed is not None:

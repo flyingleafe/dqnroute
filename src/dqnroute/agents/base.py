@@ -256,6 +256,7 @@ class Router(MessageHandler):
 
                 to_nbr, additional_msgs = self.route(sender, pkg, allowed_nbrs)
                 assert to_nbr in allowed_nbrs, "Resulting neighbour is not among allowed!"
+                pkg.last_node_routed = self.id
 
                 logger.debug('Routing pkg #{} on router {} to router {}'.format(pkg.id, self.id[1], to_nbr[1]))
                 return [PkgRouteAction(to_nbr, pkg)] + additional_msgs
@@ -270,6 +271,9 @@ class Router(MessageHandler):
         """
         Subclasses should reimplement this
         """
+        raise NotImplementedError()
+
+    def pathCost(self, to: AgentId) -> float:
         raise NotImplementedError()
 
 
@@ -329,7 +333,7 @@ class RewardAgent(object):
     def registerResentPkg(self, pkg: Package, Q_estimate: float, action, data) -> RewardMsg:
         rdata = self._getRewardData(pkg, data)
         self._pending_pkgs[pkg.id] = (action, rdata, data)
-        return self._mkReward(pkg.id, Q_estimate, rdata)
+        return self._mkReward(pkg, Q_estimate, rdata)
 
     def receiveReward(self, msg: RewardMsg):
         action, old_reward_data, saved_data = self._pending_pkgs.pop(msg.pkg_id)
@@ -339,7 +343,7 @@ class RewardAgent(object):
     def _computeReward(self, msg: RewardMsg, old_reward_data):
         raise NotImplementedError()
 
-    def _mkReward(self, pkg_id: int, Q_estimate: float, reward_data) -> RewardMsg:
+    def _mkReward(self, pkg: Package, Q_estimate: float, reward_data) -> RewardMsg:
         raise NotImplementedError()
 
     def _getRewardData(self, pkg: Package, data):
@@ -354,8 +358,8 @@ class NetworkRewardAgent(RewardAgent):
         time_received = msg.reward_data
         return msg.Q_estimate + (time_received - time_sent)
 
-    def _mkReward(self, pkg_id: int, Q_estimate: float, time_sent: float) -> NetworkRewardMsg:
-        return NetworkRewardMsg(pkg_id, Q_estimate, time_sent)
+    def _mkReward(self, pkg: Package, Q_estimate: float, time_sent: float) -> NetworkRewardMsg:
+        return NetworkRewardMsg(self.id, pkg.id, Q_estimate, time_sent)
 
     def _getRewardData(self, pkg: Package, data):
         return self.env.time()
@@ -375,9 +379,9 @@ class ConveyorRewardAgent(RewardAgent):
         time_gap = time_processed - time_sent
         return msg.Q_estimate + time_gap + self._e_weight * energy_gap
 
-    def _mkReward(self, bag_id: int, Q_estimate: float, reward_data) -> ConveyorRewardMsg:
+    def _mkReward(self, bag: Bag, Q_estimate: float, reward_data) -> ConveyorRewardMsg:
         time_processed, energy_gap = reward_data
-        return ConveyorRewardMsg(bag_id, Q_estimate, time_processed, energy_gap)
+        return ConveyorRewardMsg(self.id, bag.id, Q_estimate, time_processed, energy_gap)
 
     def _getRewardData(self, bag: Bag, data):
         cur_time = self.env.time()

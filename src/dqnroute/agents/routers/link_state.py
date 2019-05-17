@@ -98,6 +98,14 @@ class LinkStateRouter(Router, AbstractStateHandler):
                                 weight=self.edge_weight)
         return path[1], []
 
+    def pathCost(self, to: AgentId, through=None) -> float:
+        if through is None:
+            return nx.dijkstra_path_length(self.network, self.id, to, weight=self.edge_weight)
+        else:
+            l1 = nx.dijkstra_path_length(self.network, self.id, through, weight=self.edge_weight)
+            l2 = nx.dijkstra_path_length(self.network, through, self.id, weight=self.edge_weight)
+            return l1 + l2
+
     def getState(self):
         return self.network.adj[self.id]
 

@@ -201,16 +201,6 @@ def resolve_interface(conn_graph: nx.Graph, from_agent: AgentId, int_id: int) ->
         to_interface = interface_idx(conn_graph, to_agent, from_agent)
     return to_agent, to_interface
 
-def make_router_cfg(G, router_id):
-    """
-    Helper which makes valid config for the router controller of a given class
-    """
-    router_cfg = {
-        'nodes': sorted(list(G.nodes())),
-        'edges_num': len(G.edges()) # small hack to make link-state initialization simpler
-    }
-    return router_cfg
-
 def only_reachable(G, v, nodes, inv_paths=True):
     filter_func = lambda u: nx.has_path(G, u, v) if inv_paths else nx.has_path(G, v, u)
     return list(filter(filter_func, nodes))

@@ -42,38 +42,57 @@ class EnergySpender(object):
 
 
 class ConveyorFactory(HandlerFactory):
-    def __init__(self, router_type, run_settings, layout, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(self, router_type, routers_cfg, topology, conn_graph, conveyors_layout,
+                 conveyor_cfg, energy_consumption, max_speed, **kwargs):
         self.router_type = router_type
-        self.layout = layout
-        self.conveyor_cfg = run_settings['conveyor']
-        self.energy_consumption = run_settings['conveyor_env']['energy_consumption']
-        self.max_speed = run_settings['conveyor_env']['speed']
+        self.topology = topology
+        self.layout = conveyors_layout
+        self.conveyor_cfg = conveyor_cfg
+        self.energy_consumption = energy_consumption
+        self.max_speed = max_speed
 
-        router_cfg = {'conv_stop_delay': self.conveyor_cfg['stop_delay']}
-        router_cfg.update(run_settings['router'].get(router_type, {}))
+        stop_delay = self.conveyor_cfg['stop_delay']
+        try:
+            routers_cfg[router_type]['conv_stop_delay'] = stop_delay
+        except KeyError:
+            routers_cfg[router_type] = {'conv_stop_delay': stop_delay}
 
-        self.sub_factory = RouterFactory(router_type, router_cfg, context='conveyors', **kwargs)
-        self.centralized = self.sub_factory.centralized
+        self.sub_factory = RouterFactory(
+            router_type, routers_cfg,
+            conn_graph=topology.to_undirected(),  # hack to obtain correct training brain
+            context='conveyors', **kwargs)
 
-    def makeMasterHandler(self):
-        return self.sub_factory.makeMasterHandler()
+        super().__init__(conn_graph=conn_graph, **kwargs)
 
-    def makeHandler(self, agent_id: AgentId, neighbours: List[AgentId]) -> MessageHandler:
+        self.conveyor_dyn_envs = {}
+        time_func = lambda: self.env.now
+        energy_func = lambda: self.energy_consumption
+
+        for conv_id in self.layout['conveyors'].keys():
+            dyn_env = DynamicEnv(time=time_func, energy_consumption=energy_func)
+            dyn_env.register_var('scheduled_stop', 0)
+            self.conveyor_dyn_envs[conv_id] = dyn_env
+
+    def centralized(self):
+        return self.sub_factory.centralized()
+
+    def makeHandler(self, agent_id: AgentId, neighbours: List[AgentId], **kwargs) -> MessageHandler:
         a_type = agent_type(agent_id)
-        conv_idx = conveyor_idx(self.env.topology, agent_id)
+        conv_idx = conveyor_idx(self.topology, agent_id)
 
         if conv_idx != -1:
             dyn_env = self.conveyor_dyn_envs[conv_idx]
         else:
             # only if it's sink
-            dyn_env = self.env.copy()
+            time_func = lambda: self.env.now
+            energy_func = lambda: self.energy_consumption
+            dyn_env = DynamicEnv(time=time_func, energy_consumption=energy_func)
 
         common_args = {
             'env': dyn_env,
             'id': agent_id,
             'neighbours': neighbours,
-            'topology': self.env.topology,
+            'topology': self.topology,
             'router_factory': self.sub_factory
         }
 
@@ -91,23 +110,13 @@ class ConveyorFactory(HandlerFactory):
         else:
             raise Exception('Unknown agent type: ' + a_type)
 
-    def ready(self):
-        self.conveyor_dyn_envs = {}
-        for conv_id in self.layout['conveyors'].keys():
-            dyn_env = self.env.copy()
-            dyn_env.register_var('scheduled_stop', 0)
-            self.conveyor_dyn_envs[conv_id] = dyn_env
-
 
 class ConveyorsEnvironment(MultiAgentEnv):
     """
     Environment which models the conveyor system and the movement of bags.
-
-    TODO: now bags are represented as dots, they should be represented as areas
     """
 
-    def __init__(self, env: Environment, conveyors_layout,
-                 time_series: EventSeries, energy_series: EventSeries,
+    def __init__(self, conveyors_layout, time_series: EventSeries, energy_series: EventSeries,
                  speed: float = 1, energy_consumption: float = 1,
                  default_conveyor_args = {}, default_router_args = {}, **kwargs):
         self.max_speed = speed
@@ -118,7 +127,9 @@ class ConveyorsEnvironment(MultiAgentEnv):
 
         self.topology_graph = make_conveyor_topology_graph(conveyors_layout)
 
-        super().__init__(env=env, conveyors_layout=conveyors_layout, **kwargs)
+        super().__init__(
+            topology=self.topology_graph, conveyors_layout=conveyors_layout,
+            energy_consumption=energy_consumption, max_speed=speed, **kwargs)
 
         # Initialize conveyor-wise state dictionaries
         conv_ids = list(self.layout['conveyors'].keys())
@@ -147,11 +158,8 @@ class ConveyorsEnvironment(MultiAgentEnv):
             for conv_id in conv_ids
         }
 
-    def toDynEnv(self) -> DynamicEnv:
-        env = super().toDynEnv()
-        env.register('energy_consumption', lambda: self.energy_consumption)
-        env.register('topology', self.topology_graph)
-        return env
+    def makeHandlerFactory(self, **kwargs):
+        return ConveyorFactory(**kwargs)
 
     def makeConnGraph(self, conveyors_layout, **kwargs) -> nx.Graph:
         return make_conveyor_conn_graph(conveyors_layout)
@@ -346,26 +354,23 @@ class ConveyorsRunner(SimulationRunner):
     def __init__(self, data_dir=LOG_DATA_DIR+'/conveyors', **kwargs):
         super().__init__(data_dir=data_dir, **kwargs)
 
-    def makeHandlerFactory(self, router_type: str, **kwargs):
-        run_settings = self.run_params['settings']
-        layout = self.run_params['configuration']
-        return ConveyorFactory(router_type, run_settings, layout, **kwargs)
-
     def makeMultiAgentEnv(self, **kwargs) -> MultiAgentEnv:
-        return ConveyorsEnvironment(env=self.env, factory=self.factory,
-                                    time_series=self.data_series.subSeries('time'),
+        run_settings = self.run_params['settings']
+        return ConveyorsEnvironment(env=self.env, time_series=self.data_series.subSeries('time'),
                                     energy_series=self.data_series.subSeries('energy'),
                                     conveyors_layout=self.run_params['configuration'],
-                                    **self.run_params['settings']['conveyor_env'])
+                                    routers_cfg=run_settings['router'],
+                                    conveyor_cfg=run_settings['conveyor'],
+                                    **run_settings['conveyor_env'], **kwargs)
 
     def relevantConfig(self):
         ps = self.run_params
         ss = ps['settings']
         return (ps['configuration'], ss['bags_distr'], ss['conveyor_env'],
-                ss['conveyor'], ss['router'].get(self.factory.router_type, {}))
+                ss['conveyor'], ss['router'].get(self.world.factory.router_type, {}))
 
     def makeRunId(self, random_seed):
-        return '{}-{}'.format(self.factory.router_type, random_seed)
+        return '{}-{}'.format(self.world.factory.router_type, random_seed)
 
     def runProcess(self, random_seed = None):
         if random_seed is not None:
