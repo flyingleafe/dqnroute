@@ -336,7 +336,7 @@ class ConveyorsEnvironment(MultiAgentEnv):
         self.log('CHO PO')
 
         # Resolving all immediate events
-        for (conv_idx, (bag, node, delay)) in self._allUnresolvedEvents():
+        for (conv_idx, (bag, node, delay)) in all_unresolved_events(self.conveyor_models):
             assert delay == 0, "well that's just obnoxious"
             if node in self.current_bags[bag.id]:
                 continue
@@ -363,7 +363,7 @@ class ConveyorsEnvironment(MultiAgentEnv):
 
     def _move(self):
         try:
-            events = self._allNextEvents()
+            events = all_next_events(self.conveyor_models)
             self.log('MOVING: {}'.format(events))
 
             if len(events) > 0:
@@ -382,30 +382,11 @@ class ConveyorsEnvironment(MultiAgentEnv):
         except Interrupt:
             pass
 
-    def _allUnresolvedEvents(self):
-        while True:
-            had_some = False
-            for conv_idx, model in self.conveyor_models.items():
-                if model.resolving():
-                    ev = model.pickUnresolvedEvent()
-                    if ev is not None:
-                        yield (conv_idx, ev)
-                        had_some = True
-            if not had_some:
-                break
-
-    def _allNextEvents(self):
-        res = []
-        for conv_idx, model in self.conveyor_models.items():
-            evs = model.nextEvents()
-            res = merge_sorted(res, [(conv_idx, ev) for ev in evs],
-                               using=lambda p: p[1][2])
-        return res
-
     def _nodePos(self, node: AgentId) -> Tuple[int, int]:
         conv_idx = self.topology_graph.nodes[node]['conveyor']
         pos = self.topology_graph.nodes[node]['conveyor_pos']
         return conv_idx, pos
+
 
 class ConveyorsRunner(SimulationRunner):
     """

@@ -1,4 +1,4 @@
-from typing import List, Tuple, Any
+from typing import List, Tuple, Any, Dict
 from .utils import *
 
 POS_ROUND_DIGITS = 5
@@ -256,3 +256,24 @@ class ConveyorModel:
 
     def moving(self):
         return self._state == 'moving'
+
+
+def all_next_events(models: Dict[int, ConveyorModel], **kwargs):
+    res = []
+    for conv_idx, model in models.items():
+        evs = model.nextEvents(**kwargs)
+        res = merge_sorted(res, [(conv_idx, ev) for ev in evs],
+                           using=lambda p: p[1][2])
+    return res
+
+def all_unresolved_events(models: Dict[int, ConveyorModel]):
+    while True:
+        had_some = False
+        for conv_idx, model in models.items():
+            if model.resolving():
+                ev = model.pickUnresolvedEvent()
+                if ev is not None:
+                    yield (conv_idx, ev)
+                    had_some = True
+        if not had_some:
+            break

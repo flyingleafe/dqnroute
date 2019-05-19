@@ -98,6 +98,19 @@ class DelayInterrupt(WorldEvent):
     def __init__(self, delay_id: int):
         super().__init__(delay_id=delay_id)
 
+def delayed_first(evs):
+    def _priority(ev):
+        if isinstance(ev, MasterEvent):
+            return _priority(ev.inner)
+        elif isinstance(ev, DelayedEvent):
+            return (0, ev.id)
+        elif isinstance(ev, DelayInterrupt):
+            return (1, ev.delay_id)
+        else:
+            return (2, 0)
+
+    return sorted(evs, key=_priority)
+
 ##
 # Changes in connection graph
 #

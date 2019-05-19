@@ -57,6 +57,7 @@ class MultiAgentEnv(HasLog):
             self.handlers[('master', 0)] = self.factory.master_handler
             self.delayed_evs[('master', 0)] = {}
 
+        self._agent_passes = 0
 
     def time(self):
         return self.env.now
@@ -149,8 +150,10 @@ class MultiAgentEnv(HasLog):
         Let an agent react on event and handle all events produced by agent as
         a consequence.
         """
+        self._agent_passes += 1
+        agent_evs = delayed_first(self.handlers[agent].handle(event))
         evs = []
-        for new_event in self.handlers[agent].handle(event):
+        for new_event in agent_evs:
             evs.append(self.handle(agent, new_event))
         return self.env.all_of(evs)
 

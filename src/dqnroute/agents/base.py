@@ -56,6 +56,7 @@ class MessageHandler(EventHandler):
         # delays functionality
         self._delay_seq = 0
         self._pending_delayed = {}
+        self._events_handled = 0
 
         # lost messages
         self._lost_msgs = {}
@@ -102,6 +103,8 @@ class MessageHandler(EventHandler):
                     if nbr not in self._lost_msgs:
                         self._lost_msgs[nbr] = []
                     self._lost_msgs[nbr].append(err.msg)
+
+            self._events_handled += 1
             return res
         except:
             if isinstance(event, WireInMsg):
@@ -114,7 +117,7 @@ class MessageHandler(EventHandler):
             return self.init(msg.config)
 
         elif isinstance(msg, DelayTriggerMsg):
-            # self.log('trigger delayed: {}'.format(msg.delay_id), force=True)
+            self.log('trigger delayed: {}, handle {}'.format(msg.delay_id, self._events_handled))
             callback = self._pending_delayed.pop(msg.delay_id)
             return callback()
 
@@ -179,7 +182,7 @@ class MessageHandler(EventHandler):
         delay_id = self._delay_seq
         self._delay_seq += 1
         self._pending_delayed[delay_id] = callback
-        # self.log('made delayed: {}, {}s'.format(delay_id, delay), force=True)
+        self.log('made delayed: {}, {}s, handle {}'.format(delay_id, delay, self._events_handled))
         return DelayedEvent(delay_id, delay, DelayTriggerMsg(delay_id))
 
     def hasDelayed(self, delay_id: int) -> bool:
@@ -189,7 +192,8 @@ class MessageHandler(EventHandler):
         """
         Cancel a previously scheduled action before it's happened
         """
-        # self.log('cancel delayed: {}'.format(delay_id), force=True)
+        self.log('cancel delayed: {}, handle {}'
+                 .format(delay_id, self._events_handled))
         del self._pending_delayed[delay_id]
         return DelayInterrupt(delay_id)
 
