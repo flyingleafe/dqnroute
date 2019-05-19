@@ -8,6 +8,7 @@ import torch
 import itertools as it
 
 from typing import NewType, Tuple, TypeVar, Union, List, Callable, Optional, Any, Iterable
+from copy import deepcopy
 
 from .constants import INFTY, DEF_PKG_SIZE
 
@@ -182,6 +183,17 @@ def make_conveyor_conn_graph(config) -> nx.Graph:
         G.add_edge(('diverter', dv_id), ('conveyor', dv['upstream_conv']))
 
     return G
+
+def conv_to_router(conv_topology):
+    mapping = {}
+    mapping_inv = {}
+    for (i, aid) in enumerate(sorted(conv_topology.nodes)):
+        rid = ('router', i)
+        mapping[aid] = rid
+        mapping_inv[rid] = aid
+
+    router_topology = nx.relabel_nodes(conv_topology, mapping)
+    return router_topology, mapping, mapping_inv
 
 def interface_idx(conn_graph: nx.Graph, from_agent: AgentId, to_agent: AgentId) -> int:
     return list(conn_graph.edges(from_agent)).index((from_agent, to_agent))
@@ -724,6 +736,45 @@ def flatten(ls: List[Any]):
         else:
             res.append(x)
     return res
+
+def dict_merge(old_dct, merge_dct, inplace=False):
+    """ Recursive dict merge. Inspired by :meth:``dict.update()``, instead of
+    updating only top-level keys, dict_merge recurses down into dicts nested
+    to an arbitrary depth, updating keys. The ``merge_dct`` is merged into
+    ``dct``.
+    :param dct: dict onto which the merge is executed
+    :param merge_dct: dct merged into dct
+    :return: None
+    """
+    if inplace:
+        dct = old_dct
+    else:
+        dct = deepcopy(old_dct)
+
+    for k, v in merge_dct.items():
+        if (k in dct and isinstance(dct[k], dict)
+                and isinstance(merge_dct[k], dict)):
+            dict_merge(dct[k], merge_dct[k], inplace=True)
+        else:
+            dct[k] = merge_dct[k]
+    return dct
+
+def merge_sorted(list_a: List[T], list_b: List[T], using=lambda x: x) -> List[T]:
+    if len(list_a) == 0:
+        return list_b
+    if len(list_b) == 0:
+        return list_a
+    i = 0
+    j = 0
+    res = []
+    while i < len(list_a) and j < len(list_b):
+        if using(list_a[i]) < using(list_b[j]):
+            res.append(list_a[i])
+            i += 1
+        else:
+            res.append(list_b[j])
+            j += 1
+    return res + list_a[i:] + list_b[j:]
 
 def def_list(ls, default=[]):
     if ls is None:

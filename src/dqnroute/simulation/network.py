@@ -15,8 +15,9 @@ logger = logging.getLogger(DQNROUTE_LOGGER)
 
 class RouterFactory(HandlerFactory):
     def __init__(self, router_type, routers_cfg, context = None,
-                 training_router_type = None, strict_guidance = False, **kwargs):
+                 topology_graph = None, training_router_type = None, **kwargs):
         RouterClass = get_router_class(router_type, context)
+        self.context = context
         self.router_cfg = routers_cfg.get(router_type, {})
         self.edge_weight = 'latency' if context == 'network' else 'length'
         self._dyn_env = None
@@ -29,9 +30,13 @@ class RouterFactory(HandlerFactory):
             self.training_mode = True
             TrainerClass = get_router_class(training_router_type, context)
             self.router_type = 'training__{}__{}'.format(router_type, training_router_type)
-            self.RouterClass = TrainingRouterClass(RouterClass, TrainerClass,
-                                                   strict_guidance=strict_guidance)
+            self.RouterClass = TrainingRouterClass(RouterClass, TrainerClass, **kwargs)
         super().__init__(**kwargs)
+
+        if topology_graph is None:
+            self.topology_graph = self.conn_graph.to_directed()
+        else:
+            self.topology_graph = topology_graph
 
         if self.training_mode:
             dummy = RouterClass(
@@ -51,11 +56,11 @@ class RouterFactory(HandlerFactory):
     def makeMasterHanlder(self) -> MasterHandler:
         dyn_env = self.dynEnv()
         return self.RouterClass(
-            env=dyn_env, network=self.conn_graph.to_directed(),
+            env=dyn_env, network=self.topology_graph,
             edge_weight='latency', **self.router_cfg)
 
     def _handlerArgs(self, agent_id, **kwargs):
-        G = self.conn_graph.to_directed()
+        G = self.topology_graph
         kwargs.update({
             'env': self.dynEnv(),
             'id': agent_id,
@@ -157,8 +162,13 @@ class NetworkRunner(SimulationRunner):
     Class which constructs and runs scenarios in computer network simulation
     environment.
     """
+    context = 'network'
+
     def __init__(self, data_dir=LOG_DATA_DIR+'/network', **kwargs):
         super().__init__(data_dir=data_dir, **kwargs)
+
+    def makeDataSeries(self, series_period, series_funcs):
+        return event_series(series_period, series_funcs)
 
     def makeMultiAgentEnv(self, **kwargs) -> MultiAgentEnv:
         return NetworkEnvironment(env=self.env, data_series=self.data_series,
@@ -180,6 +190,8 @@ class NetworkRunner(SimulationRunner):
             set_random_seed(random_seed)
 
         all_nodes = list(self.world.conn_graph.nodes)
+        all_edges = list(self.world.conn_graph.edges(data=True))
+        broken_edges = []
         for node in all_nodes:
             self.world.passToAgent(node, WireInMsg(-1, InitMessage({})))
 
@@ -190,13 +202,32 @@ class NetworkRunner(SimulationRunner):
             try:
                 action = period["action"]
                 pause = period.get("pause", 0)
-                u = ('router', period["u"])
-                v = ('router', period["v"])
+                is_random = period.get("random", False)
 
                 if action == 'break_link':
+                    if is_random:
+                        i = random.randint(0, len(all_edges-1))
+                        u, v, ps = all_edges.pop(i)
+                        broken_edges.append((u, v, ps))
+                    else:
+                        u = ('router', period["u"])
+                        v = ('router', period["v"])
+
                     yield self.world.handleWorldEvent(RemoveLinkEvent(u, v))
                 elif action == 'restore_link':
+                    if is_random:
+                        if len(broken_edges) == 0:
+                            continue
+
+                        i = random.randint(0, len(broken_edges-1))
+                        u, v, ps = broken_edges.pop(i)
+                        all_edges.append((u, v, ps))
+                    else:
+                        u = ('router', period["u"])
+                        v = ('router', period["v"])
+
                     yield self.world.handleWorldEvent(AddLinkEvent(u, v, params=self.world.conn_graph.edges[u, v]))
+
                 yield self.env.timeout(pause)
 
             except KeyError:

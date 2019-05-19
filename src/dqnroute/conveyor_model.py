@@ -56,7 +56,8 @@ class ConveyorModel:
       (or the end of the conveyor), and also return those checkpoint and object
     """
     def __init__(self, length: float, max_speed: float,
-                 checkpoints: List[Tuple[Any, float]], model_id: AgentId = ('world', 0)):
+                 checkpoints: List[Tuple[Any, float]],
+                 model_id: AgentId = ('world', 0)):
         assert length > 0, "Conveyor length <= 0!"
         assert max_speed > 0, "Conveyor max speed <= 0!"
 
@@ -76,17 +77,21 @@ class ConveyorModel:
         self.max_speed = max_speed
 
         # variables
-        self._state = 'pristine'
-        self._resume_time = 0
         self.speed = 0
         self.objects = {}
         self.object_positions = []
 
+        self._state = 'pristine'
+        self._resume_time = 0
+        self._resolved_events = set()
+
     def _stateTransfer(self, action):
         try:
-            self._state = _model_automata[self._state][action]
+            init_state = self._state
+            self._state = _model_automata[init_state][action]
         except KeyError:
-            raise AutomataException('Invalid action `{}` in state `{}`'.format(action, self._state))
+            print('RAISED')
+            raise AutomataException('{}: Invalid action `{}` in state `{}`'.format(self.model_id, action, self._state))
 
     def checkpointPos(self, cp: Any) -> float:
         if cp[0] == 'conv_end':
@@ -133,6 +138,9 @@ class ConveyorModel:
             if oid == obj_id:
                 pos_idx = i
                 break
+        if pos_idx is None:
+            print('{}: bag#{} not found'.format(self.model_id, obj_id))
+
         self.object_positions.pop(pos_idx)
         obj = self.objects.pop(obj_id)
         self._stateTransfer('change')
@@ -158,7 +166,8 @@ class ConveyorModel:
         self._stateTransfer('change')
         return d
 
-    def nextEvents(self, obj=None, cps=None, skip_immediate=True) -> List[Tuple[Any, Any, float]]:
+    def nextEvents(self, obj=None, cps=None, skip_immediate=True,
+                   skip_resolved=True) -> List[Tuple[Any, Any, float]]:
         if self.speed == 0:
             return []
 
@@ -168,9 +177,12 @@ class ConveyorModel:
 
         cps = def_list(cps, self.checkpoint_positions.keys())
         c_points = [(cp, pos) for (cp, pos) in self.checkpoints if cp in cps]
+        c_points.append((('conv_end', self.model_id[1]), self.length))
 
-        def _skip_cond(cp_idx, pos):
-            cp_pos = c_points[cp_idx][1]
+        def _skip_cond(obj_id, cp_idx, pos):
+            cp, cp_pos = c_points[cp_idx]
+            if skip_resolved and (obj_id, cp) in self._resolved_events:
+                return True
             return cp_pos <= pos if skip_immediate else cp_pos < pos
 
         cp_idx = 0
@@ -179,21 +191,34 @@ class ConveyorModel:
             assert pos >= 0 and pos <= self.length, \
                 "`nextEvents` on conveyor with undefined object positions!"
 
-            while cp_idx < len(c_points) and _skip_cond(cp_idx, pos):
+            while cp_idx < len(c_points) and _skip_cond(obj_id, cp_idx, pos):
                 cp_idx += 1
 
             if cp_idx < len(c_points):
-                diff = (c_points[cp_idx][1] - pos) / self.speed
-                events.append((self.objects[obj_id], c_points[cp_idx][0], diff))
-            elif (not skip_immediate) or (pos < self.length):
-                diff = (self.length - pos) / self.speed
-                events.append((self.objects[obj_id], ('conv_end', -1), diff))
+                cp = c_points[cp_idx]
+                obj = self.objects[obj_id]
+                diff = (cp[1] - pos) / self.speed
+                events.append((obj, cp[0], diff))
 
         events.sort(key=lambda p: p[2])
         return events
 
     def immediateEvents(self, obj=None, cps=None) -> List[Tuple[Any, Any, float]]:
         return [ev for ev in self.nextEvents(obj=obj, cps=cps, skip_immediate=False) if ev[2] == 0]
+
+    def pickUnresolvedEvent(self) -> Union[Tuple[Any, Any, float], None]:
+        assert self.resolving(), "picking event for resolution while not resolving"
+        evs = self.nextEvents(skip_immediate=False)
+        if len(evs) == 0:
+            return None
+
+        obj, cp, diff = evs[0]
+        if diff > 0:
+            return None
+
+        self._resolved_events.add((obj.id, cp))
+        # print('HEEEEEEEY {} {} {}'.format(self.model_id, obj, cp))
+        return obj, cp, diff
 
     def resume(self, time: float):
         self._stateTransfer('resume')
@@ -209,10 +234,20 @@ class ConveyorModel:
         self._stateTransfer('start_resolving')
 
     def endResolving(self):
+        self._resolved_events = set()
         self._stateTransfer('end_resolving')
+
+    def pristine(self):
+        return self._state == 'pristine'
 
     def dirty(self):
         return self._state == 'dirty'
 
     def resolving(self):
         return self._state == 'resolving'
+
+    def resolved(self):
+        return self._state == 'resolved'
+
+    def moving(self):
+        return self._state == 'moving'

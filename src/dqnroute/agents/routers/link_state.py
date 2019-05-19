@@ -94,6 +94,9 @@ class LinkStateRouter(Router, AbstractStateHandler):
         return msgs + self._announceState()
 
     def route(self, sender: AgentId, pkg: Package, allowed_nbrs: List[AgentId]) -> Tuple[AgentId, List[Message]]:
+        if len(allowed_nbrs) == 1:
+            return allowed_nbrs[0], []
+
         path = nx.dijkstra_path(self.network, self.id, pkg.dst,
                                 weight=self.edge_weight)
         return path[1], []

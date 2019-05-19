@@ -244,7 +244,7 @@ class Package:
         self.dst = dst
         self.start_time = start_time
         self.contents = contents
-        self.last_node_routed = None
+        self.node_path = []
         # self.route = None
         # self.rnn_state = (np.zeros((1, state_size)),
         #                   np.zeros((1, state_size)))
@@ -332,18 +332,23 @@ class ConveyorSpeedChangeAction(Action):
 #
 
 class RewardMsg(ServiceMessage):
-    def __init__(self, origin: AgentId, pkg_id: int, Q_estimate: float, reward_data):
-        super().__init__(origin=origin, pkg_id=pkg_id, Q_estimate=Q_estimate,
+    def __init__(self, origin: AgentId, pkg: Package, Q_estimate: float, reward_data):
+        super().__init__(origin=origin, pkg=pkg, Q_estimate=Q_estimate,
                          reward_data=reward_data)
 
 class NetworkRewardMsg(RewardMsg):
-    def __init__(self, origin: AgentId, pkg_id: int, Q_estimate: float, time_received: float):
-        super().__init__(origin, pkg_id, Q_estimate, time_received)
+    def __init__(self, origin: AgentId, pkg: Package, Q_estimate: float, time_received: float):
+        super().__init__(origin, pkg, Q_estimate, time_received)
 
 class ConveyorRewardMsg(RewardMsg):
-    def __init__(self, origin: AgentId, bag_id: int, Q_estimate: float,
+    def __init__(self, origin: AgentId, bag: Bag, Q_estimate: float,
                  time_processed: float, energy_gap: float):
-        super().__init__(origin, bag_id, Q_estimate, (time_processed, energy_gap))
+        super().__init__(origin, bag, Q_estimate, (time_processed, energy_gap))
+
+class TrainingRewardMsg(RewardMsg):
+    def __init__(self, orig_msg: RewardMsg, true_reward=None):
+        super().__init__(orig_msg.origin, orig_msg.pkg_id,
+                         orig_msg.Q_estimate, (orig_msg.reward_data, true_reward))
 
 class StateAnnouncementMsg(ServiceMessage):
     def __init__(self, node: AgentId, seq: int, state):

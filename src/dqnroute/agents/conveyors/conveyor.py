@@ -19,6 +19,7 @@ class BaseConveyor(Conveyor, ConveyorStateHandler):
         super().__init__(**kwargs)
         self.model = ConveyorModel(length, max_speed, checkpoints, model_id=self.id)
         self.delayed_conv_update = -1
+        self.bag_checkpoints = {}
 
     def handleBagMsg(self, sender: AgentId, msg: ConveyorBagMsg) -> List[WorldEvent]:
         evs = self._interruptMovement()
@@ -26,17 +27,26 @@ class BaseConveyor(Conveyor, ConveyorStateHandler):
 
         if isinstance(msg, IncomingBagMsg):
             n_node, n_pos = self.notifierPos(sender)
-            # self.log('bag #{} arrives at {}, pos {}'.format(bag.id, arrival_node, arrival_pos))
+            self.log('bag #{} arrives from {} at {}, pos {}'
+                     .format(bag.id, sender, n_node, n_pos))
+
             self.model.putObject(bag.id, bag, n_pos)
+            self.bag_checkpoints[bag.id] = set()
             evs += self.handleIncomingBag(n_node, bag)
 
         elif isinstance(msg, OutgoingBagMsg):
             assert agent_type(sender) == 'diverter', "only diverters send us such stuff!"
+
+            self.log('bag #{} leaves at {}, pos {}'
+                     .format(bag.id, sender, self.model.checkpointPos(sender)))
             self.model.removeObject(bag.id)
+            self.bag_checkpoints.pop(bag.id)
             evs += self.handleOutgoingBag(sender, bag)
 
         elif isinstance(msg, PassedBagMsg):
             assert agent_type(sender) == 'diverter', "only diverters send us such stuff!"
+            self.log('bag #{} passes at {}, pos {}'
+                     .format(bag.id, sender, self.model.checkpointPos(sender)))
             evs += self.handlePassedBag(sender, bag)
 
         return evs + self._resolveAndResume()
@@ -78,18 +88,35 @@ class BaseConveyor(Conveyor, ConveyorStateHandler):
         evs = []
         if self.model.dirty():
             self.model.startResolving()
-            conv_events = self.model.immediateEvents()
-            for bag, node, delay in conv_events:
-                if agent_type(node) == 'conv_end':
-                    self.model.removeObject(bag.id)
-                    evs += self.handleOutgoingBag(self.id, bag)
-                else:
-                    evs += self.checkpointReach(node, bag)
+            steps = 0
+            for bag, node, delay in self._allUnresolvedEvents():
+                if steps > 100:
+                    self.log('wtf?\n  {}\n  {}\n  {}\n  {}\n'
+                             .format(ev, self.model.checkpoints,
+                                     self.model.object_positions, self.model._resolved_events))
+                    raise Exception('okay what the fuck?')
+
+                if node not in self.bag_checkpoints[bag.id]:
+                    if agent_type(node) == 'conv_end':
+                        self.model.removeObject(bag.id)
+                        evs += self.handleOutgoingBag(self.id, bag)
+                    else:
+                        evs += self.checkpointReach(node, bag)
+                        self.bag_checkpoints[bag.id].add(node)
+                steps += 1
+
             self.model.endResolving()
 
         if not self.model.resolving():
             evs += self._resumeMovement()
         return evs
+
+    def _allUnresolvedEvents(self):
+        while True:
+            ev = self.model.pickUnresolvedEvent()
+            if ev is None:
+                break
+            yield ev
 
     def _resumeMovement(self) -> List[WorldEvent]:
         if self.hasDelayed(self.delayed_conv_update):
@@ -97,9 +124,6 @@ class BaseConveyor(Conveyor, ConveyorStateHandler):
 
         self.model.resume(self.env.time())
         conv_events = self.model.nextEvents()
-
-        # if self.id[1] == 5 and (638 in self.model.objects):
-        # print(conv_events)
 
         if len(conv_events) > 0:
             self.conv_movement_start_time = self.env.time()
@@ -184,7 +208,9 @@ class SimpleRouterConveyor(SimpleConveyor, RouterContainer):
         if node == self.id:
             if agent_type(self.upstream_node) != 'sink':
                 up_conv = ('conveyor', conveyor_idx(self.topology, self.upstream_node))
-                self.log('bag #{} leaves to upstream conv {}'.format(bag.id, up_conv))
+                self.log('bag #{} leaves from {} to upstream conv {}'
+                         .format(bag.id, node, up_conv))
+
                 evs += [OutMessage(self.id, up_conv, IncomingBagMsg(bag))]
         return evs
 
@@ -193,6 +219,8 @@ class SimpleRouterConveyor(SimpleConveyor, RouterContainer):
         if agent_type(node) == 'junction':
             prev_node, _ = prev_adj_conv_node(self.topology, node)
             self._prev_junc_nodes[bag.id] = prev_node
+            self.log('remembered prev node {} for bag #{} arrived on {}'
+                     .format(prev_node, bag.id, node))
         return evs
 
     def handlePassedBag(self, node: AgentId, bag: Bag) -> List[WorldEvent]:

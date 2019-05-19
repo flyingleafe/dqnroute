@@ -45,6 +45,9 @@ class EventSeries:
                 self._log(period, coeff * self.period)
             self._log(end_period, coeff * end_gap)
 
+    def addAvg(self, avg_col='avg', sum_col='sum', count_col='count'):
+        self.records[avg_col] = self.records[sum_col] / self.records[count_col]
+
     def getSeries(self):
         return self.records.sort_index()
 
@@ -71,6 +74,13 @@ class MultiEventSeries(EventSeries):
     def subSeries(self, tag: str):
         return self.series[tag]
 
+    def allSubSeries(self):
+        return self.series.items()
+
+    def addAvg(self, avg_col='avg', sum_col='sum', count_col='count'):
+        for s in self.series.values():
+            s.addAvg(avg_col, sum_col, count_col)
+
     def getSeries(self):
         dfs = [s.getSeries().rename(columns=lambda c: tag + '_' + c)
                for (tag, s) in self.series.items()]
@@ -81,13 +91,9 @@ class MultiEventSeries(EventSeries):
             s.reset()
 
     def load(self, csv_path):
-        all_records = pd.read_csv(csv_path, index_col=False)
-        tags = set([col.split('_')[0] for col in all_records.columns])
-        for tag in tags:
-            df = all_records.loc[:, all_records.columns.str.startswith(tag)]
-            self.series[tag].records = df.rename(
-                columns=lambda c: '_'.join(c.split('_')[1:])
-            )
+        dfs = split_dataframe(pd.read_csv(csv_path, index_col=False))
+        for tag, df in dfs:
+            self.series[tag].records = df
 
 def aggregator(f: Callable[[float, float], float], dv = None) -> Aggregator:
     """
@@ -116,3 +122,25 @@ def binary_func(name: str) -> Aggregator:
 
 def event_series(period: int, aggr_names: List[str]) -> EventSeries:
     return EventSeries(period, {name: binary_func(name) for name in aggr_names})
+
+def split_dataframe(all_records, preserved_cols=[]):
+    tagged_cols = [col for col in all_records.columns if col not in preserved_cols]
+    tagged = {}
+    for col in tagged_cols:
+        tag = col.split('_')[0]
+        try:
+            tagged[tag].append(col)
+        except KeyError:
+            tagged[tag] = [col]
+
+    def _remove_tag(tag, col):
+        if col.startswith(tag+'_'):
+            return '_'.join(col.split('_')[1:])
+        return col
+
+    res = []
+    for tag, cols in tagged.items():
+        df = all_records.loc[:, cols + preserved_cols]
+        df = df.rename(columns=lambda c: _remove_tag(tag, c))
+        res.append((tag, df))
+    return res

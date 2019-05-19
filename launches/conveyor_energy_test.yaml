@@ -1,30 +1,3 @@
-# configuration:
-#   layout:
-#     - 0: {length: 0, upstream_neighbor: 2}
-#       2: {length: 10, upstream_neighbor: 3, adjacent_neighbor: 11}
-#       3: {length: 10, upstream_neighbor: 4}
-#       4: {length: 10, upstream_neighbor: 17, adjacent_neighbor: 7}
-#       17: {length: 0}
-#     - 1: {length: 0, upstream_neighbor: 5}
-#       5: {length: 10, upstream_neighbor: 6, adjacent_neighbor: 12}
-#       6: {length: 10, upstream_neighbor: 21, adjacent_neighbor: 4}
-#       21: {length: 10, upstream_neighbor: 8}
-#     - 7: {length: 10, upstream_neighbor: 8}
-#       8: {length: 10, upstream_neighbor: 9, adjacent_neighbor: 18}
-#       9: {length: 10, upstream_neighbor: 10, adjacent_neighbor: 19}
-#       10: {length: 10, upstream_neighbor: 20}
-#     - 11: {length: 10, upstream_neighbor: 12}
-#       12: {length: 10, upstream_neighbor: 13}
-#     - 13: {length: 10, upstream_neighbor: 14, adjacent_neighbor: 20}
-#       14: {length: 10, upstream_neighbor: 15, adjacent_neighbor: 19}
-#       15: {length: 10, upstream_neighbor: 16, adjacent_neighbor: 18}
-#       16: {length: 10, upstream_neighbor: 17}
-#     - 18: {length: 0}
-#       19: {length: 0}
-#       20: {length: 0}
-#   sources: [0, 1]
-#   sinks: [17, 18, 19, 20]
-
 configuration:
   sinks: [0, 1, 2, 3]
   sources:
@@ -38,7 +11,7 @@ configuration:
       length: 30
       upstream: {type: 'conveyor', idx: 5, pos: 10}
     2:
-      length: 30
+      length: 20
       upstream: {type: 'conveyor', idx: 3, pos: 0}
     3:
       length: 30
@@ -124,12 +97,11 @@ settings:
   conveyor_env:
     speed: 1
     energy_consumption: 1
-    sec_process_time: 2
   conveyor:
     stop_delay: 40
   router:
     simple_q:
-      energy_reward_weight: 0.1
+      energy_reward_weight: 0.5
       learning_rate: 0.5
     dqn: &dqn
       energy_reward_weight: 1
@@ -145,7 +117,7 @@ settings:
       <<: *dqn
     dqn_emb:
       <<: *dqn
-      energy_reward_weight: 0.1
+      energy_reward_weight: 0.5
       additional_inputs: []
       embedding:
         alg: 'lap'

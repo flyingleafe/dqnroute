@@ -61,19 +61,15 @@ class RouterContainer(MessageHandler):
     """
     def __init__(self, topology: nx.DiGraph, router_factory, **kwargs):
         super().__init__(**kwargs)
-
         self.topology = topology
-        self.node_mapping = {}
-        self.node_mapping_inv = {}
-        for (i, aid) in enumerate(sorted(self.topology.nodes)):
-            rid = ('router', i)
-            self.node_mapping[aid] = rid
-            self.node_mapping_inv[rid] = aid
 
-        self.virt_conn_graph = nx.relabel_nodes(self.topology, self.node_mapping).to_undirected()
+        r_topology, mp, mp_inv = conv_to_router(topology)
+        self.node_mapping = mp
+        self.node_mapping_inv = mp_inv
+        self.virt_conn_graph = r_topology.to_undirected()
         self.routers = {}
 
-        router_factory.conn_graph = self.virt_conn_graph
+        # self.log(pprint.pformat(self.node_mapping))
         router_factory.useDynEnv(self.env)
         for rid in self.childrenRouters(self.id):
             self.routers[rid] = router_factory._makeHandler(rid)
@@ -214,6 +210,8 @@ class RouterContainer(MessageHandler):
         allowed_nbrs = only_reachable(self.topology, bag.dst, self.topology.successors(node_id))
         allowed_routers = [self.node_mapping[v] for v in allowed_nbrs]
 
+        self.log('bag handle: {}, allowed nbrs: {}'.format(bag, allowed_nbrs))
+
         pkg = self.bagToPkg(bag)
         enqueued_evs = self.handleViaRouter(router_id, PkgEnqueuedEvent(from_router, router_id, pkg))
         process_evs = self.handleViaRouter(router_id,
@@ -250,6 +248,9 @@ class RouterSink(RouterContainer, SimpleSink):
     as `SimpleSource` but also manages virtual router messages.
     """
     def bagDetection(self, bag: Bag) -> List[WorldEvent]:
+        if bag.dst != self.id:
+            raise Exception('Bag {} has arrived at wrong sink {}!'.format(bag, self.id))
+
         router_id = self.routerId()
         last_conv = ('conveyor', bag.last_conveyor)
 

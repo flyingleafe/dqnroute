@@ -1,7 +1,9 @@
 import networkx as nx
 import os
+import yaml
+import pprint
 
-from typing import List
+from typing import List, Optional
 from simpy import Environment, Event, Interrupt
 from ..event_series import EventSeries
 from ..messages import *
@@ -186,7 +188,17 @@ class SimulationRunner:
     Class which constructs an environment from given settings and runs it.
     """
 
-    def __init__(self, run_params, data_series: EventSeries, data_dir: str, **kwargs):
+    def __init__(self, run_params, data_dir: str, params_override = {},
+                 data_series: Optional[EventSeries] = None, series_period: int = 500,
+                 series_funcs: List[str] = ['count', 'sum', 'min', 'max'], **kwargs):
+        if type(run_params) == str:
+            with open(run_params) as f:
+                run_params = yaml.safe_load(f)
+        run_params = dict_merge(run_params, params_override)
+
+        if data_series is None:
+            data_series = self.makeDataSeries(series_period, series_funcs)
+
         self.run_params = run_params
         self.data_series = data_series
         self.data_dir = data_dir
@@ -234,6 +246,12 @@ class SimulationRunner:
 
         return self.data_series
 
+    def makeDataSeries(self, series_period, series_funcs):
+        """
+        Makes a data series if one is not given directly
+        """
+        raise NotImplementedError()
+
     def makeMultiAgentEnv(self, **kwargs) -> MultiAgentEnv:
         """
         Initializes a world environment.
@@ -264,16 +282,22 @@ class SimulationRunner:
 # Small run utilities
 #
 
+def run_simulation(RunnerClass, return_runner=False, **kwargs):
+    runner = RunnerClass(**kwargs)
+    data_series = runner.run(**kwargs)
+    data_series.addAvg()
+    df = data_series.getSeries()
+
+    if return_runner:
+        return df, runner
+    return df
+
 def mk_job_id(router_type, seed):
     return '{}-{}'.format(router_type, seed)
 
 def un_job_id(job_id):
     [router_type, s_seed] = job_id.split('-')
     return router_type, int(s_seed)
-
-def add_avg(df: pd.DataFrame):
-    df['avg'] = df['sum'] / df['count']
-    return df
 
 def add_cols(df, **cols):
     for (col, val) in cols.items():

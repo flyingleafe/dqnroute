@@ -1,4 +1,5 @@
 import logging
+import random
 
 from copy import deepcopy
 from typing import List, Tuple, Callable
@@ -99,6 +100,8 @@ class MessageHandler(EventHandler):
                     self._lost_msgs[nbr].append(err.msg)
             return res
         except:
+            if isinstance(event, WireInMsg):
+                event = self._unwireMsg(event)
             self.log('exception while handling {}\n'.format(event), force=True)
             raise
 
@@ -256,7 +259,7 @@ class Router(MessageHandler):
 
                 to_nbr, additional_msgs = self.route(sender, pkg, allowed_nbrs)
                 assert to_nbr in allowed_nbrs, "Resulting neighbour is not among allowed!"
-                pkg.last_node_routed = self.id
+                pkg.node_path.append(self.id)
 
                 logger.debug('Routing pkg #{} on router {} to router {}'.format(pkg.id, self.id[1], to_nbr[1]))
                 return [PkgRouteAction(to_nbr, pkg)] + additional_msgs
@@ -329,6 +332,7 @@ class RewardAgent(object):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._pending_pkgs = {}
+        self._debug_pkgs = {}
 
     def registerResentPkg(self, pkg: Package, Q_estimate: float, action, data) -> RewardMsg:
         rdata = self._getRewardData(pkg, data)
@@ -336,7 +340,13 @@ class RewardAgent(object):
         return self._mkReward(pkg, Q_estimate, rdata)
 
     def receiveReward(self, msg: RewardMsg):
-        action, old_reward_data, saved_data = self._pending_pkgs.pop(msg.pkg_id)
+        try:
+            action, old_reward_data, saved_data = self._pending_pkgs.pop(msg.pkg.id)
+        except KeyError:
+            self.log('not our package: {}, path:\n  {}\n'
+                     .format(msg.pkg, msg.pkg.node_path), force=True)
+            raise
+
         reward = self._computeReward(msg, old_reward_data)
         return action, reward, saved_data
 
@@ -359,7 +369,7 @@ class NetworkRewardAgent(RewardAgent):
         return msg.Q_estimate + (time_received - time_sent)
 
     def _mkReward(self, pkg: Package, Q_estimate: float, time_sent: float) -> NetworkRewardMsg:
-        return NetworkRewardMsg(self.id, pkg.id, Q_estimate, time_sent)
+        return NetworkRewardMsg(self.id, pkg, Q_estimate, time_sent)
 
     def _getRewardData(self, pkg: Package, data):
         return self.env.time()
@@ -377,11 +387,15 @@ class ConveyorRewardAgent(RewardAgent):
         time_sent, _ = old_reward_data
         time_processed, energy_gap = msg.reward_data
         time_gap = time_processed - time_sent
+        # self.log('sent to {}, costs: {}s, {}kW; estimate: {}'
+        #          .format(msg.origin, time_gap, energy_gap, msg.Q_estimate),
+        #          force=(random.randint(0, 100)==0))
+
         return msg.Q_estimate + time_gap + self._e_weight * energy_gap
 
     def _mkReward(self, bag: Bag, Q_estimate: float, reward_data) -> ConveyorRewardMsg:
         time_processed, energy_gap = reward_data
-        return ConveyorRewardMsg(self.id, bag.id, Q_estimate, time_processed, energy_gap)
+        return ConveyorRewardMsg(self.id, bag, Q_estimate, time_processed, energy_gap)
 
     def _getRewardData(self, bag: Bag, data):
         cur_time = self.env.time()
@@ -390,5 +404,4 @@ class ConveyorRewardAgent(RewardAgent):
         stop_time = self.env.get_scheduled_stop()
         time_gap = delay - max(0, stop_time - cur_time)
         energy_gap = consumption * time_gap
-
         return cur_time, energy_gap

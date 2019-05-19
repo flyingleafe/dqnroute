@@ -6,6 +6,7 @@ import torch.nn as nn
 import numpy as np
 import networkx as nx
 import pandas as pd
+import pprint
 
 from typing import List, Tuple, Dict, Union
 from ..base import *
@@ -38,7 +39,7 @@ class DQNRouter(LinkStateRouter, RewardAgent):
                 self.brain.init_xavier()
             else:
                 self.brain.restore()
-                logger.info('Restored model ' + self.brain._label)
+                self.log('Restored model {}'.format(self.brain._label))
 
         else:
             self.brain = brain
@@ -92,10 +93,9 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     def _getAddInput(self, tag, *args, **kwargs):
         if tag == 'amatrix':
             amatrix = nx.convert_matrix.to_numpy_array(
-                self.network, nodelist=self.nodes,
+                self.network, nodelist=self.nodes, weight=self.edge_weight,
                 dtype=np.float32)
             gstate = np.ravel(amatrix)
-            gstate[gstate > 0] = 1
             return gstate
         else:
             raise Exception('Unknown additional input: ' + tag)
@@ -111,7 +111,11 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         input = [addr, dst, neighbours]
 
         for inp in self.additional_inputs:
-            input.append(self._getAddInput(inp['tag']))
+            tag = inp['tag']
+            add_inp = self._getAddInput(tag)
+            if tag == 'amatrix':
+                add_inp[add_inp > 0] = 1
+            input.append(add_inp)
 
         return tuple(input)
 
@@ -158,7 +162,7 @@ class DQNRouterOO(DQNRouter):
         estimate = -np.max(prediction)
 
         saved_state = [s[to_idx] for s in state]
-        to = sorted(allowed_nbrs)[to_idx]
+        to = allowed_nbrs[to_idx]
         return to, estimate, saved_state
 
     def _nodeRepr(self, node):
@@ -176,7 +180,7 @@ class DQNRouterOO(DQNRouter):
                                       for inp in self.additional_inputs]
 
         input = [[addr, dst, self._nodeRepr(v[1])] + get_add_inputs(v)
-                 for v in sorted(nbrs)]
+                 for v in nbrs]
         return stack_batch(input)
 
     def _replay(self):
@@ -221,6 +225,7 @@ class DQNRouterEmb(DQNRouterOO):
             self.prev_num_nodes = num_nodes
             self.prev_num_edges = num_edges
             self.embedding.fit(self.network, weight=self.edge_weight)
+            # self.log(pprint.pformat(self.embedding._X), force=self.id[1] == 0)
 
 
 class DQNRouterNetwork(NetworkRewardAgent, DQNRouter):
@@ -256,14 +261,5 @@ class DQNRouterOOConveyor(LSConveyorMixin, ConveyorRewardAgent, ConveyorAddInput
     pass
 
 class DQNRouterEmbConveyor(LSConveyorMixin, ConveyorRewardAgent, ConveyorAddInputMixin, DQNRouterEmb):
-    def networStateChanged(self):
-        num_nodes = len(self.network.nodes)
-        num_edges = len(self.network.edges)
+    pass
 
-        if not self.network_initialized and num_nodes == len(self.nodes) and num_edges == self.init_edges_num:
-            self.network_initialized = True
-
-        if self.network_initialized and (num_edges != self.prev_num_edges or num_nodes != self.prev_num_nodes):
-            self.prev_num_nodes = num_nodes
-            self.prev_num_edges = num_edges
-            self.embedding.fit(self.network, weight=None) # only for this 'None' all the fuss
