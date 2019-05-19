@@ -69,6 +69,9 @@ class MessageHandler(EventHandler):
                     raise BrokenInterfaceError(event.to_node, event.inner_msg)
             else:
                 return WireOutMsg(-1, event)
+        elif isinstance(event, MasterEvent):
+            event.inner = self._wireMsg(event.inner)
+            return event
         elif isinstance(event, DelayedEvent):
             return DelayedEvent(event.id, event.delay, self._wireMsg(event.inner))
         else:
@@ -84,6 +87,7 @@ class MessageHandler(EventHandler):
 
     def handle(self, event: WorldEvent) -> List[WorldEvent]:
         try:
+            # print(event, isinstance(event, WireInMsg))
             if isinstance(event, WireInMsg):
                 evs = self.handleMsg(self._unwireMsg(event))
             else:
@@ -211,6 +215,13 @@ class MasterHandler(MessageHandler):
         else:
             return super().handleEvent(event)
 
+    def delayed(self, delay: float, callback: Callable[[], List[WorldEvent]]) -> MasterEvent:
+        ev = super().delayed(delay, callback)
+        return MasterEvent(self.id, ev, id=ev.id)
+
+    def cancelDelayed(self, delay_id: int) -> MasterEvent:
+        return MasterEvent(self.id, super().cancelDelayed(delay_id))
+
     def registerSlave(self, slave_id: AgentId, slave):
         self.slaves[slave_id] = slave
 
@@ -224,7 +235,7 @@ class SlaveHandler(MessageHandler):
     Should not be connected to anything.
     """
     def __init__(self, id: AgentId, master: MasterHandler):
-        super().__init__(id=id, env=DynamicEnv(), neighbours=[])
+        super().__init__(id=id, env=DynamicEnv(time=lambda: 0), neighbours=[])
         self.master = master
 
     def init(self, config):

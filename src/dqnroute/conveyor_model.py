@@ -19,10 +19,10 @@ class AutomataException(Exception):
     pass
 
 def search_pos(ls: List[Tuple[Any, float]], pos: float,
-               return_index: bool = False,
+               offset: float = 0, return_index: bool = False,
                preference: str = 'nearest') -> Tuple[Any, float]:
     assert len(ls) > 0, "what are you gonna find pal?!"
-    return binary_search(ls, differs_from(pos, using=lambda p: p[1]),
+    return binary_search(ls, differs_from(pos, using=lambda p: p[1] + offset),
                          return_index=return_index, preference=preference)
 
 # Automata for simplifying the modelling of objects movement
@@ -101,8 +101,13 @@ class ConveyorModel:
     def nextCheckpoint(self, pos: float) -> Tuple[Any, float]:
         return search_pos(self.checkpoints, pos, preference='next')
 
-    def nearestObject(self, pos: float) -> Tuple[Any, float]:
-        oid, o_pos = search_pos(self.object_positions, pos)
+    def nearestObject(self, pos: float, after=None) -> Tuple[Any, float]:
+        if after is not None:
+            offset = round(after * self.speed, POS_ROUND_DIGITS)
+        else:
+            offset = 0
+
+        oid, o_pos = search_pos(self.object_positions, pos, offset=offset)
         return self.objects[oid], o_pos
 
     def working(self) -> bool:

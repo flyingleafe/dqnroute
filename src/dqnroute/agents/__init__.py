@@ -32,6 +32,7 @@ _conveyors_router_classes = {
     'dqn': DQNRouterConveyor,
     'dqn_oneout': DQNRouterOOConveyor,
     'dqn_emb': DQNRouterEmbConveyor,
+    'centralized_simple': CentralizedController,
 }
 
 def get_router_class(router_type: str, context: Optional[str] = None):

@@ -49,7 +49,7 @@ class EventSeries:
         self.records[avg_col] = self.records[sum_col] / self.records[count_col]
 
     def getSeries(self):
-        return self.records.sort_index()
+        return self.records.sort_index().astype(float, copy=False)
 
     def reset(self):
         self.records = self.records.iloc[0:0]

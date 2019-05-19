@@ -46,6 +46,8 @@ class ConveyorFactory(HandlerFactory):
     def __init__(self, router_type, routers_cfg, topology, conn_graph, conveyors_layout,
                  conveyor_cfg, energy_consumption, max_speed, **kwargs):
         self.router_type = router_type
+        self.router_cfg = routers_cfg.get(router_type, {})
+        self.conveyor_cfg = conveyor_cfg
         self.topology = topology
         self.layout = conveyors_layout
         self.conveyor_cfg = conveyor_cfg
@@ -58,12 +60,15 @@ class ConveyorFactory(HandlerFactory):
         except KeyError:
             routers_cfg[router_type] = {'conv_stop_delay': stop_delay}
 
-        r_topology, _, _ = conv_to_router(topology)
-        self.sub_factory = RouterFactory(
-            router_type, routers_cfg,
-            conn_graph=r_topology.to_undirected(),
-            topology_graph=r_topology,
-            context='conveyors', **kwargs)
+        self.RouterClass = get_router_class(router_type, 'conveyors')
+
+        if not self.centralized():
+            r_topology, _, _ = conv_to_router(topology)
+            self.sub_factory = RouterFactory(
+                router_type, routers_cfg,
+                conn_graph=r_topology.to_undirected(),
+                topology_graph=r_topology,
+                context='conveyors', **kwargs)
 
         super().__init__(conn_graph=conn_graph, **kwargs)
 
@@ -72,12 +77,26 @@ class ConveyorFactory(HandlerFactory):
         energy_func = lambda: self.energy_consumption
 
         for conv_id in self.layout['conveyors'].keys():
-            dyn_env = DynamicEnv(time=time_func, energy_consumption=energy_func)
+            dyn_env = self.dynEnv()
             dyn_env.register_var('scheduled_stop', 0)
             self.conveyor_dyn_envs[conv_id] = dyn_env
 
     def centralized(self):
-        return self.sub_factory.centralized()
+        return issubclass(self.RouterClass, MasterHandler)
+
+    def dynEnv(self):
+        time_func = lambda: self.env.now
+        energy_func = lambda: self.energy_consumption
+        return DynamicEnv(time=time_func, energy_consumption=energy_func)
+
+    def makeMasterHandler(self) -> MasterHandler:
+        dyn_env = self.dynEnv()
+        conv_lengths = {cid: conv['length']
+                        for (cid, conv) in self.layout['conveyors'].items()}
+        cfg = {**self.router_cfg, **self.conveyor_cfg}
+        return self.RouterClass(env=dyn_env, topology=self.topology,
+                                conv_lengths=conv_lengths,
+                                max_speed=self.max_speed, **cfg)
 
     def makeHandler(self, agent_id: AgentId, neighbours: List[AgentId], **kwargs) -> MessageHandler:
         a_type = agent_type(agent_id)
@@ -87,9 +106,7 @@ class ConveyorFactory(HandlerFactory):
             dyn_env = self.conveyor_dyn_envs[conv_idx]
         else:
             # only if it's sink
-            time_func = lambda: self.env.now
-            energy_func = lambda: self.energy_consumption
-            dyn_env = DynamicEnv(time=time_func, energy_consumption=energy_func)
+            dyn_env = self.dynEnv()
 
         common_args = {
             'env': dyn_env,
@@ -141,8 +158,6 @@ class ConveyorsEnvironment(MultiAgentEnv):
         for conv_id in conv_ids:
             checkpoints = conveyor_adj_nodes(self.topology_graph, conv_id,
                                              only_own=True, data='conveyor_pos')
-            # print('conveyor {} checkpoints: {}, {}'.format(conv_id, checkpoints,
-                                                           # self.topology_graph.nodes[checkpoints[-1][0]]))
             length = self.layout['conveyors'][conv_id]['length']
             model = ConveyorModel(length, self.max_speed, checkpoints,
                                   model_id=('world_conv', conv_id))
@@ -356,10 +371,8 @@ class ConveyorsEnvironment(MultiAgentEnv):
                 assert delay > 0, "next event delay is 0!"
                 self.log('NEXT EVENT: conv {} - ({}, {}, {})'.format(conv_idx, bag, node, delay))
                 yield self.env.timeout(delay)
-                self.log('NU CHO PRISTUPIM?')
             else:
                 # hang forever (until interrupt)
-                self.log('TAKS NU POVISIM')
                 yield Event(self.env)
 
             for model in self.conveyor_models.values():

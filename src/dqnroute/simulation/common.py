@@ -53,6 +53,11 @@ class MultiAgentEnv(HasLog):
         self.handlers = {agent_id: self.factory._makeHandler(agent_id) for agent_id in agent_ids}
         self.delayed_evs = {agent_id: {} for agent_id in agent_ids}
 
+        if self.factory.centralized():
+            self.handlers[('master', 0)] = self.factory.master_handler
+            self.delayed_evs[('master', 0)] = {}
+
+
     def time(self):
         return self.env.now
 
@@ -80,6 +85,10 @@ class MultiAgentEnv(HasLog):
         environment. Not to be overridden in children: `handleAction` and
         `handleWorldEvent` should be overridden instead.
         """
+        if isinstance(event, MasterEvent):
+            from_agent = event.agent
+            event = event.inner
+
         if isinstance(event, Message):
             return self.handleMessage(from_agent, event)
 
