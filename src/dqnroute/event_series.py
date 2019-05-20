@@ -95,6 +95,27 @@ class MultiEventSeries(EventSeries):
         for tag, df in dfs:
             self.series[tag].records = df
 
+
+class ChangingValue(object):
+    def __init__(self, data_series, init_val=0, avg=False):
+        self.data = data_series
+        self.cur_val = init_val
+        self.avg = avg
+        self.update_time = 0
+
+    def update(self, time, val):
+        assert time >= self.update_time, "time goes backwards?"
+        d = time - self.update_time
+        if d > 0 and self.cur_val != val:
+            if self.avg:
+                coeff = self.cur_val / d
+            else:
+                coeff = self.cur_val
+            self.data.logUniformRange(self.update_time, time, coeff)
+            self.cur_val = val
+            self.update_time = time
+
+
 def aggregator(f: Callable[[float, float], float], dv = None) -> Aggregator:
     """
     Make an aggregator from a simple function of two values

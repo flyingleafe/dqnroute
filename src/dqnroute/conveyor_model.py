@@ -1,4 +1,4 @@
-from typing import List, Tuple, Any, Dict
+from typing import List, Tuple, Any, Dict, Optional
 from .utils import *
 
 POS_ROUND_DIGITS = 5
@@ -19,11 +19,14 @@ class AutomataException(Exception):
     pass
 
 def search_pos(ls: List[Tuple[Any, float]], pos: float,
-               offset: float = 0, return_index: bool = False,
+               return_index: bool = False,
                preference: str = 'nearest') -> Tuple[Any, float]:
     assert len(ls) > 0, "what are you gonna find pal?!"
-    return binary_search(ls, differs_from(pos, using=lambda p: p[1] + offset),
+    return binary_search(ls, differs_from(pos, using=lambda p: p[1]),
                          return_index=return_index, preference=preference)
+
+def shift(objs, d):
+    return [(o, round(p + d, POS_ROUND_DIGITS)) for (o, p) in objs]
 
 # Automata for simplifying the modelling of objects movement
 _model_automata = {
@@ -84,6 +87,8 @@ class ConveyorModel:
         self._state = 'pristine'
         self._resume_time = 0
         self._resolved_events = set()
+        self._speed_changes = 0
+        self._speed_sum = 0
 
     def _stateTransfer(self, action):
         try:
@@ -103,12 +108,22 @@ class ConveyorModel:
 
     def nearestObject(self, pos: float, after=None) -> Tuple[Any, float]:
         if after is not None:
-            offset = round(after * self.speed, POS_ROUND_DIGITS)
+            objs = shift(self.object_positions, after * self.speed)
         else:
-            offset = 0
+            objs = self.object_positions
 
-        oid, o_pos = search_pos(self.object_positions, pos, offset=offset)
+        oid, o_pos = search_pos(objs, pos)
         return self.objects[oid], o_pos
+
+    def timeTillObjectLeave(self, speed=None) -> Optional[float]:
+        if speed is None:
+            speed = self.speed
+
+        if speed == 0 or len(self.object_positions) == 0:
+            return None
+
+        last_obj, last_pos = self.object_positions[-1]
+        return (self.length - last_pos) / speed
 
     def working(self) -> bool:
         return self.speed > 0
@@ -119,6 +134,8 @@ class ConveyorModel:
         if self.speed != speed:
             self._stateTransfer('change')
             self.speed = speed
+            self._speed_changes += 1
+            self._speed_sum += speed
 
     def putObject(self, obj_id: int, obj: Any, pos: float):
         assert obj_id not in self.objects, "Clashing object ID!"
@@ -155,20 +172,23 @@ class ConveyorModel:
         if time == 0:
             return 0
 
+        self._stateTransfer('change')
         d = time * self.speed
-        for i in range(len(self.object_positions)):
-            obj_id, pos = self.object_positions[i]
-            self.object_positions[i] = (obj_id, round(pos + d, POS_ROUND_DIGITS))
+        if len(self.objects) == 0:
+            return d
+
+        last_pos_orig = self.object_positions[-1][1]
+        self.object_positions = shift(self.object_positions, d)
 
         if clean_ends:
             while len(self.object_positions) > 0 and self.object_positions[0][1] < 0:
                 obj_id, _ = self.object_positions.pop(0)
                 self.objects.pop(obj_id)
             while len(self.object_positions) > 0 and self.object_positions[-1][1] > self.length:
-                obj_id, _ = self.object_positions.pop()
+                obj_id, pos = self.object_positions.pop()
+                print('HAHA NE ZHDAL? A VOT, NAHUI IDET: {}, {} -> {}; {}s, {}m/s'.format(obj_id, last_pos_orig, pos, time, self.speed))
                 self.objects.pop(obj_id)
 
-        self._stateTransfer('change')
         return d
 
     def nextEvents(self, obj=None, cps=None, skip_immediate=True,
@@ -270,6 +290,8 @@ def all_unresolved_events(models: Dict[int, ConveyorModel]):
     while True:
         had_some = False
         for conv_idx, model in models.items():
+            if model.dirty():
+                model.startResolving()
             if model.resolving():
                 ev = model.pickUnresolvedEvent()
                 if ev is not None:

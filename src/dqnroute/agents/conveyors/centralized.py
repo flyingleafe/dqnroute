@@ -7,6 +7,8 @@ from ...utils import *
 from ...conveyor_model import *
 
 BAG_RADIUS = 1
+SPEED_STEP = 0.1
+SPEED_ROUND_DIGITS = 5
 
 class CentralizedController(MasterHandler):
     """
@@ -33,6 +35,21 @@ class CentralizedController(MasterHandler):
         self.current_bags = {}
         self.bag_convs = {}
 
+        self.conv_ups = {}
+        self.prev_convs = {cid: set() for cid in conv_ids}
+        self.sink_convs = []
+        self.sink_bags = {}
+        for cid in conv_ids:
+            es = conveyor_edges(self.topology, cid)
+            up_node = es[-1][1]
+            self.conv_ups[cid] = up_node
+            if agent_type(up_node) == 'sink':
+                self.sink_convs.append(cid)
+                self.sink_bags[up_node] = set()
+            else:
+                up_conv = conveyor_idx(self.topology, up_node)
+                self.prev_convs[up_conv].add(cid)
+
         evs = self._update()
         assert len(evs) == 0, "doing something on first update? hey!"
 
@@ -51,7 +68,7 @@ class CentralizedController(MasterHandler):
             elif atype == 'diverter':
                 evs += self.divertBag(slave_id, bag)
             elif atype == 'sink':
-                evs += self.finishBag(bag)
+                evs += self.finishBag(slave_id, bag)
             else:
                 raise Exception('Bag detected on {} somehow!'.format(slave_id))
 
@@ -67,8 +84,7 @@ class CentralizedController(MasterHandler):
         return self.putBagToConv(conv_idx, bag, 0)
 
     def divertBag(self, dv: AgentId, bag: Bag) -> List[WorldEvent]:
-        path = nx.dijkstra_path(self.topology, dv, bag.dst, weight='length')
-        nxt = path[1]
+        nxt = self.routeBag(dv, bag)
         cur_conv = conveyor_idx(self.topology, dv)
         next_conv = self.topology[dv][nxt]['conveyor']
 
@@ -82,13 +98,27 @@ class CentralizedController(MasterHandler):
         else:
             return []
 
-    def finishBag(self, bag: Bag) -> List[WorldEvent]:
+    def finishBag(self, sink: AgentId, bag: Bag) -> List[WorldEvent]:
         self.log('bag {} is OUT'.format(bag))
+        assert bag.dst == sink, "NOT OUR DST!"
 
+        evs = []
         self.current_bags.pop(bag.id)
-        prev_conv = self.bag_convs[bag.id]
-        _, evs = self.removeBagFromConv(prev_conv, bag.id)
+
+        if bag.id in self.sink_bags[sink]:
+            self.sink_bags[sink].remove(bag.id)
+        else:
+            prev_conv = self.bag_convs[bag.id]
+            _, evs = self.removeBagFromConv(prev_conv, bag.id)
+
         return evs + [BagReceiveAction(bag)]
+
+    def routeBag(self, node: AgentId, bag: Bag) -> AgentId:
+        """
+        All routing strategy is here. Override in subclasses
+        """
+        path = nx.dijkstra_path(self.topology, node, bag.dst, weight='length')
+        return path[1]
 
     def putBagToConv(self, conv_idx, bag, pos) -> List[WorldEvent]:
         self.log('BAG {} -> CONV {} ({}m)'.format(bag, conv_idx, pos))
@@ -109,19 +139,21 @@ class CentralizedController(MasterHandler):
         return bag, evs
 
     def leaveConvEnd(self, conv_idx, bag_id) -> List[WorldEvent]:
-        up_node = conveyor_edges(self.topology, conv_idx)[-1][1]
+        bag, evs = self.removeBagFromConv(conv_idx, bag_id)
+        up_node = self.conv_ups[conv_idx]
 
         if agent_type(up_node) != 'sink':
-            bag, evs = self.removeBagFromConv(conv_idx, bag_id)
             ps = self.topology.nodes[up_node]
             up_conv = ps['conveyor']
             up_pos = ps['conveyor_pos']
             return evs + self.putBagToConv(up_conv, bag, up_pos)
-        return []
+        else:
+            self.sink_bags[up_node].add(bag.id)
+            return evs
 
     def start(self, conv_idx, speed=None) -> List[WorldEvent]:
         if speed is None:
-            speed = self.max_speed
+            speed = self._maxAllowedSpeed(conv_idx)
         return self.setSpeed(conv_idx, speed)
 
     def stop(self, conv_idx) -> List[WorldEvent]:
@@ -175,6 +207,12 @@ class CentralizedController(MasterHandler):
 
             self.current_bags[bag.id].add(node)
 
+        evs += self._cascadeSpeedUpdate()
+
+        for model in self.conveyor_models.values():
+            if model.dirty():
+                model.startResolving()
+
         for model in self.conveyor_models.values():
             if model.resolving():
                 model.endResolving()
@@ -190,7 +228,8 @@ class CentralizedController(MasterHandler):
     def _scheduleUpdate(self):
         next_events = all_next_events(self.conveyor_models)
         if len(next_events) > 0:
-            _, (_, _, delay) = next_events[0]
+            conv_idx, (bag, node, delay) = next_events[0]
+
             assert delay >= 0, "chto za!!1"
 
             ev = self.delayed(delay, self._pauseUpdate)
@@ -203,3 +242,52 @@ class CentralizedController(MasterHandler):
         evs = self._interrupt()
         evs += callback()
         return evs + self._update()
+
+    def _cascadeSpeedUpdate(self) -> List[WorldEvent]:
+        queue = list(self.sink_convs)
+        seen = set()
+        evs = []
+        while len(queue) > 0:
+            cid = queue.pop(0)
+            seen.add(cid)
+            model = self.conveyor_models[cid]
+
+            max_speed = self._maxAllowedSpeed(cid)
+            if len(model.objects) > 0:
+                assert not self.hasDelayed(self.conv_delayed_stops[cid]), "HHEEEET"
+                evs += self.setSpeed(cid, max_speed)
+
+            for pr in self.prev_convs[cid] - seen:
+                queue.append(pr)
+        return evs
+
+    def _maxAllowedSpeed(self, conv_idx):
+        speed = self.max_speed
+        model = self.conveyor_models[conv_idx]
+        up_node = self.conv_ups[conv_idx]
+
+        if agent_type(up_node) != 'sink':
+            up_conv = conveyor_idx(self.topology, up_node)
+            up_model = self.conveyor_models[up_conv]
+            up_pos = up_model.checkpointPos(up_node)
+
+            if len(up_model.objects) > 0:
+                while speed > 0:
+                    leave_time = model.timeTillObjectLeave(speed)
+                    if leave_time is None:
+                        break
+
+                    last_bag, last_pos = model.object_positions[-1]
+
+                    bag, pos = up_model.nearestObject(up_pos, after=leave_time)
+                    if abs(pos - up_pos) >= 2*BAG_RADIUS:
+                        self.log('bag {}: conv {} -> ({}; {}) -> conv {}, nearest - (bag {}; {})'
+                                 .format(last_bag, conv_idx, up_node, up_pos, up_conv, bag.id, pos))
+                        break
+
+                    self.log('conv {}, last bag ({}; {}m) goes to ({}; {}m):\n  - cannot set speed {} due to ({}; {}m) on conv {}'
+                             .format(conv_idx, last_bag, last_pos, up_node, up_pos,
+                                     speed, bag, pos, up_conv))
+                    speed = round(speed - SPEED_STEP, SPEED_ROUND_DIGITS)
+
+        return max(0, speed)

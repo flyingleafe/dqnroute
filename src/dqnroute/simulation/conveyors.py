@@ -20,26 +20,20 @@ logger = logging.getLogger(DQNROUTE_LOGGER)
 
 DIVERTER_RANGE = 0.5
 
-class EnergySpender(object):
+class EnergySpender(ChangingValue):
     """
     Class which records energy consumption
     """
     def __init__(self, env: Environment, data_series: EventSeries, consumption: float):
+        super().__init__(data_series)
         self.env = env
-        self.data = data_series
         self.consumption = consumption
-        self.time_started = -1
-        self.total_spent = 0
 
     def start(self):
-        if self.time_started == -1:
-            self.time_started = self.env.now
+        self.update(self.env.now, self.consumption)
 
     def stop(self):
-        if self.time_started != -1:
-            self.data.logUniformRange(self.time_started, self.env.now,
-                                      self.consumption)
-            self.time_started = -1
+        self.update(self.env.now, 0)
 
 
 class ConveyorFactory(HandlerFactory):
@@ -136,14 +130,13 @@ class ConveyorsEnvironment(MultiAgentEnv):
     Environment which models the conveyor system and the movement of bags.
     """
 
-    def __init__(self, conveyors_layout, time_series: EventSeries, energy_series: EventSeries,
+    def __init__(self, conveyors_layout, data_series: EventSeries,
                  speed: float = 1, energy_consumption: float = 1,
                  default_conveyor_args = {}, default_router_args = {}, **kwargs):
         self.max_speed = speed
         self.energy_consumption = energy_consumption
         self.layout = conveyors_layout
-        self.time_series = time_series
-        self.energy_series = energy_series
+        self.data_series = data_series
 
         self.topology_graph = make_conveyor_topology_graph(conveyors_layout)
 
@@ -168,9 +161,14 @@ class ConveyorsEnvironment(MultiAgentEnv):
         self.conveyor_broken = {conv_id: False for conv_id in conv_ids}
 
         self.conveyor_energy = {
-            conv_id: EnergySpender(self.env, self.energy_series, self.energy_consumption)
+            conv_id: EnergySpender(self.env, self.data_series.subSeries('energy'), self.energy_consumption)
             for conv_id in conv_ids
         }
+
+        # self.conveyor_speed = {
+        #     conv_id: ChangingValue(self.data_series.subSeries('speed'), avg=True)
+        #     for conv_id in conv_ids
+        # }
 
         self.conveyor_upstreams = {
             conv_id: conveyor_adj_nodes(self.topology_graph, conv_id)[-1]
@@ -192,15 +190,19 @@ class ConveyorsEnvironment(MultiAgentEnv):
     def handleAction(self, from_agent: AgentId, action: Action) -> Event:
         if isinstance(action, BagReceiveAction):
             assert agent_type(from_agent) == 'sink', "Only sink can receive bags!"
+            bag = action.bag
+
             self.log("bag #{} received at sink {}"
-                     .format(action.bag.id, from_agent[1]))
+                     .format(bag.id, from_agent[1]))
 
-            if from_agent != action.bag.dst:
+            if from_agent != bag.dst:
                 raise Exception('Bag #{} came to {}, but its destination was {}'
-                                .format(action.bag.id, from_agent, action.bag.dst))
+                                .format(action.bag.id, from_agent, bag.dst))
 
+            assert bag.id in self.current_bags, "why leave twice??"
             self.current_bags.pop(action.bag.id)
-            self.time_series.logEvent(self.env.now, self.env.now - action.bag.start_time)
+
+            self.data_series.logEvent('time', self.env.now, self.env.now - action.bag.start_time)
             return Event(self.env).succeed()
 
         elif isinstance(action, DiverterKickAction):
@@ -285,6 +287,7 @@ class ConveyorsEnvironment(MultiAgentEnv):
             return
 
         model.setSpeed(new_speed)
+        # self.conveyor_speed[conv_idx].update(self.env.now, new_speed)
 
         if old_speed == 0:
             self.log('conv {} started!'.format(conv_idx))
@@ -293,6 +296,13 @@ class ConveyorsEnvironment(MultiAgentEnv):
         if new_speed == 0:
             self.log('conv {} stopped!'.format(conv_idx))
             self.conveyor_energy[conv_idx].stop()
+
+        # all_stopped = True
+        # for model in self.conveyor_models.values():
+        #     if model.speed > 0:
+        #         all_stopped = False
+        # if all_stopped:
+        #     self.log('ALL CONVEYORS STOPPED!', True)
 
     def _putBagOnConveyor(self, conv_idx, bag, pos):
         """
@@ -304,7 +314,7 @@ class ConveyorsEnvironment(MultiAgentEnv):
         model.putObject(bag.id, bag, pos)
         bag.last_conveyor = conv_idx
 
-    def _leaveConveyorEnd(self, conv_idx, bag_id):
+    def _leaveConveyorEnd(self, conv_idx, bag_id) -> bool:
         model = self.conveyor_models[conv_idx]
         bag = model.removeObject(bag_id)
         up_node = self.conveyor_upstreams[conv_idx]
@@ -312,33 +322,24 @@ class ConveyorsEnvironment(MultiAgentEnv):
 
         if up_type == 'sink':
             self.passToAgent(up_node, BagDetectionEvent(bag))
-        elif up_type == 'junction':
+            return True
+
+        if up_type == 'junction':
             up_conv, up_pos = self._nodePos(up_node)
             self._putBagOnConveyor(up_conv, bag, up_pos)
         else:
             raise Exception('Invalid conveyor upstream node type: ' + up_type)
-
-    def _startResolving(self):
-        for model in self.conveyor_models.values():
-            if model.dirty():
-                model.startResolving()
-        self.conveyors_move_proc = None
-
-    def _endResolving(self):
-        for model in self.conveyor_models.values():
-            if model.resolving():
-                model.endResolving()
-            model.resume(self.env.now)
-        self.conveyors_move_proc = self.env.process(self._move())
+        return False
 
     def _updateAll(self):
-        self._startResolving()
         self.log('CHO PO')
+        self.conveyors_move_proc = None
 
+        left_to_sinks = set()
         # Resolving all immediate events
         for (conv_idx, (bag, node, delay)) in all_unresolved_events(self.conveyor_models):
             assert delay == 0, "well that's just obnoxious"
-            if node in self.current_bags[bag.id]:
+            if bag.id in left_to_sinks or node in self.current_bags[bag.id]:
                 continue
 
             model = self.conveyor_models[conv_idx]
@@ -346,20 +347,28 @@ class ConveyorsEnvironment(MultiAgentEnv):
             self.log('conv {}: handling {} on {}'.format(conv_idx, bag, node))
 
             atype = agent_type(node)
+            left_to_sink = False
             if atype == 'junction':
                 # do nothing, we process collisions in another branch
                 pass
             elif atype == 'conv_end':
-                self._leaveConveyorEnd(conv_idx, bag.id)
+                left_to_sink = self._leaveConveyorEnd(conv_idx, bag.id)
+                if left_to_sink:
+                    left_to_sinks.add(bag.id)
             elif atype == 'diverter':
                 self.passToAgent(node, BagDetectionEvent(bag))
             else:
                 raise Exception('Impossible conv node: {}'.format(node))
 
-            if bag.id in self.current_bags:
+            if bag.id not in left_to_sinks:
                 self.current_bags[bag.id].add(node)
 
-        self._endResolving()
+        for model in self.conveyor_models.values():
+            if model.resolving():
+                model.endResolving()
+            model.resume(self.env.now)
+
+        self.conveyors_move_proc = self.env.process(self._move())
 
     def _move(self):
         try:
@@ -401,12 +410,12 @@ class ConveyorsRunner(SimulationRunner):
     def makeDataSeries(self, series_period, series_funcs):
         time_series = event_series(series_period, series_funcs)
         energy_series = event_series(series_period, series_funcs)
-        return MultiEventSeries(time=time_series, energy=energy_series)
+        # speed_series = event_series(series_period, series_funcs)
+        return MultiEventSeries(time=time_series, energy=energy_series)#, speed=speed_series)
 
     def makeMultiAgentEnv(self, **kwargs) -> MultiAgentEnv:
         run_settings = self.run_params['settings']
-        return ConveyorsEnvironment(env=self.env, time_series=self.data_series.subSeries('time'),
-                                    energy_series=self.data_series.subSeries('energy'),
+        return ConveyorsEnvironment(env=self.env, data_series=self.data_series,
                                     conveyors_layout=self.run_params['configuration'],
                                     routers_cfg=run_settings['router'],
                                     conveyor_cfg=run_settings['conveyor'],
@@ -460,6 +469,3 @@ class ConveyorsRunner(SimulationRunner):
 
                     bag_id += 1
                 yield self.env.timeout(delta)
-
-        # Stop the hanging of move process
-        # self.world.conveyors_move_proc.interrupt()

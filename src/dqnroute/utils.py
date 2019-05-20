@@ -184,6 +184,25 @@ def make_conveyor_conn_graph(config) -> nx.Graph:
 
     return G
 
+def to_conv_graph(topology):
+    conv_G = nx.DiGraph()
+
+    def _walk(node, conv):
+        if agent_type(node) == 'source':
+            conv_G.add_edge(node, ('conveyor', conv))
+        for u, _, ps in topology.in_edges(node, data=True):
+            p_conv = ('conveyor', ps['conveyor'])
+            if conv != p_conv:
+                conv_G.add_edge(p_conv, conv, junction=u)
+            _walk(u, p_conv)
+
+    for node in topology.nodes:
+        if agent_type(node) == 'sink':
+            _walk(node, node)
+
+    return conv_G
+
+
 def conv_to_router(conv_topology):
     mapping = {}
     mapping_inv = {}
