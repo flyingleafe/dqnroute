@@ -19,6 +19,7 @@ from .network import RouterFactory
 logger = logging.getLogger(DQNROUTE_LOGGER)
 
 DIVERTER_RANGE = 0.5
+REAL_BAG_RADIUS = 0.5
 
 class EnergySpender(ChangingValue):
     """
@@ -311,7 +312,14 @@ class ConveyorsEnvironment(MultiAgentEnv):
         """
         self.log('bag {} -> conv {} ({}m)'.format(bag.id, conv_idx, pos))
         model = self.conveyor_models[conv_idx]
-        model.putObject(bag.id, bag, pos)
+        nearest = model.putObject(bag.id, bag, pos, return_nearest=True)
+        if nearest is not None:
+            n_oid, n_pos = nearest
+            if abs(pos - n_pos) < 2*REAL_BAG_RADIUS:
+                self.log('collision detected: (#{}; {}m) with (#{}; {}m) on conv {}'
+                         .format(bag.id, pos, n_oid, n_pos, conv_idx), True)
+                self.data_series.logEvent('collisions', self.env.now, 1)
+
         bag.last_conveyor = conv_idx
 
     def _leaveConveyorEnd(self, conv_idx, bag_id) -> bool:
@@ -342,8 +350,6 @@ class ConveyorsEnvironment(MultiAgentEnv):
             if bag.id in left_to_sinks or node in self.current_bags[bag.id]:
                 continue
 
-            model = self.conveyor_models[conv_idx]
-
             self.log('conv {}: handling {} on {}'.format(conv_idx, bag, node))
 
             atype = agent_type(node)
@@ -363,7 +369,7 @@ class ConveyorsEnvironment(MultiAgentEnv):
             if bag.id not in left_to_sinks:
                 self.current_bags[bag.id].add(node)
 
-        for model in self.conveyor_models.values():
+        for conv_idx, model in self.conveyor_models.items():
             if model.resolving():
                 model.endResolving()
             model.resume(self.env.now)
@@ -410,8 +416,8 @@ class ConveyorsRunner(SimulationRunner):
     def makeDataSeries(self, series_period, series_funcs):
         time_series = event_series(series_period, series_funcs)
         energy_series = event_series(series_period, series_funcs)
-        # speed_series = event_series(series_period, series_funcs)
-        return MultiEventSeries(time=time_series, energy=energy_series)#, speed=speed_series)
+        collisions_series = event_series(series_period, series_funcs)
+        return MultiEventSeries(time=time_series, energy=energy_series, collisions=collisions_series)
 
     def makeMultiAgentEnv(self, **kwargs) -> MultiAgentEnv:
         run_settings = self.run_params['settings']

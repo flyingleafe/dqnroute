@@ -1,7 +1,12 @@
 from typing import List, Tuple, Any, Dict, Optional
 from .utils import *
 
-POS_ROUND_DIGITS = 5
+POS_ROUND_DIGITS = 3
+SOFT_COLLIDE_SHIFT = 0.2
+
+BAG_RADIUS = 0.6
+SPEED_STEP = 0.1
+SPEED_ROUND_DIGITS = 3
 
 class CollisionException(Exception):
     """
@@ -96,34 +101,46 @@ class ConveyorModel:
             self._state = _model_automata[init_state][action]
         except KeyError:
             print('RAISED')
-            raise AutomataException('{}: Invalid action `{}` in state `{}`'.format(self.model_id, action, self._state))
+            raise AutomataException(
+                '{}: Invalid action `{}` in state `{}`;\n  speed - {}m/s\n  cps - {};\n  objs - {}'
+                .format(self.model_id, action, self._state, self.speed,
+                        self.checkpoints, self.object_positions))
 
-    def checkpointPos(self, cp: Any) -> float:
+    def checkpointPos(self, cp: Any) -> Optional[float]:
         if cp[0] == 'conv_end':
             return self.length
-        return self.checkpoint_positions[cp]
+        return self.checkpoint_positions.get(cp, None)
 
     def nextCheckpoint(self, pos: float) -> Tuple[Any, float]:
         return search_pos(self.checkpoints, pos, preference='next')
 
-    def nearestObject(self, pos: float, after=None) -> Tuple[Any, float]:
+    def nearestObject(self, pos: float, after=None, speed=None, not_exact=False,
+                      preference='nearest') -> Optional[Tuple[Any, float]]:
+        if len(self.object_positions) == 0:
+            return None
+
         if after is not None:
-            objs = shift(self.object_positions, after * self.speed)
+            if speed is None:
+                speed = self.speed
+            objs = shift(self.object_positions, after * speed)
         else:
             objs = self.object_positions
 
-        oid, o_pos = search_pos(objs, pos)
-        return self.objects[oid], o_pos
-
-    def timeTillObjectLeave(self, speed=None) -> Optional[float]:
-        if speed is None:
-            speed = self.speed
-
-        if speed == 0 or len(self.object_positions) == 0:
-            return None
-
-        last_obj, last_pos = self.object_positions[-1]
-        return (self.length - last_pos) / speed
+        res = search_pos(objs, pos, preference=preference, return_index=True)
+        if res is not None:
+            (oid, o_pos), idx = res
+            if not_exact and o_pos == pos:
+                if preference == 'prev':
+                    idx -= 1
+                elif preference == 'next':
+                    idx += 1
+                else:
+                    raise Exception('please dont use nearest with not exact')
+                if idx < 0 or idx > len(objs):
+                    return None
+                oid, o_pos = objs[idx]
+            return self.objects[oid], o_pos
+        return None
 
     def working(self) -> bool:
         return self.speed > 0
@@ -137,16 +154,27 @@ class ConveyorModel:
             self._speed_changes += 1
             self._speed_sum += speed
 
-    def putObject(self, obj_id: int, obj: Any, pos: float):
+    def putObject(self, obj_id: int, obj: Any, pos: float, soft_collide=True, return_nearest=False):
         assert obj_id not in self.objects, "Clashing object ID!"
         pos = round(pos, POS_ROUND_DIGITS)
 
+        nearest = None
         if len(self.objects) > 0:
             (n_obj_id, n_pos), n_idx = search_pos(self.object_positions, pos, return_index=True)
             if n_pos == pos:
-                raise CollisionException((obj, self.objects[n_obj_id], pos, self.model_id))
+                if soft_collide:
+                    print('{}: TRUE COLLISION: #{} and #{} on {}'.format(self.model_id, obj_id, n_obj_id, pos))
+                    i = n_idx
+                    p_pos = pos
+                    while i < len(self.object_positions) and self.object_positions[i][1] >= p_pos:
+                        p_pos = round(p_pos + SOFT_COLLIDE_SHIFT, POS_ROUND_DIGITS)
+                        self.object_positions[i] = (self.object_positions[i][0], p_pos)
+                        i += 1
+                else:
+                    raise CollisionException((obj, self.objects[n_obj_id], pos, self.model_id))
             elif n_pos < pos:
                 n_idx += 1
+            nearest = (n_obj_id, n_pos)
         else:
             n_idx = 0
 
@@ -154,19 +182,29 @@ class ConveyorModel:
         self.object_positions.insert(n_idx, (obj_id, pos))
         self._stateTransfer('change')
 
+        if return_nearest:
+            return nearest
+
+    def objPos(self, obj_id: int):
+        for (oid, pos) in self.object_positions:
+            if oid == obj_id:
+                return pos
+        return None
+
     def removeObject(self, obj_id: int):
         pos_idx = None
         for (i, (oid, pos)) in enumerate(self.object_positions):
             if oid == obj_id:
                 pos_idx = i
                 break
-        if pos_idx is None:
-            print('{}: bag#{} not found'.format(self.model_id, obj_id))
 
         self.object_positions.pop(pos_idx)
         obj = self.objects.pop(obj_id)
         self._stateTransfer('change')
         return obj
+
+    def shift(self, d):
+        self.object_positions = shift(self.object_positions, d)
 
     def skipTime(self, time: float, clean_ends=True):
         if time == 0:
@@ -178,7 +216,7 @@ class ConveyorModel:
             return d
 
         last_pos_orig = self.object_positions[-1][1]
-        self.object_positions = shift(self.object_positions, d)
+        self.shift(d)
 
         if clean_ends:
             while len(self.object_positions) > 0 and self.object_positions[0][1] < 0:
@@ -186,7 +224,7 @@ class ConveyorModel:
                 self.objects.pop(obj_id)
             while len(self.object_positions) > 0 and self.object_positions[-1][1] > self.length:
                 obj_id, pos = self.object_positions.pop()
-                print('HAHA NE ZHDAL? A VOT, NAHUI IDET: {}, {} -> {}; {}s, {}m/s'.format(obj_id, last_pos_orig, pos, time, self.speed))
+                # print('HAHA NE ZHDAL? A VOT, NAHUI IDET: {}, {} -> {}; {}s, {}m/s'.format(obj_id, last_pos_orig, pos, time, self.speed))
                 self.objects.pop(obj_id)
 
         return d
@@ -299,3 +337,20 @@ def all_unresolved_events(models: Dict[int, ConveyorModel]):
                     had_some = True
         if not had_some:
             break
+
+def find_max_speed(up_model, up_pos, up_speed, dist_to_end, max_speed):
+    speed = max_speed
+    while speed > 0:
+        end_time = dist_to_end / speed
+        up_nearest = up_model.nearestObject(up_pos, after=end_time, speed=up_speed)
+        if up_nearest is None:
+            break
+
+        _, obj_pos = up_nearest
+        if abs(up_pos - obj_pos) >= 2*BAG_RADIUS:
+            break
+        elif dist_to_end == 0:
+            return 0
+        speed = round(speed - SPEED_STEP, SPEED_ROUND_DIGITS)
+
+    return max(0, speed)

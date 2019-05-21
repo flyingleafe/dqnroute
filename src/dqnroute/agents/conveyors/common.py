@@ -18,15 +18,15 @@ class ConveyorStateHandler(AbstractStateHandler):
         super().__init__(**kwargs)
         self.controllers_state = {}
 
-    def processNewAnnouncement(self, node: AgentId, state) -> bool:
+    def processNewAnnouncement(self, node: AgentId, state) -> Tuple[bool, List[WorldEvent]]:
         try:
             old_state = self.controllers_state[node]
             if old_state == state:
-                return False
+                return False, []
         except KeyError:
             pass
         self.controllers_state[node] = state
-        return True
+        return True, []
 
 
 class SimpleSource(BagDetector, ConveyorStateHandler):

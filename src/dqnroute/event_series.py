@@ -1,4 +1,5 @@
 import pandas as pd
+from functools import reduce
 
 from typing import Callable, Dict, Optional, List
 
@@ -11,6 +12,7 @@ class EventSeries:
         self.records = pd.DataFrame(columns=columns)
         self.period = period
         self.aggregators = aggregators
+        self.last_logged = 0
 
     def _log(self, cur_period: int, value):
         avg_time = cur_period * self.period
@@ -82,16 +84,16 @@ class MultiEventSeries(EventSeries):
             s.addAvg(avg_col, sum_col, count_col)
 
     def getSeries(self):
-        dfs = [s.getSeries().rename(columns=lambda c: tag + '_' + c)
+        dfs = [s.getSeries().rename(columns=lambda c: tag + '_' + c if c != 'time' else c)
                for (tag, s) in self.series.items()]
-        return pd.concat(dfs, axis=1)
+        return reduce(lambda a, b: a.merge(b, how='outer', on='time'), dfs).fillna(.0)
 
     def reset(self):
         for s in self.series.values():
             s.reset()
 
     def load(self, csv_path):
-        dfs = split_dataframe(pd.read_csv(csv_path, index_col=False))
+        dfs = split_dataframe(pd.read_csv(csv_path, index_col=False), preserved_cols=['time'])
         for tag, df in dfs:
             self.series[tag].records = df
 
@@ -141,8 +143,8 @@ def binary_func(name: str) -> Aggregator:
     else:
         raise Exception('Unknown aggregator function ' + name)
 
-def event_series(period: int, aggr_names: List[str]) -> EventSeries:
-    return EventSeries(period, {name: binary_func(name) for name in aggr_names})
+def event_series(period: int, aggr_names: List[str], **kwargs) -> EventSeries:
+    return EventSeries(period, {name: binary_func(name) for name in aggr_names}, **kwargs)
 
 def split_dataframe(all_records, preserved_cols=[]):
     tagged_cols = [col for col in all_records.columns if col not in preserved_cols]

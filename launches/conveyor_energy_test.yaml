@@ -99,6 +99,7 @@ settings:
     energy_consumption: 1
   conveyor:
     stop_delay: 40
+    slowdown_delay: 1
   router:
     simple_q:
       energy_reward_weight: 0.5

@@ -146,7 +146,7 @@ def make_conveyor_topology_graph(config) -> nx.DiGraph:
             edge_len = v_pos - u_pos
 
             assert edge_len >= 2, "Conveyor section is way too short!"
-            DG.add_edge(u, v, length=edge_len, conveyor=conv_id)
+            DG.add_edge(u, v, length=edge_len, conveyor=conv_id, end_pos=v_pos)
 
             if (i > 1) or (u[0] != 'diverter'):
                 DG.nodes[u]['conveyor'] = conv_id
@@ -284,26 +284,7 @@ def next_adj_conv_node(topology, node):
 def conveyor_edges(topology, conv_idx):
     edges = [(u, v) for u, v, cid in topology.edges(data='conveyor')
              if cid == conv_idx]
-    edges_sorted = [edges.pop()]
-    while len(edges) > 0:
-        u, _ = edges_sorted[0]
-        prev = find_by(edges, lambda e: e[1] == u, return_index=True)
-        if prev is None:
-            break
-        else:
-            e, i = prev
-            edges.pop(i)
-            edges_sorted.insert(0, e)
-    while len(edges) > 0:
-        _, u = edges_sorted[-1]
-        nxt = find_by(edges, lambda e: e[0] == v, return_index=True)
-        if nxt is None:
-            break
-        else:
-            e, i = nxt
-            edges.pop(i)
-            edges_sorted.append(e)
-    return edges_sorted
+    return sorted(edges, key=lambda e: topology[e[0]][e[1]]['end_pos'])
 
 def conveyor_adj_nodes(topology, conv_idx, only_own=False, data=False):
     conv_edges = conveyor_edges(topology, conv_idx)

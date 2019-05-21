@@ -23,8 +23,17 @@ class AbstractStateHandler(MessageHandler):
 
     def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[WorldEvent]:
         if isinstance(msg, StateAnnouncementMsg):
-            if self._processStateAnnouncement(msg):
-                return self.broadcast(msg, exclude=[sender])
+            if msg.node == self.id:
+                return []
+
+            if msg.node not in self.announcements or self.announcements[msg.node].seq < msg.seq:
+                self.announcements[msg.node] = msg
+                broadcast, msgs = self.processNewAnnouncement(msg.node, msg.state)
+                self.networkStateChanged()
+
+                if broadcast:
+                    msgs += self.broadcast(msg, exclude=[sender])
+                return msgs
             return []
 
         else:
@@ -38,17 +47,6 @@ class AbstractStateHandler(MessageHandler):
         announcement = StateAnnouncementMsg(self.id, self.seq_num, state)
         self.seq_num += 1
         return self.broadcast(announcement)
-
-    def _processStateAnnouncement(self, msg: StateAnnouncementMsg) -> bool:
-        if msg.node == self.id:
-            return False
-
-        if msg.node not in self.announcements or self.announcements[msg.node].seq < msg.seq:
-            self.announcements[msg.node] = msg
-            res = self.processNewAnnouncement(msg.node, msg.state)
-            self.networkStateChanged()
-            return res
-        return False
 
     def networkStateChanged(self):
         """
@@ -65,7 +63,7 @@ class AbstractStateHandler(MessageHandler):
         """
         raise NotImplementedError()
 
-    def processNewAnnouncement(self, node: int, state) -> bool:
+    def processNewAnnouncement(self, node: int, state) -> Tuple[bool, List[WorldEvent]]:
         raise NotImplementedError()
 
 class LinkStateRouter(Router, AbstractStateHandler):
@@ -112,7 +110,7 @@ class LinkStateRouter(Router, AbstractStateHandler):
     def getState(self):
         return self.network.adj[self.id]
 
-    def processNewAnnouncement(self, node: AgentId, neighbours) -> bool:
+    def processNewAnnouncement(self, node: AgentId, neighbours) -> Tuple[bool, List[WorldEvent]]:
         changed = False
 
         for (m, params) in neighbours.items():
@@ -127,7 +125,7 @@ class LinkStateRouter(Router, AbstractStateHandler):
             except nx.NetworkXError:
                 pass
 
-        return changed
+        return changed, []
 
 
 class LSConveyorMixin(object):
@@ -172,11 +170,11 @@ class LSConveyorMixin(object):
         sub = super().getState()
         return {'sub': sub, 'works': self._conveyorWorks()}
 
-    def processNewAnnouncement(self, node: int, state) -> bool:
-        sub_ok = super().processNewAnnouncement(node, state['sub'])
+    def processNewAnnouncement(self, node: int, state) -> Tuple[bool, List[WorldEvent]]:
+        sub_ok, msgs = super().processNewAnnouncement(node, state['sub'])
         works_changed = self._conveyorWorks(node) != state['works']
         self.network.nodes[node]['works'] = state['works']
-        return sub_ok or works_changed
+        return sub_ok or works_changed, msgs
 
 class LinkStateRouterConveyor(LSConveyorMixin, LinkStateRouter):
     pass

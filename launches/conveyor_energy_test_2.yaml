@@ -88,7 +88,7 @@ settings:
       - {bags_number: 200, delta: 20}
       - {bags_number: 200, delta: 20, sinks: [0, 1]} 
       - {bags_number: 200, delta: 20}
-      - {bags_number: 200, delta: 10} 
+      - {bags_number: 200, delta: 20, simult_sources: 2} 
       - {bags_number: 400, delta: 10, simult_sources: 2}
       - {bags_number: 600, delta: 7, simult_sources: 2}
       - {bags_number: 800, delta: 4, simult_sources: 2}

@@ -372,7 +372,7 @@ class ConveyorRewardMsg(RewardMsg):
 
 class TrainingRewardMsg(RewardMsg):
     def __init__(self, orig_msg: RewardMsg, true_reward=None):
-        super().__init__(orig_msg.origin, orig_msg.pkg_id,
+        super().__init__(orig_msg.origin, orig_msg.pkg,
                          orig_msg.Q_estimate, (orig_msg.reward_data, true_reward))
 
 class StateAnnouncementMsg(ServiceMessage):

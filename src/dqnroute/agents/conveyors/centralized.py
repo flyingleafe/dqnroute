@@ -1,14 +1,11 @@
 import networkx as nx
+import random
 
 from typing import List, Tuple, Dict
 from ..base import *
 from ...messages import *
 from ...utils import *
 from ...conveyor_model import *
-
-BAG_RADIUS = 1
-SPEED_STEP = 0.1
-SPEED_ROUND_DIGITS = 5
 
 class CentralizedController(MasterHandler):
     """
@@ -21,6 +18,9 @@ class CentralizedController(MasterHandler):
         self.max_speed = max_speed
         self.stop_delay = stop_delay
 
+        for u, v in self.topology.edges:
+            self.topology[u][v]['max_allowed_speed'] = self.max_speed
+
         self.conveyor_models = {}
         for (conv_id, length) in conv_lengths.items():
             checkpoints = conveyor_adj_nodes(self.topology, conv_id,
@@ -30,25 +30,18 @@ class CentralizedController(MasterHandler):
             self.conveyor_models[conv_id] = model
 
         conv_ids = list(conv_lengths.keys())
+        self.max_conv_speeds = {cid: self.max_speed for cid in conv_ids}
         self.conv_delayed_stops = {cid: -1 for cid in conv_ids}
         self.delayed_update = -1
         self.current_bags = {}
         self.bag_convs = {}
 
-        self.conv_ups = {}
-        self.prev_convs = {cid: set() for cid in conv_ids}
-        self.sink_convs = []
         self.sink_bags = {}
-        for cid in conv_ids:
-            es = conveyor_edges(self.topology, cid)
-            up_node = es[-1][1]
-            self.conv_ups[cid] = up_node
-            if agent_type(up_node) == 'sink':
-                self.sink_convs.append(cid)
-                self.sink_bags[up_node] = set()
-            else:
-                up_conv = conveyor_idx(self.topology, up_node)
-                self.prev_convs[up_conv].add(cid)
+        for node in self.topology.nodes:
+            if agent_type(node) == 'sink':
+                self.sink_bags[node] = set()
+
+        self.last_cascade_update_time = -1
 
         evs = self._update()
         assert len(evs) == 0, "doing something on first update? hey!"
@@ -88,7 +81,35 @@ class CentralizedController(MasterHandler):
         cur_conv = conveyor_idx(self.topology, dv)
         next_conv = self.topology[dv][nxt]['conveyor']
 
+        model = self.conveyor_models[cur_conv]
+        dv_pos = model.checkpointPos(dv)
+        o_pos = model.objPos(bag.id)
+
+        if o_pos != dv_pos:
+            if o_pos is None:
+                if bag.id in self.bag_convs:
+                    false_conv = self.bag_convs[bag.id]
+                    false_model = self.conveyor_models[false_conv]
+                    false_pos = true_model.objPos(bag.id)
+                    self.log('DIVERGENCE WITH REALITY: conv {}: {} passed the {} in {}m, while we thought it is on conv {} in {}m'
+                             .format(cur_conv, bag, dv, dv_pos, false_conv, false_pos), True)
+                    # false_model.removeObject(bag.id)
+                elif bag.id in self.sink_bags[nxt]:
+                    self.log('DIVERGENCE WITH REALITY: conv {}: {} passed the {} in {}m, while we thought it has reached the {}'
+                             .format(cur_conv, bag, dv, dv_pos, nxt), True)
+                    # self.sink_bags[nxt].remove(bag.id)
+                else:
+                    raise Exception('Okay this is epic!')
+
+                # self.bag_convs[bag.id] = cur_conv
+                # model.putObject(bag.id, bag, dv_pos)
+            else:
+                self.log('DIVERGENCE WITH REALITY: conv {}: {} passed the {} in {}m, while we thought it is in {}m'
+                         .format(cur_conv, bag, dv, dv_pos, o_pos), True)
+                # model.shift(dv_pos - o_pos)
+
         if next_conv != cur_conv:
+            self.log('{} KICKS {}'.format(dv, bag))
             bag_, evs = self.removeBagFromConv(cur_conv, bag.id)
             assert bag == bag_, "some other bag is here!!"
 
@@ -96,6 +117,7 @@ class CentralizedController(MasterHandler):
             evs += self.putBagToConv(next_conv, bag, 0)
             return evs
         else:
+            self.log('{} PASSES {}'.format(dv, bag))
             return []
 
     def finishBag(self, sink: AgentId, bag: Bag) -> List[WorldEvent]:
@@ -109,6 +131,13 @@ class CentralizedController(MasterHandler):
             self.sink_bags[sink].remove(bag.id)
         else:
             prev_conv = self.bag_convs[bag.id]
+            model = self.conveyor_models[prev_conv]
+            o_pos = model.objPos(bag.id)
+            if o_pos != model.length:
+                self.log('DIVERGENCE WITH REALITY: conv {}: {} reached the {} in {}m, while we thought it is in {}m'
+                         .format(prev_conv, bag, sink, model.length, o_pos), True)
+                # model.shift(model.length - o_pos)
+
             _, evs = self.removeBagFromConv(prev_conv, bag.id)
 
         return evs + [BagReceiveAction(bag)]
@@ -140,7 +169,7 @@ class CentralizedController(MasterHandler):
 
     def leaveConvEnd(self, conv_idx, bag_id) -> List[WorldEvent]:
         bag, evs = self.removeBagFromConv(conv_idx, bag_id)
-        up_node = self.conv_ups[conv_idx]
+        up_node = conveyor_edges(self.topology, conv_idx)[-1][1]
 
         if agent_type(up_node) != 'sink':
             ps = self.topology.nodes[up_node]
@@ -153,7 +182,7 @@ class CentralizedController(MasterHandler):
 
     def start(self, conv_idx, speed=None) -> List[WorldEvent]:
         if speed is None:
-            speed = self._maxAllowedSpeed(conv_idx)
+            speed = self.max_conv_speeds[conv_idx]
         return self.setSpeed(conv_idx, speed)
 
     def stop(self, conv_idx) -> List[WorldEvent]:
@@ -202,16 +231,14 @@ class CentralizedController(MasterHandler):
             atype = agent_type(node)
             if atype == 'conv_end':
                 evs += self.leaveConvEnd(conv_idx, bag.id)
-            # elif atype == 'diverter':
-                # self.passToAgent(node, BagDetectionEvent(bag))
 
             self.current_bags[bag.id].add(node)
 
         evs += self._cascadeSpeedUpdate()
 
-        for model in self.conveyor_models.values():
-            if model.dirty():
-                model.startResolving()
+        # for model in self.conveyor_models.values():
+        #     if model.dirty():
+        #         model.startResolving()
 
         for model in self.conveyor_models.values():
             if model.resolving():
@@ -229,8 +256,7 @@ class CentralizedController(MasterHandler):
         next_events = all_next_events(self.conveyor_models)
         if len(next_events) > 0:
             conv_idx, (bag, node, delay) = next_events[0]
-
-            assert delay >= 0, "chto za!!1"
+            assert delay > 0, "chto za!!1"
 
             ev = self.delayed(delay, self._pauseUpdate)
             self.delayed_update = ev.id
@@ -244,50 +270,119 @@ class CentralizedController(MasterHandler):
         return evs + self._update()
 
     def _cascadeSpeedUpdate(self) -> List[WorldEvent]:
-        queue = list(self.sink_convs)
-        seen = set()
+        if self.last_cascade_update_time == self.env.time():
+            return []
+
+        for cid in self.max_conv_speeds.keys():
+            self.max_conv_speeds[cid] = self.max_speed
+
+        while True:
+            conv_speed_changed = False
+
+            for u, v in self._bfsFromSinks():
+                cid = self.topology[u][v]['conveyor']
+                max_speed = self._maxAllowedSectionSpeed(u, v, self.max_conv_speeds[cid])
+                if max_speed < self.max_conv_speeds[cid]:
+                    self.max_conv_speeds[cid] = max_speed
+                    conv_speed_changed = True
+
+                self.topology[u][v]['max_allowed_speed'] = self.max_conv_speeds[cid]
+
+            if not conv_speed_changed:
+                break
+
         evs = []
-        while len(queue) > 0:
-            cid = queue.pop(0)
-            seen.add(cid)
+        for cid, speed in self.max_conv_speeds.items():
             model = self.conveyor_models[cid]
-
-            max_speed = self._maxAllowedSpeed(cid)
             if len(model.objects) > 0:
-                assert not self.hasDelayed(self.conv_delayed_stops[cid]), "HHEEEET"
-                evs += self.setSpeed(cid, max_speed)
+                if speed == 0 and model.speed > 0:
+                    self.log('CLOGGED: conv {}\n  - objs: {}'
+                             .format(cid, model.object_positions), True)
+                elif speed > 0 and model.speed == 0:
+                    self.log('UNCLOGGED: conv {}\n  - objs: {}'
+                             .format(cid, model.object_positions), True)
 
-            for pr in self.prev_convs[cid] - seen:
-                queue.append(pr)
+                evs += self.setSpeed(cid, speed)
+
+        self.last_cascade_update_time = self.env.time()
         return evs
 
-    def _maxAllowedSpeed(self, conv_idx):
-        speed = self.max_speed
+    def _maxAllowedSectionSpeed(self, u, v, cur_max_speed=None):
+        if cur_max_speed is None:
+            cur_max_speed = self.max_speed
+
+        exit_type = agent_type(v)
+
+        if exit_type == 'sink':
+            # sinks have no limitations
+            return cur_max_speed
+
+        conv_idx = self.topology[u][v]['conveyor']
         model = self.conveyor_models[conv_idx]
-        up_node = self.conv_ups[conv_idx]
+        u_conv = conveyor_idx(self.topology, u)
+        v_conv = conveyor_idx(self.topology, v)
 
-        if agent_type(up_node) != 'sink':
-            up_conv = conveyor_idx(self.topology, up_node)
-            up_model = self.conveyor_models[up_conv]
-            up_pos = up_model.checkpointPos(up_node)
+        u_pos = 0 if (u_conv != conv_idx or agent_type(u) == 'source') else model.checkpointPos(u)
+        v_pos = model.length if v_conv != conv_idx else model.checkpointPos(v)
 
-            if len(up_model.objects) > 0:
-                while speed > 0:
-                    leave_time = model.timeTillObjectLeave(speed)
-                    if leave_time is None:
-                        break
+        nxt_exiting = model.nearestObject(v_pos, preference='prev')
+        if nxt_exiting is not None:
+            bag, bag_pos = nxt_exiting
+            if bag_pos <= u_pos:
+                # let that be handled by prev one
+                return cur_max_speed
 
-                    last_bag, last_pos = model.object_positions[-1]
+            dist_to_end = v_pos - bag_pos
+            assert dist_to_end >= 0, \
+                "searched for objs prev {}, found ({}, {})! ({} {})".format(v_pos, bag, bag_pos, u, v)
 
-                    bag, pos = up_model.nearestObject(up_pos, after=leave_time)
-                    if abs(pos - up_pos) >= 2*BAG_RADIUS:
-                        self.log('bag {}: conv {} -> ({}; {}) -> conv {}, nearest - (bag {}; {})'
-                                 .format(last_bag, conv_idx, up_node, up_pos, up_conv, bag.id, pos))
-                        break
+            if exit_type == 'diverter':
+                try:
+                    next_cp = self.routeBag(v, bag)
+                except:
+                    self.log('edge ({}; {}m - {}; {}m): (#{}; {}m) cannot be routed'
+                             .format(u, u_pos, v, v_pos, bag, bag_pos), True)
+                    raise
 
-                    self.log('conv {}, last bag ({}; {}m) goes to ({}; {}m):\n  - cannot set speed {} due to ({}; {}m) on conv {}'
-                             .format(conv_idx, last_bag, last_pos, up_node, up_pos,
-                                     speed, bag, pos, up_conv))
-                    speed = round(speed - SPEED_STEP, SPEED_ROUND_DIGITS)
+                up_edge = self.topology[v][next_cp]
+                up_conv = up_edge['conveyor']
+                if up_conv == conv_idx:
+                    # cannot do much about it
+                    return cur_max_speed
+                else:
+                    up_model = self.conveyor_models[up_conv]
+                    up_speed = up_edge['max_allowed_speed']
+                    return find_max_speed(up_model, 0, up_speed, dist_to_end, cur_max_speed)
+            else: # junction
+                if v_conv == conv_idx:
+                    return cur_max_speed
+                else:
+                    up_model = self.conveyor_models[v_conv]
+                    up_pos = up_model.checkpointPos(v)
+                    next_cp = next_same_conv_node(self.topology, v)
+                    up_speed = self.topology[v][next_cp]['max_allowed_speed']
+                    return find_max_speed(up_model, up_pos, up_speed, dist_to_end, cur_max_speed)
+        else:
+            return cur_max_speed
 
-        return max(0, speed)
+    def _bfsFromSinks(self):
+        for u, v, _ in nx.edge_bfs(self.topology, list(self.sink_bags.keys()), orientation='reverse'):
+            yield u, v
+
+
+# def CentralizedOracle(CentralizedController):
+#     def __init__(self, conveyor_models: Dict[int, ConveyorModel], topology: nx.DiGraph,
+#                  max_speed: float, stop_delay: float, **kwargs):
+#         super().__init__(**kwargs)
+#         self.topology = topology
+#         self.max_speed = max_speed
+#         self.stop_delay = stop_delay
+
+#         for u, v in self.topology.edges:
+#             self.topology[u][v]['max_allowed_speed'] = self.max_speed
+
+#         self.conveyor_models = conveyor_models
+
+#         conv_ids = list(conv_lengths.keys())
+#         self.max_conv_speeds = {cid: self.max_speed for cid in conv_ids}
+#         self.conv_delayed_stops = {cid: -1 for cid in conv_ids}
