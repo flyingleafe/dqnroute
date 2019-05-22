@@ -25,7 +25,7 @@ class CentralizedController(MasterHandler):
         for (conv_id, length) in conv_lengths.items():
             checkpoints = conveyor_adj_nodes(self.topology, conv_id,
                                              only_own=True, data='conveyor_pos')
-            model = ConveyorModel(length, self.max_speed, checkpoints,
+            model = ConveyorModel(self.env, length, self.max_speed, checkpoints,
                                   model_id=('conveyor', conv_id))
             self.conveyor_models[conv_id] = model
 
@@ -50,7 +50,10 @@ class CentralizedController(MasterHandler):
         super().log(msg, force)
 
     def handleSlaveEvent(self, slave_id: AgentId, event: WorldEvent) -> List[WorldEvent]:
-        if isinstance(event, BagDetectionEvent):
+        if isinstance(event, (IncomingBagEvent, OutgoingBagEvent)):
+            # no oracling here
+            return []
+        elif isinstance(event, BagDetectionEvent):
             bag = event.bag
             atype = agent_type(slave_id)
 
@@ -142,7 +145,7 @@ class CentralizedController(MasterHandler):
 
         return evs + [BagReceiveAction(bag)]
 
-    def routeBag(self, node: AgentId, bag: Bag) -> AgentId:
+    def routeBag(self, node: AgentId, bag: Bag, preview=False) -> AgentId:
         """
         All routing strategy is here. Override in subclasses
         """
@@ -209,7 +212,7 @@ class CentralizedController(MasterHandler):
 
     def _interrupt(self):
         for model in self.conveyor_models.values():
-            model.pause(self.env.time())
+            model.pause()
 
         if self.hasDelayed(self.delayed_update):
             return [self.cancelDelayed(self.delayed_update)]
@@ -243,13 +246,13 @@ class CentralizedController(MasterHandler):
         for model in self.conveyor_models.values():
             if model.resolving():
                 model.endResolving()
-            model.resume(self.env.time())
+            model.resume()
 
         return evs + self._scheduleUpdate()
 
     def _pauseUpdate(self):
         for model in self.conveyor_models.values():
-            model.pause(self.env.time())
+            model.pause()
         return self._update()
 
     def _scheduleUpdate(self):
@@ -338,7 +341,7 @@ class CentralizedController(MasterHandler):
 
             if exit_type == 'diverter':
                 try:
-                    next_cp = self.routeBag(v, bag)
+                    next_cp = self.routeBag(v, bag, preview=True)
                 except:
                     self.log('edge ({}; {}m - {}; {}m): (#{}; {}m) cannot be routed'
                              .format(u, u_pos, v, v_pos, bag, bag_pos), True)
@@ -370,19 +373,88 @@ class CentralizedController(MasterHandler):
             yield u, v
 
 
-# def CentralizedOracle(CentralizedController):
-#     def __init__(self, conveyor_models: Dict[int, ConveyorModel], topology: nx.DiGraph,
-#                  max_speed: float, stop_delay: float, **kwargs):
-#         super().__init__(**kwargs)
-#         self.topology = topology
-#         self.max_speed = max_speed
-#         self.stop_delay = stop_delay
+class CentralizedOracle(CentralizedController, Oracle):
+    def __init__(self, conveyor_models: Dict[int, ConveyorModel], topology: nx.DiGraph,
+                 max_speed: float, stop_delay: float, **kwargs):
+        MasterHandler.__init__(self, **kwargs)
+        self.topology = topology
+        self.max_speed = max_speed
+        self.stop_delay = stop_delay
 
-#         for u, v in self.topology.edges:
-#             self.topology[u][v]['max_allowed_speed'] = self.max_speed
+        for u, v in self.topology.edges:
+            self.topology[u][v]['max_allowed_speed'] = self.max_speed
 
-#         self.conveyor_models = conveyor_models
+        self.conveyor_models = conveyor_models
 
-#         conv_ids = list(conv_lengths.keys())
-#         self.max_conv_speeds = {cid: self.max_speed for cid in conv_ids}
-#         self.conv_delayed_stops = {cid: -1 for cid in conv_ids}
+        conv_ids = list(conveyor_models.keys())
+        self.max_conv_speeds = {cid: self.max_speed for cid in conv_ids}
+        self.conv_delayed_stops = {cid: -1 for cid in conv_ids}
+        self.last_cascade_update_time = -1
+        self.sink_bags = {}
+        for node in self.topology.nodes:
+            if agent_type(node) == 'sink':
+                self.sink_bags[node] = set()
+
+    def handleSlaveEvent(self, slave_id: AgentId, event: WorldEvent) -> List[WorldEvent]:
+        if isinstance(event, (IncomingBagEvent, OutgoingBagEvent, PassedBagEvent, BagDetectionEvent)):
+            evs = []
+            if isinstance(event, BagDetectionEvent):
+                atype = agent_type(slave_id)
+                if atype == 'diverter':
+                    evs += self.divertBag(slave_id, event.bag)
+                elif atype == 'sink':
+                    evs += self.bagArrived(slave_id, event.bag)
+            elif isinstance(event, IncomingBagEvent):
+                evs += self.incomingBag(slave_id[1], event.sender, event.bag, event.node)
+            elif isinstance(event, OutgoingBagEvent):
+                evs += self.outgoingBag(slave_id[1], event.bag, event.node)
+            elif isinstance(event, PassedBagEvent):
+                evs += self.passedBag(slave_id[1], event.bag, event.node)
+
+            return evs + self._cascadeSpeedUpdate()
+        else:
+            return super().handleSlaveEvent(slave_id, event)
+
+    def divertBag(self, dv: AgentId, bag: Bag) -> List[WorldEvent]:
+        nxt = self.routeBag(dv, bag)
+        cur_conv = conveyor_idx(self.topology, dv)
+        next_conv = self.topology[dv][nxt]['conveyor']
+
+        if next_conv != cur_conv:
+            self.log('{} KICKS {}'.format(dv, bag))
+            return [DiverterKickAction()]
+        else:
+            self.log('{} PASSES {}'.format(dv, bag))
+            return []
+
+    def bagArrived(self, sink, bag):
+        self.log('bag {} is OUT'.format(bag))
+        assert bag.dst == sink, "NOT OUR DST!"
+        return [BagReceiveAction(bag)]
+
+    def incomingBag(self, conv_idx, sender, bag, node):
+        return self.start(conv_idx) + self._cancelDelayedStop(conv_idx)
+
+    def outgoingBag(self, conv_idx, bag, node):
+        if len(self.conveyor_models[conv_idx].objects) == 0:
+            return self._scheduleDelayedStop(conv_idx)
+        return []
+
+    def passedBag(self, conv_idx, bag, node):
+        return []
+
+    def setSpeed(self, conv_idx, new_speed: float) -> List[WorldEvent]:
+        model = self.conveyor_models[conv_idx]
+        if model.speed != new_speed:
+            return [MasterEvent(('conveyor', conv_idx), ConveyorSpeedChangeAction(new_speed))]
+        return []
+
+    def _withInterrupt(self, callback):
+        evs = callback()
+        return evs + self._cascadeSpeedUpdate()
+
+    def _update(self):
+        raise NotImplementedError()
+
+    def _interrupt(self):
+        raise NotImplementedError()

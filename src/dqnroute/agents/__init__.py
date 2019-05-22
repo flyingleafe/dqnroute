@@ -32,20 +32,26 @@ _conveyors_router_classes = {
     'dqn': DQNRouterConveyor,
     'dqn_oneout': DQNRouterOOConveyor,
     'dqn_emb': DQNRouterEmbConveyor,
-    'centralized_simple': CentralizedController,
+    'centralized_simple': (CentralizedController, CentralizedOracle),
 }
 
-def get_router_class(router_type: str, context: Optional[str] = None):
+def get_router_class(router_type: str, context: Optional[str] = None, oracle=False):
     try:
+        res = None
         if context is None:
             raise Exception('Simulation context is not provided: '\
                             'should be "network" or "conveyors"')
         elif context == 'network':
-            return _network_router_classes[router_type]
+            res = _network_router_classes[router_type]
         elif context == 'conveyors':
-            return _conveyors_router_classes[router_type]
-        else:
+            res = _conveyors_router_classes[router_type]
+
+        if res is None:
             raise Exception('Unknown simulation context "{}" '\
                             '(should be "network" or "conveyors")'.format(context))
+        if type(res) == tuple:
+            return res[1] if oracle else res[0]
+        return res
+
     except KeyError:
         raise UnsupportedRouterType(router_type)

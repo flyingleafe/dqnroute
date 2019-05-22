@@ -97,6 +97,7 @@ class LinkStateRouter(Router, AbstractStateHandler):
 
         path = nx.dijkstra_path(self.network, self.id, pkg.dst,
                                 weight=self.edge_weight)
+        assert path[1] in allowed_nbrs, "okay what now???"
         return path[1], []
 
     def pathCost(self, to: AgentId, through=None) -> float:
@@ -152,11 +153,15 @@ class LSConveyorMixin(object):
             return self._announceState()
         return []
 
-    def route(self, sender: AgentId, pkg: Package, allowed_nbrs: List[AgentId]) -> Tuple[AgentId, List[Message]]:
-        to, msgs = super().route(sender, pkg, allowed_nbrs)
-        scheduled_stop_time = self.env.time() + self.conv_stop_delay
-        self.env.set_scheduled_stop(scheduled_stop_time)
-        return to, msgs
+    def detectEnqueuedPkg(self, sender: AgentId, pkg: Package) -> List[WorldEvent]:
+        msgs = super().detectEnqueuedPkg(sender, pkg)
+
+        allowed_nbrs = only_reachable(self.network, pkg.dst, self.network.successors(self.id))
+        to, _ = self.route(sender, pkg, allowed_nbrs)
+        if isinstance(self, RewardAgent):
+            self._pending_pkgs.pop(pkg.id)
+
+        return msgs + [PkgRoutePredictionAction(to, pkg)]
 
     def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[Message]:
         if isinstance(msg, ConveyorStartMsg):

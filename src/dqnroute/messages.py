@@ -323,6 +323,13 @@ class PkgRouteAction(Action):
     def __init__(self, to: AgentId, pkg: Package):
         super().__init__(to=to, pkg=pkg)
 
+class PkgRoutePredictionAction(Action):
+    """
+    Router has re-routed a package to a neighbour
+    """
+    def __init__(self, to: AgentId, pkg: Package):
+        super().__init__(to=to, pkg=pkg)
+
 ##
 # Conveyors events/actions
 #
@@ -351,6 +358,19 @@ class DiverterKickAction(Action):
 class ConveyorSpeedChangeAction(Action):
     def __init__(self, new_speed: float):
         super().__init__(new_speed=new_speed)
+
+class IncomingBagEvent(WorldEvent):
+    def __init__(self, sender: AgentId, bag: Bag, node: AgentId):
+        super().__init__(sender=sender, bag=bag, node=node)
+
+class OutgoingBagEvent(WorldEvent):
+    def __init__(self, bag: Bag, node: AgentId):
+        super().__init__(bag=bag, node=node)
+
+class PassedBagEvent(WorldEvent):
+    def __init__(self, bag: Bag, node: AgentId):
+        super().__init__(bag=bag, node=node)
+
 
 #
 # Service messages
@@ -391,8 +411,8 @@ class WrappedRouterMsg(ServiceMessage):
 #
 
 class ConveyorBagMsg(ServiceMessage):
-    def __init__(self, bag: Bag):
-        super().__init__(bag=bag)
+    def __init__(self, bag: Bag, node: AgentId):
+        super().__init__(bag=bag, node=node)
 
 class IncomingBagMsg(ConveyorBagMsg):
     pass
@@ -412,3 +432,11 @@ class ConveyorStopMsg(ServiceMessage):
 class StopTimeUpdMsg(ServiceMessage):
     def __init__(self, time: float):
         super().__init__(time=time)
+
+class DiverterNotification(ServiceMessage):
+    def __init__(self, bag: Bag, pos: float):
+        super().__init__(bag=bag, pos=pos)
+
+class DiverterPrediction(ServiceMessage):
+    def __init__(self, bag: Bag, kick: bool):
+        super().__init__(bag=bag, kick=kick)

@@ -91,9 +91,9 @@ settings:
       - {bags_number: 200, delta: 20, simult_sources: 2} 
       - {bags_number: 400, delta: 10, simult_sources: 2}
       - {bags_number: 600, delta: 7, simult_sources: 2}
-      - {bags_number: 800, delta: 4, simult_sources: 2}
-      - {bags_number: 1100, delta: 3, simult_sources: 2}
-      - {bags_number: 1200, delta: 2.5, simult_sources: 2}
+      # - {bags_number: 800, delta: 4, simult_sources: 2}
+      # - {bags_number: 1100, delta: 3, simult_sources: 2}
+      # - {bags_number: 1200, delta: 2.5, simult_sources: 2}
       # - {bags_number: 800, delta: 2, simult_sources: 2}
       # - {bags_number: 666, delta: 4}
       # - {bags_number: 430, delta: 3}

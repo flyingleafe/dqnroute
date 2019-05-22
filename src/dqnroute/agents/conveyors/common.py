@@ -36,7 +36,7 @@ class SimpleSource(BagDetector, ConveyorStateHandler):
     """
     def bagDetection(self, bag: Bag) -> List[WorldEvent]:
         nbr = self.interface_map[0]    # source is always connected only to upstream conv
-        return [OutMessage(self.id, nbr, IncomingBagMsg(bag))]
+        return [OutMessage(self.id, nbr, IncomingBagMsg(bag))] if not self._oracle else []
 
     def getState(self):
         return None
@@ -213,10 +213,8 @@ class RouterContainer(MessageHandler):
         self.log('bag handle: {}, allowed nbrs: {}'.format(bag, allowed_nbrs))
 
         pkg = self.bagToPkg(bag)
-        enqueued_evs = self.handleViaRouter(router_id, PkgEnqueuedEvent(from_router, router_id, pkg))
-        process_evs = self.handleViaRouter(router_id,
-                                           PkgProcessingEvent(from_router, router_id, pkg, allowed_routers))
-        return enqueued_evs + process_evs
+        return self.handleViaRouter(
+            router_id, PkgProcessingEvent(from_router, router_id, pkg, allowed_routers))
 
     def routerId(self):
         """
@@ -239,7 +237,10 @@ class RouterSource(RouterContainer, SimpleSource):
         sender = ('world', 0)
         router_id = self.routerId()
         nbr = self.interface_map[0] # source is always connected only to upstream conv
-        return [OutMessage(self.id, nbr, IncomingBagMsg(bag))] + self.handleBagViaRouter(sender, router_id, bag)
+        evs = self.handleBagViaRouter(sender, router_id, bag)
+        if not self._oracle:
+            evs += [OutMessage(self.id, nbr, IncomingBagMsg(bag))]
+        return evs
 
 
 class RouterSink(RouterContainer, SimpleSink):

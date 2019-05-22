@@ -104,10 +104,9 @@ def run_training(RunnerClass, router_type, training_router_type,
         training_router_type=training_router_type,
         params_override=params_override, **kwargs)
 
-    loss_series.addAvg()
     brain = runner.world.factory.brain
     if save_net:
         brain.save()
 
-    return brain, loss_series.getSeries(), launch_data
+    return brain, loss_series.getSeries(add_avg=True), launch_data
 

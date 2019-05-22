@@ -10,6 +10,10 @@ from ..messages import *
 from ..agents import *
 from ..utils import *
 
+
+class UnknownAgentError(Exception):
+    pass
+
 class HandlerFactory:
     def __init__(self, env: Environment, conn_graph: nx.Graph, **kwargs):
         super().__init__()
@@ -151,7 +155,13 @@ class MultiAgentEnv(HasLog):
         a consequence.
         """
         self._agent_passes += 1
-        agent_evs = delayed_first(self.handlers[agent].handle(event))
+        if agent in self.handlers:
+            agent_evs = delayed_first(self.handlers[agent].handle(event))
+        elif self.factory.centralized() and isinstance(self.factory.master_handler, Oracle):
+            agent_evs = delayed_first(self.factory.master_handler.handleSlaveEvent(node, event))
+        else:
+            raise UnknownAgentError('No such agent: {}'.format(agent))
+
         evs = []
         for new_event in agent_evs:
             evs.append(self.handle(agent, new_event))
@@ -297,8 +307,7 @@ class SimulationRunner:
 def run_simulation(RunnerClass, return_runner=False, **kwargs):
     runner = RunnerClass(**kwargs)
     data_series = runner.run(**kwargs)
-    data_series.addAvg()
-    df = data_series.getSeries()
+    df = data_series.getSeries(add_avg=True)
 
     if return_runner:
         return df, runner

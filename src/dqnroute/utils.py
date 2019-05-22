@@ -249,6 +249,17 @@ def conveyor_idx(topology, node):
     else:
         return topology.nodes[node]['conveyor']
 
+def node_conv_pos(topology, conv_idx, node):
+    es = conveyor_edges(topology, conv_idx)
+    p_pos = 0
+    for u, v in es:
+        if u == node:
+            return p_pos
+        p_pos = topology[u][v]['end_pos']
+        if v == node:
+            return p_pos
+    return None
+
 def prev_same_conv_node(topology, node):
     conv_idx = conveyor_idx(topology, node)
     conv_in_edges = [v for v, _, cid in topology.in_edges(node, data='conveyor')

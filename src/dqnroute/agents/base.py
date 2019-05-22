@@ -204,6 +204,8 @@ class MessageHandler(EventHandler):
         return [OutMessage(self.id, v, deepcopy(msg))
                 for v in (set(self.interface_map.values()) - set(exclude))]
 
+class Oracle(MessageHandler):
+    pass
 
 class MasterHandler(MessageHandler):
     """
@@ -257,7 +259,7 @@ class Router(MessageHandler):
         if isinstance(event, PkgEnqueuedEvent):
             assert event.recipient == self.id, \
                 "Wrong recipient of PkgEnqueuedEvent!"
-            return self.detectEnqueuedPkg()
+            return self.detectEnqueuedPkg(event.sender, event.pkg)
 
         elif isinstance(event, PkgProcessingEvent):
             assert event.recipient == self.id, \
@@ -282,7 +284,7 @@ class Router(MessageHandler):
         else:
             return super().handleEvent(event)
 
-    def detectEnqueuedPkg(self) -> List[WorldEvent]:
+    def detectEnqueuedPkg(self, sender: AgentId, pkg: Package) -> List[WorldEvent]:
         return []
 
     def route(self, sender: AgentId, pkg: Package, allowed_nbrs: List[AgentId]) -> Tuple[AgentId, List[Message]]:
@@ -299,6 +301,10 @@ class BagDetector(MessageHandler):
     """
     Base class for `Source`s and `Sink`s. Only reacts to `BagDetectionEvent`.
     """
+    def __init__(self, oracle: bool = False, **kwargs):
+        super().__init__(**kwargs)
+        self._oracle = oracle
+
     def handleEvent(self, event: WorldEvent) -> List[WorldEvent]:
         if isinstance(event, BagDetectionEvent):
             return self.bagDetection(event.bag)
@@ -314,8 +320,18 @@ class Conveyor(MessageHandler):
     Base class which implements a conveyor controller, which can start
     a conveyor or stop it.
     """
+    def __init__(self, oracle: bool = False, **kwargs):
+        super().__init__(**kwargs)
+        self._oracle = oracle
+
+    def handleEvent(self, event: WorldEvent) -> List[WorldEvent]:
+        if isinstance(event, (IncomingBagEvent, OutgoingBagEvent, PassedBagEvent)) and self._oracle:
+            return self.handleBagEvent(event)
+        else:
+            return super().handleEvent(event)
+
     def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[WorldEvent]:
-        if isinstance(msg, ConveyorBagMsg):
+        if isinstance(msg, ConveyorBagMsg) and not self._oracle:
             return self.handleBagMsg(sender, msg)
         else:
             return super().handleMsgFrom(sender, msg)

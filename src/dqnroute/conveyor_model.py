@@ -1,12 +1,71 @@
 from typing import List, Tuple, Any, Dict, Optional
 from .utils import *
+from .event_series import *
 
 POS_ROUND_DIGITS = 3
 SOFT_COLLIDE_SHIFT = 0.2
 
-BAG_RADIUS = 0.6
+BAG_RADIUS = 0.5
+BAG_MASS = 20
+BAG_DENSITY = 40
+
+BELT_WIDTH = 1.5
+BELT_UNIT_MASS = 15
+
 SPEED_STEP = 0.1
 SPEED_ROUND_DIGITS = 3
+
+MODEL_BELT_LEN = 313.25
+
+_G = 9.8
+_FRICTON_COEFF = 0.024
+_THETA_1 = 1/(6.48*BELT_WIDTH*BELT_WIDTH*BAG_DENSITY)
+_THETA_2_L = _G*_FRICTON_COEFF*BELT_UNIT_MASS
+_k_3 = 4000
+_THETA_3 = 0.0031
+_THETA_4_L = _G*_FRICTON_COEFF
+_k_2 = 30
+
+_ETA = 0.8
+
+# THETAS_ORIG = [2.3733e-4, 8566.3, 0.0031, 51.6804]
+
+def _P_Zhang(length, V, T):
+    return _THETA_1*V*T*T + (_THETA_2_L*length + _k_3)*V + \
+        _THETA_3*T*T/V + (_THETA_4_L*length + _k_2)*T + V*V*T/3.6
+
+def consumption_Zhang(length, speed, n_bags):
+    if speed == 0:
+        return 0
+    Q_g = n_bags * BAG_MASS / length
+    T = Q_g * speed * 3.6
+    return _P_Zhang(length, speed, T) / _ETA
+
+def consumption_linear(length, speed, n_bags):
+    return _G * _FRICTION_COEFF * BAG_MASS * n_bags * speed / _ETA
+
+##
+# ^ weird stuff up here ...
+#
+
+class EnergySpender(ChangingValue):
+    """
+    Class which records energy consumption
+    """
+    def __init__(self, data_series: EventSeries, length, consumption='zhang'):
+        super().__init__(data_series)
+        if type(consumption) == 'float':
+            self._consumption = lambda v, n: consumption
+        elif consumption == 'zhang':
+            self._consumption = lambda v, n: consumption_Zhang(length, v, n)
+        elif consumption == 'linear':
+            self._consumption = lambda v, n: consumption_linear(length, v, n)
+        else:
+            raise Exception('consumption: ' + consumption)
+
+    def update(self, time, speed, n_bags):
+        super().update(time, self._consumption(speed, n_bags))
+
 
 class CollisionException(Exception):
     """
@@ -63,8 +122,8 @@ class ConveyorModel:
     - calculate time T until earliest event of object reaching a checkpoint
       (or the end of the conveyor), and also return those checkpoint and object
     """
-    def __init__(self, length: float, max_speed: float,
-                 checkpoints: List[Tuple[Any, float]],
+    def __init__(self, env: DynamicEnv, length: float, max_speed: float,
+                 checkpoints: List[Tuple[Any, float]], energy_series: EventSeries = None,
                  model_id: AgentId = ('world', 0)):
         assert length > 0, "Conveyor length <= 0!"
         assert max_speed > 0, "Conveyor max speed <= 0!"
@@ -78,6 +137,7 @@ class ConveyorModel:
                     "Checkpoints with equal positions!"
 
         # constants
+        self.env = env
         self.model_id = model_id
         self.checkpoints = checkpoints
         self.checkpoint_positions = {cp: pos for (cp, pos) in checkpoints}
@@ -89,6 +149,10 @@ class ConveyorModel:
         self.objects = {}
         self.object_positions = []
 
+        self._spender = None
+        if energy_series is not None:
+            self._spender = EnergySpender(energy_series, self.length)
+
         self._state = 'pristine'
         self._resume_time = 0
         self._resolved_events = set()
@@ -97,8 +161,9 @@ class ConveyorModel:
 
     def _stateTransfer(self, action):
         try:
-            init_state = self._state
-            self._state = _model_automata[init_state][action]
+            self._state = _model_automata[self._state][action]
+            if action == 'change' and self._spender is not None:
+                self._spender.update(self.env.time(), self.speed, len(self.objects))
         except KeyError:
             print('RAISED')
             raise AutomataException(
@@ -283,13 +348,13 @@ class ConveyorModel:
         # print('HEEEEEEEY {} {} {}'.format(self.model_id, obj, cp))
         return obj, cp, diff
 
-    def resume(self, time: float):
+    def resume(self):
         self._stateTransfer('resume')
-        self._resume_time = time
+        self._resume_time = self.env.time()
 
-    def pause(self, time: float):
+    def pause(self):
         self._stateTransfer('pause')
-        time_diff = time - self._resume_time
+        time_diff = self.env.time() - self._resume_time
         assert time_diff >= 0, "Pause before resume??"
         self.skipTime(time_diff)
 
@@ -338,7 +403,7 @@ def all_unresolved_events(models: Dict[int, ConveyorModel]):
         if not had_some:
             break
 
-def find_max_speed(up_model, up_pos, up_speed, dist_to_end, max_speed):
+def find_max_speed(up_model, up_pos, up_speed, dist_to_end, max_speed, bag_radius=BAG_RADIUS):
     speed = max_speed
     while speed > 0:
         end_time = dist_to_end / speed
@@ -347,7 +412,7 @@ def find_max_speed(up_model, up_pos, up_speed, dist_to_end, max_speed):
             break
 
         _, obj_pos = up_nearest
-        if abs(up_pos - obj_pos) >= 2*BAG_RADIUS:
+        if abs(up_pos - obj_pos) >= 2*bag_radius:
             break
         elif dist_to_end == 0:
             return 0
