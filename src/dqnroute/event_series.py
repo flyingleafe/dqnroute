@@ -1,4 +1,5 @@
 import pandas as pd
+from functools import reduce
 
 from typing import Callable, Dict, Optional, List
 
@@ -6,25 +7,32 @@ Aggregator = Callable[[Optional[float], float], float]
 
 class EventSeries:
     def __init__(self, period: int, aggregators: Dict[str, Aggregator]):
-        columns = ['time'] + list(aggregators.keys())
+        self.columns = ['time'] + list(aggregators.keys())
 
-        self.records = pd.DataFrame(columns=columns)
+        self.records = []
+        self.record_idx = {}
+        self.record_periods = []
+
         self.period = period
         self.aggregators = aggregators
+        self.last_logged = 0
 
     def _log(self, cur_period: int, value):
-        avg_time = cur_period * self.period
-        data_cols = self.records.columns[1:]
-
         try:
-            data_vals = self.records.loc[cur_period, data_cols]
+            idx = self.record_idx[cur_period]
         except KeyError:
-            data_vals = [None]*len(data_cols)
+            idx = len(self.records)
+            avg_time = cur_period * self.period
+            row = [None]*len(self.columns)
+            row[0] = avg_time
+            self.records.append(row)
+            self.record_periods.append(cur_period)
+            self.record_idx[cur_period] = idx
 
-        new_data_vals = [self.aggregators[col](old_value, value)
-                         for (col, old_value) in zip(data_cols, data_vals)]
-
-        self.records.loc[cur_period] = [avg_time] + new_data_vals
+        for i in range(1, len(self.columns)):
+            col = self.columns[i]
+            agg = self.aggregators[col]
+            self.records[idx][i] = agg(self.records[idx][i], value)
 
     def logEvent(self, time, value):
         cur_period = int(time // self.period)
@@ -45,14 +53,25 @@ class EventSeries:
                 self._log(period, coeff * self.period)
             self._log(end_period, coeff * end_gap)
 
-    def getSeries(self):
-        return self.records.sort_index()
+    def getSeries(self, add_avg=False, avg_col='avg',
+                  sum_col='sum', count_col='count'):
+        df = pd.DataFrame(self.records, columns=self.columns, index=self.record_periods)
+        if add_avg:
+            df[avg_col] = df[sum_col] / df[count_col]
+
+        return df.sort_index().astype(float, copy=False)
 
     def reset(self):
         self.records = self.records.iloc[0:0]
 
-    def load(self, csv_path):
-        self.records = pd.read_csv(csv_path, index_col=False)
+    def load(self, data):
+        if type(data) == str:
+            df = pd.read_csv(data, index_col=False)
+        else:
+            df = data
+        self.records = df.values.tolist()
+        self.record_periods = list(range(len(self.records)))
+        self.record_idx = {i: i for i in range(len(self.records))}
 
     def save(self, csv_path):
         self.getSeries().to_csv(csv_path, index=False)
@@ -71,8 +90,11 @@ class MultiEventSeries(EventSeries):
     def subSeries(self, tag: str):
         return self.series[tag]
 
-    def getSeries(self):
-        dfs = [s.getSeries().rename(columns=lambda c: tag + '_' + c)
+    def allSubSeries(self):
+        return self.series.items()
+
+    def getSeries(self, **kwargs):
+        dfs = [s.getSeries(**kwargs).rename(columns=lambda c: tag + '_' + c)
                for (tag, s) in self.series.items()]
         return pd.concat(dfs, axis=1)
 
@@ -80,14 +102,40 @@ class MultiEventSeries(EventSeries):
         for s in self.series.values():
             s.reset()
 
-    def load(self, csv_path):
-        all_records = pd.read_csv(csv_path, index_col=False)
-        tags = set([col.split('_')[0] for col in all_records.columns])
-        for tag in tags:
-            df = all_records.loc[:, all_records.columns.str.startswith(tag)]
-            self.series[tag].records = df.rename(
-                columns=lambda c: '_'.join(c.split('_')[1:])
-            )
+    def load(self, data):
+        if type(data) == str:
+            df = pd.read_csv(data, index_col=False)
+        else:
+            df = data
+
+        dfs = split_dataframe(df)
+        for tag, df in dfs:
+            self.series[tag].load(df)
+
+
+class ChangingValue(object):
+    def __init__(self, data_series, init_val=0, avg=False):
+        self.data = data_series
+        self.cur_val = init_val
+        self.total_sum = 0
+        self.avg = avg
+        self.update_time = 0
+
+    def update(self, time, val):
+        assert time >= self.update_time, "time goes backwards?"
+        d = time - self.update_time
+        if d > 0 and self.cur_val != val:
+            if self.avg:
+                coeff = self.cur_val / d
+            else:
+                coeff = self.cur_val
+            self.data.logUniformRange(self.update_time, time, coeff)
+            self.total_sum += self.cur_val * d
+            self.cur_val = val
+            self.update_time = time
+
+    def total(self, time):
+        return self.total_sum + self.cur_val * (time - self.update_time)
 
 def aggregator(f: Callable[[float, float], float], dv = None) -> Aggregator:
     """
@@ -114,5 +162,27 @@ def binary_func(name: str) -> Aggregator:
     else:
         raise Exception('Unknown aggregator function ' + name)
 
-def event_series(period: int, aggr_names: List[str]) -> EventSeries:
-    return EventSeries(period, {name: binary_func(name) for name in aggr_names})
+def event_series(period: int, aggr_names: List[str], **kwargs) -> EventSeries:
+    return EventSeries(period, {name: binary_func(name) for name in aggr_names}, **kwargs)
+
+def split_dataframe(all_records, preserved_cols=[]):
+    tagged_cols = [col for col in all_records.columns if col not in preserved_cols]
+    tagged = {}
+    for col in tagged_cols:
+        tag = col.split('_')[0]
+        try:
+            tagged[tag].append(col)
+        except KeyError:
+            tagged[tag] = [col]
+
+    def _remove_tag(tag, col):
+        if col.startswith(tag+'_'):
+            return '_'.join(col.split('_')[1:])
+        return col
+
+    res = []
+    for tag, cols in tagged.items():
+        df = all_records.loc[:, cols + preserved_cols]
+        df = df.rename(columns=lambda c: _remove_tag(tag, c))
+        res.append((tag, df))
+    return res

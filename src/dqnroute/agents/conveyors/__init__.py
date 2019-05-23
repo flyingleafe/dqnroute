@@ -1,4 +1,7 @@
 """
 Contains definitions of conveyor controllers
 """
-from .simple import *
+from .common import *
+from .conveyor import *
+from .diverter import *
+from .centralized import *

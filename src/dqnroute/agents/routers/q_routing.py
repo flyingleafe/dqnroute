@@ -11,42 +11,44 @@ class SimpleQRouter(Router, RewardAgent):
     """
     A router which implements Q-routing algorithm
     """
-    def __init__(self, learning_rate: float, nodes: List[int], **kwargs):
+    def __init__(self, learning_rate: float, nodes: List[AgentId], **kwargs):
         super().__init__(**kwargs)
         self.learning_rate = learning_rate
         self.nodes = nodes
         self.Q = {u: {v: 0 if u == v else 10
-                      for v in self.out_neighbours}
+                      for v in self.interface_map.values()}
                   for u in self.nodes}
 
-    def addLink(self, to: int, direction: str, params={}) -> List[Message]:
-        msgs = super().addLink(to, direction, params)
-        if direction != 'in':
-            for (u, dct) in self.Q.items():
-                if to not in dct:
-                    dct[to] = 0 if u == to else 10
+    def addLink(self, to: AgentId, params={}) -> List[Message]:
+        msgs = super().addLink(to, params)
+        for (u, dct) in self.Q.items():
+            if to not in dct:
+                dct[to] = 0 if u == to else 10
         return msgs
 
-    def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
-        Qs = self._Q(pkg.dst)
+    def route(self, sender: AgentId, pkg: Package, allowed_nbrs: List[AgentId]) -> Tuple[AgentId, List[Message]]:
+        Qs = self._Q(pkg.dst, allowed_nbrs)
         to, estimate = dict_min(Qs)
-        reward_msg = self.registerResentPkg(pkg, estimate, pkg.dst)
+        reward_msg = self.registerResentPkg(pkg, estimate, to, pkg.dst)
 
-        return to, [OutMessage(self.id, sender, reward_msg)] if sender != -1 else []
+        return to, [OutMessage(self.id, sender, reward_msg)] if sender[0] != 'world' else []
 
-    def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
+    def pathCost(self, to: AgentId) -> float:
+        return min(self._Q(to, list(self.interface_map.values())).values())
+
+    def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[Message]:
         if isinstance(msg, RewardMsg):
-            Q_new, dst = self.receiveReward(msg)
-            self.Q[dst][sender] += self.learning_rate * (Q_new - self.Q[dst][sender])
+            action, Q_new, dst = self.receiveReward(msg)
+            self.Q[dst][action] += self.learning_rate * (Q_new - self.Q[dst][action])
             return []
         else:
-            return super().handleServiceMsg(sender, msg)
+            return super().handleMsgFrom(sender, msg)
 
-    def _Q(self, d: int) -> Dict[int, float]:
+    def _Q(self, d: int, allowed_nbrs: List[AgentId]) -> Dict[int, float]:
         """
         Returns a dict which only includes available neighbours
         """
-        return {n: self.Q[d][n] for n in self.out_neighbours}
+        return {n: self.Q[d][n] for n in allowed_nbrs}
 
 
 class PredictiveQRouter(SimpleQRouter, RewardAgent):
@@ -55,58 +57,57 @@ class PredictiveQRouter(SimpleQRouter, RewardAgent):
         self.beta = beta
         self.gamma = gamma
         self.B = deepcopy(self.Q)
-        self.R = {u: {v: 0 for v in self.out_neighbours}
+        self.R = {u: {v: 0 for v in self.interface_map.values()}
                   for u in self.nodes}
-        self.U = {u: {v: 0 for v in self.out_neighbours}
+        self.U = {u: {v: 0 for v in self.interface_map.values()}
                   for u in self.nodes}
 
-    def addLink(self, to: int, direction: str, params={}) -> List[Message]:
-        msgs = super().addLink(to, direction, params)
-        if direction != 'in':
-            for u in self.nodes:
-                if to not in self.B[u]:
-                    self.B[u][to] = 0 if u == to else self.Q[u][to]
-                if to not in self.R[u]:
-                    self.R[u][to] = 0
-                if to not in self.U[u]:
-                    self.U[u][to] = self.env.time()
+    def addLink(self, to: AgentId, params={}) -> List[Message]:
+        msgs = super().addLink(to, params)
+        for u in self.nodes:
+            if to not in self.B[u]:
+                self.B[u][to] = 0 if u == to else self.Q[u][to]
+            if to not in self.R[u]:
+                self.R[u][to] = 0
+            if to not in self.U[u]:
+                self.U[u][to] = self.env.time()
         return msgs
 
-    def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
-        Qs = self._Q(pkg.dst)
-        Qs_altered = self._Q_altered(pkg.dst)
+    def route(self, sender: AgentId, pkg: Package, allowed_nbrs: List[AgentId]) -> Tuple[AgentId, List[Message]]:
+        Qs = self._Q(pkg.dst, allowed_nbrs)
+        Qs_altered = self._Q_altered(pkg.dst, allowed_nbrs)
         to, _ = dict_min(Qs_altered)
         estimate = min(Qs.values())
-        reward_msg = self.registerResentPkg(pkg, estimate, pkg.dst)
+        reward_msg = self.registerResentPkg(pkg, estimate, to, pkg.dst)
 
-        return to, [OutMessage(self.id, sender, reward_msg)] if sender != -1 else []
+        return to, [OutMessage(self.id, sender, reward_msg)] if sender[0] != 'world' else []
 
-    def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
+    def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[Message]:
         if isinstance(msg, RewardMsg):
-            Q_new, dst = self.receiveReward(msg)
-            dQ = Q_new - self.Q[dst][sender]
-            self.Q[dst][sender] += self.learning_rate * dQ
-            self.B[dst][sender] = min(self.B[dst][sender], self.Q[dst][sender])
+            action, Q_new, dst = self.receiveReward(msg)
+            dQ = Q_new - self.Q[dst][action]
+            self.Q[dst][action] += self.learning_rate * dQ
+            self.B[dst][action] = min(self.B[dst][action], self.Q[dst][action])
 
             now = self.env.time()
             if dQ < 0:
-                dR = dQ / (now - self.U[dst][sender])
-                self.R[dst][sender] += self.beta * dR
+                dR = dQ / (now - self.U[dst][action])
+                self.R[dst][action] += self.beta * dR
             elif dQ > 0:
-                self.R[dst][sender] *= self.gamma
+                self.R[dst][action] *= self.gamma
 
-            self.U[dst][sender] = now
+            self.U[dst][action] = now
             return []
         else:
-            return super().handleServiceMsg(sender, msg)
+            return super().handleMsgFrom(sender, msg)
 
-    def _Q_altered(self, d: int) -> Dict[int, float]:
+    def _Q_altered(self, d: int, allowed_nbrs: List[AgentId]) -> Dict[int, float]:
         """
         Returns estimates for all available neighbours
         """
         now = self.env.time()
         res = {}
-        for n in self.out_neighbours:
+        for n in allowed_nbrs:
             dt = now - self.U[d][n]
             res[n] = max(self.Q[d][n] + dt * self.R[d][n], self.B[d][n])
         return res

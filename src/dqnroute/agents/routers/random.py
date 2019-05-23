@@ -9,8 +9,5 @@ class RandomRouter(Router):
     Simplest router which just sends a packet in a random direction.
     """
 
-    def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
-        return random.choice(self.out_neighbours), []
-
-    def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
-        return []
+    def route(self, sender: AgentId, pkg: Package, allowed_nbrs: List[AgentId]) -> Tuple[AgentId, List[Message]]:
+        return random.choice(allowed_nbrs), []

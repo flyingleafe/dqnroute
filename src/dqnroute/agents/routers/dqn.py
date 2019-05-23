@@ -6,6 +6,7 @@ import torch.nn as nn
 import numpy as np
 import networkx as nx
 import pandas as pd
+import pprint
 
 from typing import List, Tuple, Dict, Union
 from ..base import *
@@ -24,7 +25,7 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     """
     A router which implements DQN-routing algorithm
     """
-    def __init__(self, batch_size: int, mem_capacity: int, nodes: List[int],
+    def __init__(self, batch_size: int, mem_capacity: int, nodes: List[AgentId],
                  optimizer='rmsprop', brain=None, random_init=False, additional_inputs=[], **kwargs):
         super().__init__(**kwargs)
         self.batch_size = batch_size
@@ -38,7 +39,7 @@ class DQNRouter(LinkStateRouter, RewardAgent):
                 self.brain.init_xavier()
             else:
                 self.brain.restore()
-                logger.info('Restored model ' + self.brain._label)
+                self.log('Restored model {}'.format(self.brain._label))
 
         else:
             self.brain = brain
@@ -46,34 +47,34 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         self.optimizer = get_optimizer(optimizer)(self.brain.parameters())
         self.loss_func = nn.MSELoss()
 
-    def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
-        to, estimate, saved_state = self._act(pkg)
-        reward = self.registerResentPkg(pkg, estimate, saved_state)
-        return to, [OutMessage(self.id, sender, reward)] if sender != -1 else []
+    def route(self, sender: AgentId, pkg: Package, allowed_nbrs: List[AgentId]) -> Tuple[AgentId, List[Message]]:
+        to, estimate, saved_state = self._act(pkg, allowed_nbrs)
+        reward = self.registerResentPkg(pkg, estimate, to, saved_state)
+        return to, [OutMessage(self.id, sender, reward)] if sender[0] != 'world' else []
 
-    def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
+    def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[Message]:
         if isinstance(msg, RewardMsg):
-            Q_new, prev_state = self.receiveReward(msg)
-            self.memory.add((prev_state, sender, -Q_new))
+            action, Q_new, prev_state = self.receiveReward(msg)
+            self.memory.add((prev_state, action[1], -Q_new))
             self._replay()
             return []
         else:
-            return super().handleServiceMsg(sender, msg)
+            return super().handleMsgFrom(sender, msg)
 
     def _makeBrain(self, additional_inputs=[], **kwargs):
         return QNetwork(len(self.nodes), additional_inputs=additional_inputs,
                         one_out=False, **kwargs)
 
-    def _act(self, pkg: Package):
-        state = self._getNNState(pkg)
+    def _act(self, pkg: Package, allowed_nbrs: List[AgentId]):
+        state = self._getNNState(pkg, allowed_nbrs)
         prediction = self._predict(state)[0]
 
         to = -1
-        while to not in self.out_neighbours:
+        while ('router', to) not in allowed_nbrs:
             to = soft_argmax(prediction, MIN_TEMP)
 
         estimate = -np.max(prediction)
-        return to, estimate, state
+        return ('router', to), estimate, state
 
     def _predict(self, x):
         self.brain.eval()
@@ -92,22 +93,17 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     def _getAddInput(self, tag, *args, **kwargs):
         if tag == 'amatrix':
             amatrix = nx.convert_matrix.to_numpy_array(
-                self.network, nodelist=self.nodes,
+                self.network, nodelist=self.nodes, weight=self.edge_weight,
                 dtype=np.float32)
             gstate = np.ravel(amatrix)
-            gstate[gstate > 0] = 1
             return gstate
         else:
             raise Exception('Unknown additional input: ' + tag)
 
-    def _getNNState(self, pkg: Package, nbrs=None):
+    def _getNNState(self, pkg: Package, nbrs: List[AgentId]):
         n = len(self.nodes)
-
-        if nbrs is None:
-            nbrs = self.out_neighbours
-
-        addr = np.array(self.id)
-        dst = np.array(pkg.dst)
+        addr = np.array(self.id[1])
+        dst = np.array(pkg.dst[1])
 
         neighbours = np.array(
             list(map(lambda v: v in nbrs, self.nodes)),
@@ -115,7 +111,11 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         input = [addr, dst, neighbours]
 
         for inp in self.additional_inputs:
-            input.append(self._getAddInput(inp['tag']))
+            tag = inp['tag']
+            add_inp = self._getAddInput(tag)
+            if tag == 'amatrix':
+                add_inp[add_inp > 0] = 1
+            input.append(add_inp)
 
         return tuple(input)
 
@@ -155,14 +155,14 @@ class DQNRouterOO(DQNRouter):
         return QNetwork(len(self.nodes), additional_inputs=additional_inputs,
                         one_out=True, **kwargs)
 
-    def _act(self, pkg: Package):
-        state = self._getNNState(pkg)
+    def _act(self, pkg: Package, allowed_nbrs: List[AgentId]):
+        state = self._getNNState(pkg, allowed_nbrs)
         prediction = self._predict(state).flatten()
         to_idx = soft_argmax(prediction, MIN_TEMP)
         estimate = -np.max(prediction)
 
         saved_state = [s[to_idx] for s in state]
-        to = sorted(list(self.out_neighbours))[to_idx]
+        to = allowed_nbrs[to_idx]
         return to, estimate, saved_state
 
     def _nodeRepr(self, node):
@@ -171,20 +171,16 @@ class DQNRouterOO(DQNRouter):
     def _getAddInput(self, tag, nbr):
         return super()._getAddInput(tag)
 
-    def _getNNState(self, pkg: Package, nbrs=None):
+    def _getNNState(self, pkg: Package, nbrs: List[AgentId]):
         n = len(self.nodes)
-
-        if nbrs is None:
-            nbrs = sorted(list(self.out_neighbours))
-
-        addr = self._nodeRepr(self.id)
-        dst = self._nodeRepr(pkg.dst)
+        addr = self._nodeRepr(self.id[1])
+        dst = self._nodeRepr(pkg.dst[1])
 
         get_add_inputs = lambda nbr: [self._getAddInput(inp['tag'], nbr)
                                       for inp in self.additional_inputs]
 
-        input = [[addr, dst, self._nodeRepr(v)] + get_add_inputs(v)
-                 for v in sorted(list(self.out_neighbours))]
+        input = [[addr, dst, self._nodeRepr(v[1])] + get_add_inputs(v)
+                 for v in nbrs]
         return stack_batch(input)
 
     def _replay(self):
@@ -202,6 +198,7 @@ class DQNRouterEmb(DQNRouterOO):
         self.prev_num_nodes = 0
         self.prev_num_edges = 0
         self.init_edges_num = edges_num
+        self.network_initialized = False
 
         if type(embedding) == dict:
             self.embedding = get_embedding(**embedding)
@@ -217,16 +214,18 @@ class DQNRouterEmb(DQNRouterOO):
     def _nodeRepr(self, node):
         return self.embedding.transform(node).astype(np.float32)
 
-    def networkComplete(self):
-        return len(self.network.nodes) == len(self.nodes) and len(self.network.edges) == self.init_edges_num
-
-    def networkInit(self):
+    def networkStateChanged(self):
         num_nodes = len(self.network.nodes)
         num_edges = len(self.network.edges)
-        if num_edges != self.prev_num_edges or num_nodes != self.prev_num_nodes:
+
+        if not self.network_initialized and num_nodes == len(self.nodes) and num_edges == self.init_edges_num:
+            self.network_initialized = True
+
+        if self.network_initialized and (num_edges != self.prev_num_edges or num_nodes != self.prev_num_nodes):
             self.prev_num_nodes = num_nodes
             self.prev_num_edges = num_edges
             self.embedding.fit(self.network, weight=self.edge_weight)
+            # self.log(pprint.pformat(self.embedding._X), force=self.id[1] == 0)
 
 
 class DQNRouterNetwork(NetworkRewardAgent, DQNRouter):
@@ -262,10 +261,5 @@ class DQNRouterOOConveyor(LSConveyorMixin, ConveyorRewardAgent, ConveyorAddInput
     pass
 
 class DQNRouterEmbConveyor(LSConveyorMixin, ConveyorRewardAgent, ConveyorAddInputMixin, DQNRouterEmb):
-    def networkInit(self):
-        num_nodes = len(self.network.nodes)
-        num_edges = len(self.network.edges)
-        if num_edges != self.prev_num_edges or num_nodes != self.prev_num_nodes:
-            self.prev_num_nodes = num_nodes
-            self.prev_num_edges = num_edges
-            self.embedding.fit(self.network, weight=None) # only for this 'None' all the fuss
+    pass
+

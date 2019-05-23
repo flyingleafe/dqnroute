@@ -1,4 +1,5 @@
 import random
+import pprint
 import networkx as nx
 
 from copy import deepcopy
@@ -6,66 +7,66 @@ from typing import List, Tuple, Dict
 from ..base import *
 from ...messages import *
 
-class AbstractLinkStateRouter(Router):
+class AbstractStateHandler(MessageHandler):
     """
-    A router which implements a link-state protocol where the notion
-    of a link-state is abstracted out
+    A router which implements a link-state protocol but the state is
+    not necessarily link-state and can be abstracted out.
     """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.seq_num = 0
         self.announcements = {}
 
-    def init(self, config) -> List[Message]:
+    def init(self, config) -> List[WorldEvent]:
         msgs = super().init(config)
         return msgs + self._announceState()
 
-    def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
+    def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[WorldEvent]:
         if isinstance(msg, StateAnnouncementMsg):
-            if self._processStateAnnouncement(msg):
-                return [OutMessage(self.id, v, deepcopy(msg))
-                        for v in (self.all_neighbours - set([sender]))]
+            if msg.node == self.id:
+                return []
+
+            if msg.node not in self.announcements or self.announcements[msg.node].seq < msg.seq:
+                self.announcements[msg.node] = msg
+                broadcast, msgs = self.processNewAnnouncement(msg.node, msg.state)
+                self.networkStateChanged()
+
+                if broadcast:
+                    msgs += self.broadcast(msg, exclude=[sender])
+                return msgs
             return []
 
         else:
-            return super().handleServiceMsg(sender, msg)
+            return super().handleMsgFrom(sender, msg)
 
     def _announceState(self) -> List[Message]:
         state = self.getState()
+        if state is None:
+            return []
+
         announcement = StateAnnouncementMsg(self.id, self.seq_num, state)
         self.seq_num += 1
-        return [OutMessage(self.id, v, deepcopy(announcement)) for v in self.all_neighbours]
+        return self.broadcast(announcement)
 
-    def _processStateAnnouncement(self, msg: StateAnnouncementMsg) -> bool:
-        if msg.node == self.id:
-            return False
-
-        if msg.node not in self.announcements or self.announcements[msg.node].seq < msg.seq:
-            self.announcements[msg.node] = msg
-            res = self.processNewAnnouncement(msg.node, msg.state)
-
-            # Do some action if initial announcements exchange is complete
-            if self.networkComplete():
-                self.networkInit()
-            return res
-        return False
-
-    def networkComplete(self):
+    def networkStateChanged(self):
         """
-        Never call `networkInit` by default
+        Check if relevant network state has been changed and perform
+        some action accordingly.
+        Do nothing by default; should be overridden in subclasses.
         """
-        return False
-
-    def networkInit(self):
-        raise NotImplementedError()
+        pass
 
     def getState(self):
+        """
+        Should be overridden by subclasses. If returned state is `None`,
+        no announcement is made.
+        """
         raise NotImplementedError()
 
-    def processNewAnnouncement(self, node: int, state) -> bool:
+    def processNewAnnouncement(self, node: int, state) -> Tuple[bool, List[WorldEvent]]:
         raise NotImplementedError()
 
-class LinkStateRouter(AbstractLinkStateRouter):
+class LinkStateRouter(Router, AbstractStateHandler):
     """
     Simple link-state router
     """
@@ -78,31 +79,39 @@ class LinkStateRouter(AbstractLinkStateRouter):
         for (m, params) in adj_links.items():
             self.network.add_edge(self.id, m, **params)
 
-    def addLink(self, to: int, direction: str, params={}) -> List[Message]:
-        msgs = super().addLink(to, direction, params)
-        if direction != 'out':
-            self.network.add_edge(to, self.id, **params)
-        if direction != 'in':
-            self.network.add_edge(self.id, to, **params)
+    def addLink(self, to: AgentId, params={}) -> List[Message]:
+        msgs = super().addLink(to, params)
+        self.network.add_edge(to, self.id, **params)
+        self.network.add_edge(self.id, to, **params)
         return msgs + self._announceState()
 
-    def removeLink(self, to: int, direction: str) -> List[Message]:
-        msgs = super().removeLink(to, direction)
-        if direction != 'out':
-            self.network.remove_edge(to, self.id)
-        if direction != 'in':
-            self.network.remove_edge(self.id, to)
+    def removeLink(self, to: AgentId) -> List[Message]:
+        msgs = super().removeLink(to)
+        self.network.remove_edge(to, self.id)
+        self.network.remove_edge(self.id, to)
         return msgs + self._announceState()
 
-    def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
+    def route(self, sender: AgentId, pkg: Package, allowed_nbrs: List[AgentId]) -> Tuple[AgentId, List[Message]]:
+        if len(allowed_nbrs) == 1:
+            return allowed_nbrs[0], []
+
         path = nx.dijkstra_path(self.network, self.id, pkg.dst,
                                 weight=self.edge_weight)
+        assert path[1] in allowed_nbrs, "okay what now???"
         return path[1], []
+
+    def pathCost(self, to: AgentId, through=None) -> float:
+        if through is None:
+            return nx.dijkstra_path_length(self.network, self.id, to, weight=self.edge_weight)
+        else:
+            l1 = nx.dijkstra_path_length(self.network, self.id, through, weight=self.edge_weight)
+            l2 = nx.dijkstra_path_length(self.network, through, self.id, weight=self.edge_weight)
+            return l1 + l2
 
     def getState(self):
         return self.network.adj[self.id]
 
-    def processNewAnnouncement(self, node: int, neighbours) -> bool:
+    def processNewAnnouncement(self, node: AgentId, neighbours) -> Tuple[bool, List[WorldEvent]]:
         changed = False
 
         for (m, params) in neighbours.items():
@@ -117,42 +126,8 @@ class LinkStateRouter(AbstractLinkStateRouter):
             except nx.NetworkXError:
                 pass
 
-        return changed
+        return changed, []
 
-class GlobalDynamicRouter(LinkStateRouter):
-    """
-    Router which routes packets accordingly to global-dynamic routing
-    strategy (path is weighted as a sum of queue lenghts on the nodes)
-    """
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.network.nodes[self.id]['q_len'] = 0
-
-    def _queueLength(self, node=None) -> int:
-        if node is None:
-            node = self.id
-        return self.network.nodes[node].get('q_len', 0)
-
-    def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
-        w_func = lambda u, v, ps: self._queueLength(v)
-        path = nx.dijkstra_path(self.network, self.id, pkg.dst,
-                                weight=w_func)
-        self.network.nodes[self.id]['q_len'] -= 1
-        return path[1], self._announceState()
-
-    def detectEnqueuedPkg(self) -> List[Message]:
-        self.network.nodes[self.id]['q_len'] += 1
-        return self._announceState()
-
-    def getState(self):
-        sub = super().getState()
-        return {'sub': sub, 'q_len': self._queueLength()}
-
-    def processNewAnnouncement(self, node: int, state) -> bool:
-        sub_ok = super().processNewAnnouncement(node, state['sub'])
-        q_changed = self._queueLength(node) != state['q_len']
-        self.network.nodes[node]['q_len'] = state['q_len']
-        return sub_ok or q_changed
 
 class LSConveyorMixin(object):
     """
@@ -162,8 +137,9 @@ class LSConveyorMixin(object):
     in other classes.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, conv_stop_delay: float, **kwargs):
         super().__init__(**kwargs)
+        self.conv_stop_delay = conv_stop_delay
         self.network.nodes[self.id]['works'] = False
 
     def _conveyorWorks(self, node=None) -> bool:
@@ -177,44 +153,33 @@ class LSConveyorMixin(object):
             return self._announceState()
         return []
 
-    def route(self, sender: int, pkg: Package) -> Tuple[int, List[Message]]:
-        """
-        Makes sure that bags are not sent to the path which can not lead to
-        the destination
-        """
-        old_neighbours = self.out_neighbours
-        self.out_neighbours = set(only_reachable(self.network, pkg.dst, old_neighbours))
+    def detectEnqueuedPkg(self, sender: AgentId, pkg: Package) -> List[WorldEvent]:
+        msgs = super().detectEnqueuedPkg(sender, pkg)
 
-        to, msgs = super().route(sender, pkg)
-        scheduled_stop_time = self.env.time() + self.env.stop_delay()
-        msgs.append(OutConveyorMsg(StopTimeUpdMsg(scheduled_stop_time)))
+        allowed_nbrs = only_reachable(self.network, pkg.dst, self.network.successors(self.id))
+        to, _ = self.route(sender, pkg, allowed_nbrs)
+        if isinstance(self, RewardAgent):
+            self._pending_pkgs.pop(pkg.id)
 
-        self.out_neighbours = old_neighbours
-        return to, msgs
+        return msgs + [PkgRoutePredictionAction(to, pkg)]
 
-    def handleServiceMsg(self, sender: int, msg: ServiceMessage) -> List[Message]:
-        if isinstance(msg, ConveyorServiceMsg):
-            if isinstance(msg, ConveyorStartMsg):
-                self.scheduled_stop_time = self.env.time()
-                return self._setConveyorWorkStatus(True)
-            elif isinstance(msg, ConveyorStopMsg):
-                return self._setConveyorWorkStatus(False)
-            return []
+    def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[Message]:
+        if isinstance(msg, ConveyorStartMsg):
+            return self._setConveyorWorkStatus(True)
+        elif isinstance(msg, ConveyorStopMsg):
+            return self._setConveyorWorkStatus(False)
         else:
-            return super().handleServiceMsg(sender, msg)
+            return super().handleMsgFrom(sender, msg)
 
     def getState(self):
         sub = super().getState()
         return {'sub': sub, 'works': self._conveyorWorks()}
 
-    def processNewAnnouncement(self, node: int, state) -> bool:
-        sub_ok = super().processNewAnnouncement(node, state['sub'])
+    def processNewAnnouncement(self, node: int, state) -> Tuple[bool, List[WorldEvent]]:
+        sub_ok, msgs = super().processNewAnnouncement(node, state['sub'])
         works_changed = self._conveyorWorks(node) != state['works']
         self.network.nodes[node]['works'] = state['works']
-        return sub_ok or works_changed
+        return sub_ok or works_changed, msgs
 
 class LinkStateRouterConveyor(LSConveyorMixin, LinkStateRouter):
-    pass
-
-class GlobalDynamicRouterConveyor(LSConveyorMixin, GlobalDynamicRouter):
     pass

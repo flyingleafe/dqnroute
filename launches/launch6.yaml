@@ -30,6 +30,7 @@ settings:
       beta: 0.7
       gamma: 0.9
     dqn: &dqn
+      # scope: 'fun_test'
       optimizer: 'rmsprop'
       activation: 'relu'
       layers: [64, 64]
