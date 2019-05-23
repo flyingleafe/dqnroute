@@ -276,8 +276,9 @@ class CentralizedController(MasterHandler):
         if self.last_cascade_update_time == self.env.time():
             return []
 
-        for cid in self.max_conv_speeds.keys():
-            self.max_conv_speeds[cid] = self.max_speed
+        for cid, model in self.conveyor_models.items():
+            discount = 0.3 * (len(model.objects) / model.length)
+            self.max_conv_speeds[cid] = self.max_speed - discount
 
         while True:
             conv_speed_changed = False

@@ -102,7 +102,7 @@ settings:
     slowdown_delay: 1
   router:
     simple_q:
-      energy_reward_weight: 0.1
+      energy_reward_weight: 0.4
       learning_rate: 0.5
     dqn: &dqn
       energy_reward_weight: 1

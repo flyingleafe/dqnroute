@@ -171,6 +171,9 @@ class ConveyorModel:
                 .format(self.model_id, action, self._state, self.speed,
                         self.checkpoints, self.object_positions))
 
+    def totalEnergySpent(self):
+        return self._spender.total(self.env.time())
+
     def checkpointPos(self, cp: Any) -> Optional[float]:
         if cp[0] == 'conv_end':
             return self.length

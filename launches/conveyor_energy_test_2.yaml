@@ -104,7 +104,7 @@ settings:
     stop_delay: 40
   router:
     simple_q:
-      energy_reward_weight: 0.5
+      energy_reward_weight: 0.3
       learning_rate: 0.5
     dqn: &dqn
       energy_reward_weight: 1

@@ -60,7 +60,8 @@ class ConveyorFactory(HandlerFactory):
 
         for conv_id in self.conveyor_models.keys():
             dyn_env = self.dynEnv()
-            dyn_env.register_var('scheduled_stop', 0)
+            dyn_env.register_var('prev_total_nrg', 0)
+            dyn_env.register_var('total_nrg', 0)
             self.conveyor_dyn_envs[conv_id] = dyn_env
 
     def centralized(self):

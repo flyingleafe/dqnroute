@@ -419,6 +419,7 @@ class ConveyorRewardAgent(RewardAgent):
         time_processed, energy_gap = msg.reward_data
         time_gap = time_processed - time_sent
 
+        # self.log('time gap: {}, nrg gap: {}'.format(time_gap, energy_gap), True)
         return msg.Q_estimate + time_gap + self._e_weight * energy_gap
 
     def _mkReward(self, bag: Bag, Q_estimate: float, reward_data) -> ConveyorRewardMsg:
@@ -427,9 +428,10 @@ class ConveyorRewardAgent(RewardAgent):
 
     def _getRewardData(self, bag: Bag, data):
         cur_time = self.env.time()
-        delay = self.conv_stop_delay
-        consumption = self.env.energy_consumption()
-        stop_time = self.env.get_scheduled_stop()
-        time_gap = delay - max(0, stop_time - cur_time)
-        energy_gap = consumption * time_gap
-        return cur_time, energy_gap
+        # delay = self.conv_stop_delay
+        # consumption = self.env.energy_consumption()
+        # stop_time = self.env.get_scheduled_stop()
+        # time_gap = delay - max(0, stop_time - cur_time)
+        # energy_gap = consumption * time_gap
+        energy_gap = self.env.get_total_nrg() - self.env.get_prev_total_nrg()
+        return cur_time, energy_gap / 5000  # zhang consumption for 1 sec

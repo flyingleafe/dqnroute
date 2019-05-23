@@ -64,8 +64,11 @@ class EventSeries:
     def reset(self):
         self.records = self.records.iloc[0:0]
 
-    def load(self, csv_path):
-        df = pd.read_csv(csv_path, index_col=False)
+    def load(self, data):
+        if type(data) == str:
+            df = pd.read_csv(data, index_col=False)
+        else:
+            df = data
         self.records = df.values.tolist()
         self.record_periods = list(range(len(self.records)))
         self.record_idx = {i: i for i in range(len(self.records))}
@@ -99,16 +102,22 @@ class MultiEventSeries(EventSeries):
         for s in self.series.values():
             s.reset()
 
-    def load(self, csv_path):
-        dfs = split_dataframe(pd.read_csv(csv_path, index_col=False))
+    def load(self, data):
+        if type(data) == str:
+            df = pd.read_csv(data, index_col=False)
+        else:
+            df = data
+
+        dfs = split_dataframe(df)
         for tag, df in dfs:
-            self.series[tag].records = df
+            self.series[tag].load(df)
 
 
 class ChangingValue(object):
     def __init__(self, data_series, init_val=0, avg=False):
         self.data = data_series
         self.cur_val = init_val
+        self.total_sum = 0
         self.avg = avg
         self.update_time = 0
 
@@ -121,9 +130,12 @@ class ChangingValue(object):
             else:
                 coeff = self.cur_val
             self.data.logUniformRange(self.update_time, time, coeff)
+            self.total_sum += self.cur_val * d
             self.cur_val = val
             self.update_time = time
 
+    def total(self, time):
+        return self.total_sum + self.cur_val * (time - self.update_time)
 
 def aggregator(f: Callable[[float, float], float], dv = None) -> Aggregator:
     """

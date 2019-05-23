@@ -375,8 +375,12 @@ class SimpleRouterConveyor(StopDelayConveyor, RouterContainer):
         return []
 
     def _updateScheduledStop(self):
-        scheduled_stop_time = self.env.time() + self.stop_delay
-        self.env.set_scheduled_stop(scheduled_stop_time)
+        prev_nrg = self.env.get_total_nrg()
+        cur_nrg = self.model.totalEnergySpent()
+        self.env.set_prev_total_nrg(prev_nrg)
+        self.env.set_total_nrg(cur_nrg)
+        # scheduled_stop_time = self.env.time() + self.stop_delay
+        # self.env.set_scheduled_stop(scheduled_stop_time)
 
     def processNewAnnouncement(self, node: AgentId, state) -> Tuple[bool, List[WorldEvent]]:
         res, msgs = super().processNewAnnouncement(node, state)
@@ -412,7 +416,7 @@ class SimpleRouterConveyor(StopDelayConveyor, RouterContainer):
         if len(self.model.objects) == 0:
             return []
 
-        max_speed = self.model.max_speed
+        max_speed = self.model.max_speed - 0.3 * (len(self.model.objects) / self.model.length)
         for u, v in reversed(self.conv_edges):
             up_conv, up_pos = self.up_conv.get(v, (-1, 0))
             if up_conv == -1:
