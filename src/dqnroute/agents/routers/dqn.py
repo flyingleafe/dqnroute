@@ -68,12 +68,13 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     def _act(self, pkg: Package, allowed_nbrs: List[AgentId]):
         state = self._getNNState(pkg, allowed_nbrs)
         prediction = self._predict(state)[0]
+        distr = softmax(prediction, MIN_TEMP)
+        estimate = -np.dot(prediction, distr)
 
         to = -1
         while ('router', to) not in allowed_nbrs:
-            to = soft_argmax(prediction, MIN_TEMP)
+            to = sample_distr(distr)
 
-        estimate = -np.max(prediction)
         return ('router', to), estimate, state
 
     def _predict(self, x):
@@ -158,8 +159,9 @@ class DQNRouterOO(DQNRouter):
     def _act(self, pkg: Package, allowed_nbrs: List[AgentId]):
         state = self._getNNState(pkg, allowed_nbrs)
         prediction = self._predict(state).flatten()
-        to_idx = soft_argmax(prediction, MIN_TEMP)
-        estimate = -np.max(prediction)
+        distr = softmax(prediction, MIN_TEMP)
+        to_idx = sample_distr(distr)
+        estimate = -np.dot(prediction, distr)
 
         saved_state = [s[to_idx] for s in state]
         to = allowed_nbrs[to_idx]

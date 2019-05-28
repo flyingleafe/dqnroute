@@ -277,8 +277,7 @@ class CentralizedController(MasterHandler):
             return []
 
         for cid, model in self.conveyor_models.items():
-            discount = 0.3 * (len(model.objects) / model.length)
-            self.max_conv_speeds[cid] = self.max_speed - discount
+            self.max_conv_speeds[cid] = self.max_speed
 
         while True:
             conv_speed_changed = False

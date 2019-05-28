@@ -1,6 +1,6 @@
 from typing import List, Tuple, Any, Dict, Optional
-from .utils import *
-from .event_series import *
+from ..utils import *
+from ..event_series import *
 
 POS_ROUND_DIGITS = 3
 SOFT_COLLIDE_SHIFT = 0.2
