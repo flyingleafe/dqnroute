@@ -50,7 +50,7 @@ class CentralizedController(MasterHandler):
         super().log(msg, force)
 
     def handleSlaveEvent(self, slave_id: AgentId, event: WorldEvent) -> List[WorldEvent]:
-        if isinstance(event, (IncomingBagEvent, OutgoingBagEvent)):
+        if isinstance(event, (IncomingBagEvent, OutgoingBagEvent, ConveyorBreakEvent, ConveyorRestoreEvent)):
             # no oracling here
             return []
         elif isinstance(event, BagDetectionEvent):

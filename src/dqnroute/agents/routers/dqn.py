@@ -26,12 +26,14 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     A router which implements DQN-routing algorithm
     """
     def __init__(self, batch_size: int, mem_capacity: int, nodes: List[AgentId],
-                 optimizer='rmsprop', brain=None, random_init=False, additional_inputs=[], **kwargs):
+                 optimizer='rmsprop', brain=None, random_init=False, max_act_time=None,
+                 additional_inputs=[], **kwargs):
         super().__init__(**kwargs)
         self.batch_size = batch_size
         self.memory = Memory(mem_capacity)
         self.additional_inputs = additional_inputs
         self.nodes = nodes
+        self.max_act_time = max_act_time
 
         if brain is None:
             self.brain = self._makeBrain(additional_inputs=additional_inputs, **kwargs)
@@ -48,9 +50,12 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         self.loss_func = nn.MSELoss()
 
     def route(self, sender: AgentId, pkg: Package, allowed_nbrs: List[AgentId]) -> Tuple[AgentId, List[Message]]:
-        to, estimate, saved_state = self._act(pkg, allowed_nbrs)
-        reward = self.registerResentPkg(pkg, estimate, to, saved_state)
-        return to, [OutMessage(self.id, sender, reward)] if sender[0] != 'world' else []
+        if self.max_act_time is not None and self.env.time() > self.max_act_time:
+            return super().route(sender, pkg, allowed_nbrs)
+        else:
+            to, estimate, saved_state = self._act(pkg, allowed_nbrs)
+            reward = self.registerResentPkg(pkg, estimate, to, saved_state)
+            return to, [OutMessage(self.id, sender, reward)] if sender[0] != 'world' else []
 
     def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[Message]:
         if isinstance(msg, RewardMsg):

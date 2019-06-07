@@ -26,7 +26,8 @@ class QNetwork(SaveableModel):
     """
 
     def __init__(self, n, layers, activation, additional_inputs=[],
-                 embedding_dim=None, one_out=True, scope='', **kwargs):
+                 embedding_dim=None, embedding_shift=True,
+                 one_out=True, scope='', **kwargs):
 
         if embedding_dim is not None and not one_out:
             raise Exception('Embedding-using networks are one-out only!')
@@ -35,13 +36,15 @@ class QNetwork(SaveableModel):
         self.graph_size = n
         self.add_inputs = _transform_add_inputs(n, additional_inputs)
         self.uses_embedding = embedding_dim is not None
+        self.embedding_shift = embedding_shift
         self.one_out = one_out
 
         input_dim = sum([d for (_, d) in self.add_inputs])
         if not self.uses_embedding:
             input_dim += 3 * n
         else:
-            input_dim += 2 * embedding_dim
+            mult = 2 if self.embedding_shift else 3
+            input_dim += mult * embedding_dim
 
         output_dim = 1 if one_out else n
 
@@ -67,8 +70,11 @@ class QNetwork(SaveableModel):
             dst_ = atleast_dim(dst, 2)
             neighbour_ = atleast_dim(neighbour, 2)
 
-            # re-center embeddings linearly against origin
-            input_tensors = [dst_ - addr_, neighbour_ - addr_]
+            if self.embedding_shift:
+                # re-center embeddings linearly against origin
+                input_tensors = [dst_ - addr_, neighbour_ - addr_]
+            else:
+                input_tensors = [addr_, dst_, neighbour_]
         else:
             addr_ = one_hot(atleast_dim(addr, 1), self.graph_size)
             dst_ = one_hot(atleast_dim(dst, 1), self.graph_size)

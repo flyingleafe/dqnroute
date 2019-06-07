@@ -33,6 +33,14 @@ class BaseConveyor(Conveyor, ConveyorStateHandler):
     # def log(self, msg, force=False):
     #     super().log(msg, force or self.id[1] == 6)
 
+    def convBreak(self):
+        return []
+
+    def convRestore(self):
+        if len(self.model.objects) > 0:
+            return self.start()
+        return []
+
     def handleBagEvent(self, event: WorldEvent) -> List[WorldEvent]:
         evs = []
 

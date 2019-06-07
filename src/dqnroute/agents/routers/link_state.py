@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import List, Tuple, Dict
 from ..base import *
 from ...messages import *
+from ...constants import INFTY
 
 class AbstractStateHandler(MessageHandler):
     """
@@ -97,8 +98,21 @@ class LinkStateRouter(Router, AbstractStateHandler):
 
         path = nx.dijkstra_path(self.network, self.id, pkg.dst,
                                 weight=self.edge_weight)
-        assert path[1] in allowed_nbrs, "okay what now???"
-        return path[1], []
+        if path[1] in allowed_nbrs:
+            return path[1], []
+
+        else:
+            min_nbr = None
+            min_len = INFTY
+            for nbr in allowed_nbrs:
+                elen = self.network[self.id][nbr][self.edge_weight]
+                plen = nx.dijkstra_path_length(self.network, nbr, pkg.dst,
+                                               weight=self.edge_weight)
+                if elen + plen < min_len:
+                    min_nbr = nbr
+                    min_len = elen + plen
+            assert min_nbr is not None, "!!sdfsdfs!!!"
+            return min_nbr, []
 
     def pathCost(self, to: AgentId, through=None) -> float:
         if through is None:

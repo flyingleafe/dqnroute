@@ -218,6 +218,8 @@ class MasterHandler(MessageHandler):
     def handleEvent(self, event: WorldEvent) -> List[WorldEvent]:
         if isinstance(event, SlaveEvent):
             return self.handleSlaveEvent(event.slave_id, event.inner)
+        elif isinstance(event, (ConveyorBreakEvent, ConveyorRestoreEvent)):
+            return []
         else:
             return super().handleEvent(event)
 
@@ -308,6 +310,8 @@ class BagDetector(MessageHandler):
     def handleEvent(self, event: WorldEvent) -> List[WorldEvent]:
         if isinstance(event, BagDetectionEvent):
             return self.bagDetection(event.bag)
+        elif isinstance(event, (ConveyorBreakEvent, ConveyorRestoreEvent)):
+            return []
         else:
             return super().handleEvent(event)
 
@@ -327,6 +331,10 @@ class Conveyor(MessageHandler):
     def handleEvent(self, event: WorldEvent) -> List[WorldEvent]:
         if isinstance(event, (IncomingBagEvent, OutgoingBagEvent, PassedBagEvent)) and self._oracle:
             return self.handleBagEvent(event)
+        elif isinstance(event, ConveyorBreakEvent):
+            return self.convBreak()
+        elif isinstance(event, ConveyorRestoreEvent):
+            return self.convRestore()
         else:
             return super().handleEvent(event)
 
@@ -337,7 +345,13 @@ class Conveyor(MessageHandler):
             return super().handleMsgFrom(sender, msg)
 
     def handleBagMsg(self, sender: AgentId, msg: ConveyorBagMsg) -> List[WorldEvent]:
-        raise NotImplementedError
+        raise NotImplementedError()
+
+    def convBreak(self):
+        raise NotImplementedError()
+
+    def convRestore(self):
+        raise NotImplementedError()
 
 
 class Diverter(BagDetector):

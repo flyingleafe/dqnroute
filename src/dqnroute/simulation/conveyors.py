@@ -224,6 +224,10 @@ class ConveyorsEnvironment(MultiAgentEnv):
             self.passToAgent(src, BagDetectionEvent(bag))
             return self._checkInterrupt(lambda: self._putBagOnConveyor(conv_idx, src, bag, src))
 
+        elif isinstance(event, ConveyorBreakEvent):
+            return self._checkInterrupt(lambda: self._conveyorBreak(event.conv_idx))
+        elif isinstance(event, ConveyorRestoreEvent):
+            return self._checkInterrupt(lambda: self._conveyorRestore(event.conv_idx))
         else:
             return super().handleWorldEvent(event)
 
@@ -244,6 +248,22 @@ class ConveyorsEnvironment(MultiAgentEnv):
             self._updateAll()
 
         return Event(self.env).succeed()
+
+    def _conveyorBreak(self, conv_idx: int):
+        self.log('conv break: {}'.format(conv_idx), True)
+        model = self.conveyor_models[conv_idx]
+        model.setSpeed(0)
+        self.log('chill bags: {}'.format(len(model.objects)), True)
+
+        self.conveyor_broken[conv_idx] = True
+        for aid in self.handlers.keys():
+            self.passToAgent(aid, ConveyorBreakEvent(conv_idx))
+
+    def _conveyorRestore(self, conv_idx: int):
+        self.log('conv restore: {}'.format(conv_idx), True)
+        self.conveyor_broken[conv_idx] = False
+        for aid in self.handlers.keys():
+            self.passToAgent(aid, ConveyorRestoreEvent(conv_idx))
 
     def _diverterKick(self, dv_id: AgentId):
         """
@@ -295,6 +315,12 @@ class ConveyorsEnvironment(MultiAgentEnv):
         Puts a bag on a given position to a given conveyor. If there is currently
         some other bag on a conveyor, throws a `CollisionException`
         """
+        if self.conveyor_broken[conv_idx]:
+            # just forget about the bag and say we had a collision
+            self.data_series.logEvent('collisions', self.env.now, 1)
+            self.current_bags.pop(bag.id)
+            return
+
         pos = node_conv_pos(self.topology_graph, conv_idx, node)
         assert pos is not None, "adasdasdasdas!"
 
@@ -337,6 +363,9 @@ class ConveyorsEnvironment(MultiAgentEnv):
         # Resolving all immediate events
         for (conv_idx, (bag, node, delay)) in all_unresolved_events(self.conveyor_models):
             assert delay == 0, "well that's just obnoxious"
+            if self.conveyor_broken[conv_idx]:
+                continue
+
             if bag.id in left_to_sinks or node in self.current_bags[bag.id]:
                 continue
 
@@ -359,7 +388,7 @@ class ConveyorsEnvironment(MultiAgentEnv):
             else:
                 raise Exception('Impossible conv node: {}'.format(node))
 
-            if bag.id not in left_to_sinks:
+            if bag.id in self.current_bags and bag.id not in left_to_sinks:
                 self.current_bags[bag.id].add(node)
 
         for conv_idx, model in self.conveyor_models.items():
@@ -445,25 +474,44 @@ class ConveyorsRunner(SimulationRunner):
 
         bag_id = 1
         for period in bag_distr['sequence']:
-            # adding a tiny noise to delta
-            delta = period['delta'] + round(np.random.normal(0, 0.5), 2)
+            try:
+                action = period['action']
+                conv_idx = period['conv_idx']
+                pause = period.get('pause', 0)
 
-            cur_sources = period.get('sources', sources)
-            cur_sinks = period.get('sinks', sinks)
-            simult_sources = period.get("simult_sources", 1)
+                if pause > 0:
+                    yield self.env.timeout(pause)
 
-            for i in range(0, period['bags_number'] // simult_sources):
-                srcs = random.sample(cur_sources, simult_sources)
-                for (j, src) in enumerate(srcs):
-                    if j > 0:
-                        mini_delta = round(abs(np.random.normal(0, 0.5)), 2)
-                        yield self.env.timeout(mini_delta)
+                if action == 'conv_break':
+                    yield self.world.handleWorldEvent(ConveyorBreakEvent(conv_idx))
+                elif action == 'conv_restore':
+                    yield self.world.handleWorldEvent(ConveyorRestoreEvent(conv_idx))
+                else:
+                    raise Exception('Unknown action: ' + action)
 
-                    dst = random.choice(cur_sinks)
-                    bag = Bag(bag_id, ('sink', dst), self.env.now, None)
-                    logger.debug("Sending random bag #{} from {} to {} at time {}"
-                                 .format(bag_id, src, dst, self.env.now))
-                    yield self.world.handleWorldEvent(BagAppearanceEvent(src, bag))
+                if pause > 0:
+                    yield self.env.timeout(pause)
 
-                    bag_id += 1
-                yield self.env.timeout(delta)
+            except KeyError:
+                # adding a tiny noise to delta
+                delta = period['delta'] + round(np.random.normal(0, 0.5), 2)
+
+                cur_sources = period.get('sources', sources)
+                cur_sinks = period.get('sinks', sinks)
+                simult_sources = period.get("simult_sources", 1)
+
+                for i in range(0, period['bags_number'] // simult_sources):
+                    srcs = random.sample(cur_sources, simult_sources)
+                    for (j, src) in enumerate(srcs):
+                        if j > 0:
+                            mini_delta = round(abs(np.random.normal(0, 0.5)), 2)
+                            yield self.env.timeout(mini_delta)
+
+                        dst = random.choice(cur_sinks)
+                        bag = Bag(bag_id, ('sink', dst), self.env.now, None)
+                        logger.debug("Sending random bag #{} from {} to {} at time {}"
+                                     .format(bag_id, src, dst, self.env.now))
+                        yield self.world.handleWorldEvent(BagAppearanceEvent(src, bag))
+
+                        bag_id += 1
+                    yield self.env.timeout(delta)

@@ -1,6 +1,7 @@
 import warnings
 import networkx as nx
 import numpy as np
+import scipy.linalg as lg
 import scipy.sparse as sp
 
 from typing import Union
@@ -26,7 +27,7 @@ class HOPEEmbedding(Embedding):
             dim -= dim % 2
             print('HOPE supports only even embedding dimensions; falling back to {}'.format(dim))
 
-        if proximity not in {'katz', 'common-neighbors'}:
+        if proximity not in ('katz', 'common-neighbors', 'adamic-adar'):
             raise Exception('Unsupported proximity measure: ' + proximity)
 
         super().__init__(dim, **kwargs)
@@ -36,6 +37,7 @@ class HOPEEmbedding(Embedding):
 
     def fit(self, graph: Union[nx.DiGraph, np.ndarray], weight='weight'):
         if type(graph) == nx.DiGraph:
+            graph = nx.relabel_nodes(graph, agent_idx)
             A = nx.to_numpy_matrix(graph, nodelist=sorted(graph.nodes), weight=weight)
             n = graph.number_of_nodes()
         else:
@@ -48,9 +50,14 @@ class HOPEEmbedding(Embedding):
         elif self.proximity == 'common-neighbors':
             M_g = np.eye(n)
             M_l = A * A
+        elif self.proximity == 'adamic-adar':
+            M_g = np.eye(n)
+            D = np.mat(np.diag([1 / (np.sum(A[:, i]) + np.sum(A[i, :])) for i in range(n)]))
+            M_l = A * D * A
+
         S = np.dot(np.linalg.inv(M_g), M_l)
 
-        u, s, vt = lg.svds(S, k=self.dim // 2)
+        u, s, vt = sp.linalg.svds(S, k=self.dim // 2)
         X1 = np.dot(u, np.diag(np.sqrt(s)))
         X2 = np.dot(vt.T, np.diag(np.sqrt(s)))
         self._W = np.concatenate((X1, X2), axis=1)

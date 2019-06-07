@@ -68,6 +68,7 @@ class RouterContainer(MessageHandler):
         self.node_mapping_inv = mp_inv
         self.virt_conn_graph = r_topology.to_undirected()
         self.routers = {}
+        self.broken_convs = set()
 
         # self.log(pprint.pformat(self.node_mapping))
         router_factory.useDynEnv(self.env)
@@ -78,6 +79,22 @@ class RouterContainer(MessageHandler):
         msgs = super().init(config)
         init_msg = WireInMsg(-1, InitMessage(config))
         return msgs + flatten([self.handleViaRouter(rid, init_msg) for rid in self.routers.keys()])
+
+    def _workingTopology(self):
+        G = deepcopy(self.topology)
+        es = list(G.edges(data=True))
+        for u, v, ps in es:
+            if ps['conveyor'] in self.broken_convs:
+                G.remove_edge(u, v)
+        return G
+
+    def handleEvent(self, event: WorldEvent) -> List[WorldEvent]:
+        if isinstance(event, ConveyorBreakEvent):
+            self.broken_convs.add(event.conv_idx)
+        elif isinstance(event, ConveyorRestoreEvent):
+            self.broken_convs.remove(event.conv_idx)
+
+        return super().handleEvent(event)
 
     def handleMsgFrom(self, sender: AgentId, msg: Message) -> List[WorldEvent]:
         if isinstance(msg, WrappedRouterMsg):
@@ -207,7 +224,8 @@ class RouterContainer(MessageHandler):
         Enqueues and processes a `Bag` as `Package` in the same time.
         """
         node_id = self.node_mapping_inv[router_id]
-        allowed_nbrs = only_reachable(self.topology, bag.dst, self.topology.successors(node_id))
+        topology = self._workingTopology()
+        allowed_nbrs = only_reachable(topology, bag.dst, self.topology.successors(node_id))
         allowed_routers = [self.node_mapping[v] for v in allowed_nbrs]
 
         self.log('bag handle: {}, allowed nbrs: {}'.format(bag, allowed_nbrs))

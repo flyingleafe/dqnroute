@@ -347,6 +347,14 @@ class BagDetectionEvent(WorldEvent):
     def __init__(self, bag: Bag):
         super().__init__(bag=bag)
 
+class ConveyorBreakEvent(WorldEvent):
+    def __init__(self, conv_idx: int):
+        super().__init__(conv_idx=conv_idx)
+
+class ConveyorRestoreEvent(WorldEvent):
+    def __init__(self, conv_idx: int):
+        super().__init__(conv_idx=conv_idx)
+
 class BagReceiveAction(Action):
     def __init__(self, bag: Bag):
         super().__init__(bag=bag)
