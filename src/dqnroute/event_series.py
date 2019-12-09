@@ -76,6 +76,9 @@ class EventSeries:
     def save(self, csv_path):
         self.getSeries().to_csv(csv_path, index=False)
 
+    def maxTime(self):
+        return self.records[-1][0]
+
 
 class MultiEventSeries(EventSeries):
     def __init__(self, **series: Dict[str, EventSeries]):
@@ -111,6 +114,10 @@ class MultiEventSeries(EventSeries):
         dfs = split_dataframe(df)
         for tag, df in dfs:
             self.series[tag].load(df)
+
+    def maxTime(self):
+        return max([es.maxTime() for es in self.series.values()])
+
 
 
 class ChangingValue(object):

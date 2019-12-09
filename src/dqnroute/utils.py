@@ -75,6 +75,7 @@ def gen_network_graph(gen) -> nx.Graph:
 
     if gen_type == 'barabasi-albert':
         G = nx.barabasi_albert_graph(gen['n'], gen['m'], seed=gen['seed'])
+        G = nx.relabel_nodes(G, lambda u: ('router', u))
         np.random.seed(gen['seed'])
         for u, v in G.edges():
             G[u][v]['bandwidth'] = DEF_PKG_SIZE

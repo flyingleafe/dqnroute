@@ -192,7 +192,7 @@ class DQNRouterOO(DQNRouter):
 
     def _replay(self):
         states, _, values = self._sampleMemStacked()
-        self._train(states, np.array(values, dtype=np.float32))
+        self._train(states, np.expand_dims(np.array(values, dtype=np.float32), axis=0))
 
 
 class DQNRouterEmb(DQNRouterOO):

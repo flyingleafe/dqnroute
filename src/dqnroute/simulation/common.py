@@ -244,6 +244,7 @@ class SimulationRunner:
         if not ignore_saved and os.path.isfile(data_path):
             self.data_series.load(data_path)
             if progress_queue is not None:
+                progress_queue.put((run_id, self.data_series.maxTime()))
                 progress_queue.put((run_id, None))
 
         else:

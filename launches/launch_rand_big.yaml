@@ -10,8 +10,8 @@ network:
 settings:
   pkg_distr:
     sequence:
-      - {pkg_number: 25000, delta: 10, simult_sources: 5}
-      # - {pkg_number: 50000, delta: 10, simult_sources: 10}
+      # - {pkg_number: 25000, delta: 10, simult_sources: 5}
+      - {pkg_number: 50000, delta: 10, simult_sources: 10}
   router_env:
     pkg_process_delay: 5
   router:
