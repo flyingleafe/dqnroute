@@ -159,7 +159,7 @@ class PGDAdversary(Adversary):
                 classification_gradient, classification_loss = get_gradient(perturbed_vector)
                 if self.verbose > 0:
                     if classification_loss > self.stop_loss or i == self.steps - 1 or i % 5 == 0 and self.verbose > 1:
-                        print(f"step {i:3d}: objective = {-classification_loss:+.7f}, "
+                        print(f"step {i:3d}: objective = {-classification_loss:7f}, "
                               f"║Δx║ = {self.norm_(perturbation):.5f}, ║x║ = {self.norm_(perturbed_vector):.5f}")
                 if classification_loss > self.stop_loss:
                     found = True
