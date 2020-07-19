@@ -432,7 +432,7 @@ class ConveyorRewardAgent(RewardAgent):
         time_sent, _ = old_reward_data
         time_processed, energy_gap = msg.reward_data
         time_gap = time_processed - time_sent
-
+        
         # self.log('time gap: {}, nrg gap: {}'.format(time_gap, energy_gap), True)
         return msg.Q_estimate + time_gap + self._e_weight * energy_gap
 
