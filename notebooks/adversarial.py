@@ -2,6 +2,7 @@ import numpy as np
 import torch
 from typing import *
 from abc import ABC, abstractmethod
+import contextlib
 
 from ml_util import Util
 
@@ -61,7 +62,7 @@ class PGDAdversary(Adversary):
     
     def __init__(self, rho: float = 0.1, steps: int = 25, step_size: float = 0.1, random_start: bool = True,
                  stop_loss: float = 0, verbose: int = 1, norm: str = "scaled_l_2",
-                 n_repeat: int = 1, repeat_mode: str = None):
+                 n_repeat: int = 1, repeat_mode: str = None, initial_smoothing_alpha: float = 0.01):
         """
         Constructs PGDAdversary. 
         :param rho > 0: bound on perturbation norm.
@@ -76,6 +77,7 @@ class PGDAdversary(Adversary):
         :param repeat_mode: 'any' or 'min': In mode 'any', n_repeat runs are identical and any run that reaches
             stop_loss will prevent subsequent runs. In mode 'min', all runs will be performed, and if a run
             finds a smaller perturbation according to norm, it will tighten rho on the next run.
+        :param initial_smoothing_alpha: initial value of the probability smoothing parameter.
         """
         super().__init__()
         self.rho = rho
@@ -94,6 +96,7 @@ class PGDAdversary(Adversary):
         assert repeat_mode in [None, "any", "min"], "if repeat_mode is set, it must be either 'any' or 'min'"
         self.n_repeat = n_repeat
         self.shrinking_repeats = repeat_mode == "min"
+        self.initial_smoothing_alpha = initial_smoothing_alpha
     
     def norm_(self, x: torch.tensor) -> float:
         """
@@ -125,7 +128,8 @@ class PGDAdversary(Adversary):
     
     def perturb(self, initial_vector: torch.tensor,
                 get_gradient: Callable[[torch.tensor], Tuple[torch.tensor, float, object]]) -> torch.tensor:
-        with torch.autograd.detect_anomaly():
+        #with torch.autograd.detect_anomaly():
+        with contextlib.nullcontext():
             best_perturbation = None
             best_perturbation_norm = np.infty
             # rho may potentially shrink with repeat_mode == "min":
@@ -134,6 +138,8 @@ class PGDAdversary(Adversary):
             for run_n in range(self.n_repeat):
                 x1 = initial_vector * 1
                 perturbation = x1 * 0
+                
+                smoothing_alpha = self.initial_smoothing_alpha
 
                 if random_start:
                     # random vector within the rho-ball
@@ -155,9 +161,11 @@ class PGDAdversary(Adversary):
 
                 found = False
                 for i in range(self.steps):
+                    # in the end of optimization, alpha becomes ~20 times smaller than in the beginning:
+                    smoothing_alpha *= (1 - 3 / self.steps) #!!!
                     assert not torch.isnan(perturbation).any()
                     perturbed_vector = x1 + perturbation
-                    classification_gradient, classification_loss, aux_info = get_gradient(perturbed_vector)
+                    classification_gradient, classification_loss, aux_info = get_gradient(perturbed_vector, smoothing_alpha)
                     if self.verbose > 0:
                         if classification_loss > self.stop_loss or i == self.steps - 1 or i % 5 == 0 and self.verbose > 1:
                             print(f"step {i:3d}: objective = {classification_loss:7f}, "
