@@ -45,6 +45,9 @@ class RouterGraph:
         self.conveyor_models: dict = runner.world.conveyor_models
         self._agent_id_to_edge_lengths = {}
         self._node_to_conveyor_ids = {}
+        
+        self.junctions = set()
+        
         for conveyor_index, m in self.conveyor_models.items():
             checkpoints = m.checkpoints
             for cp_index, cp in enumerate(checkpoints):
@@ -69,9 +72,11 @@ class RouterGraph:
                     break
                     
             print(f"conveyor {conveyor_index}: {checkpoints}, length = {m.length}")
-                    
+            
             for cp_index, cp in enumerate(checkpoints):
                 checkpoint_node_key = cp[0]
+                if checkpoint_node_key[0] == "junction":
+                    self.junctions.add(checkpoint_node_key)
                 position = cp[1]
                 if cp_index < len(checkpoints) - 1:
                     next_position = checkpoints[cp_index + 1][1]
@@ -89,6 +94,8 @@ class RouterGraph:
                         router = routers[0]
                         self._agent_id_to_edge_lengths[router[0]] = edge_len
                         break
+                        
+        self.junctions = list(self.junctions)
         
         # add junctions also to the conveyors that they end
         for conveyor_index in self.conveyor_models.keys():
