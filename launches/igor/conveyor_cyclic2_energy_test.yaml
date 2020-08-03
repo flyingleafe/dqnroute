@@ -29,7 +29,7 @@ configuration:
       length: 20
       upstream: {type: 'conveyor', idx: 8, pos: 0}
     8:
-      length: 20
+      length: 30
       upstream: {type: 'conveyor', idx: 0, pos: 10}
     9:
       length: 10
@@ -58,11 +58,11 @@ settings:
       # - {bags_number: 2000, delta: 10}
       - {bags_number: 200, delta: 20, sinks: [0]}
       - {bags_number: 200, delta: 20}
-      - {bags_number: 200, delta: 20, sinks: [0]} 
+      - {bags_number: 200, delta: 20, sinks: [1]} 
       - {bags_number: 200, delta: 20}
       - {bags_number: 200, delta: 20, sinks: [0]} 
       - {bags_number: 200, delta: 20}
-      - {bags_number: 200, delta: 20, sinks: [0]} 
+      - {bags_number: 200, delta: 20, sinks: [1]} 
   conveyor_env:
     speed: 1
     energy_consumption: 1
