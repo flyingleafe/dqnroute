@@ -1,0 +1,240 @@
+configuration:
+  sinks: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  sources:
+    0: {upstream_conv: 26}
+    1: {upstream_conv: 27}
+  conveyors:
+    0:
+      length: 20
+      upstream: {type: 'conveyor', idx: 28, pos: 0}
+    28:
+      length: 20
+      upstream: {type: 'conveyor', idx: 26, pos: 70}
+    1:
+      length: 20
+      upstream: {type: 'conveyor', idx: 29, pos: 0}
+    29:
+      length: 20
+      upstream: {type: 'conveyor', idx: 27, pos: 70}
+    2:
+      length: 30
+      upstream: {type: 'conveyor', idx: 27, pos: 180}
+    3:
+      length: 70
+      upstream: {type: 'conveyor', idx: 26, pos: 200}
+    4:
+      length: 30
+      upstream: {type: 'conveyor', idx: 26, pos: 170}
+    5:
+      length: 30
+      upstream: {type: 'conveyor', idx: 3, pos: 30}
+    6:
+      length: 20
+      upstream: {type: 'conveyor', idx: 27, pos: 200}
+    7:
+      length: 40
+      upstream: {type: 'conveyor', idx: 10, pos: 175}
+    8:
+      length: 310
+      upstream: {type: 'conveyor', idx: 10, pos: 295}
+    9:
+      length: 220
+      upstream: {type: 'conveyor', idx: 10, pos: 40}
+    10:
+      length: 575
+      upstream: {type: 'conveyor', idx: 10, pos: 55}
+    11:
+      length: 20
+      upstream: {type: 'conveyor', idx: 8, pos: 70}
+    12:
+      length: 50
+      upstream: {type: 'sink', idx: 0}
+    13:
+      length: 50
+      upstream: {type: 'sink', idx: 1}
+    14:
+      length: 50
+      upstream: {type: 'sink', idx: 2}
+    15:
+      length: 50
+      upstream: {type: 'sink', idx: 3}
+    16:
+      length: 50
+      upstream: {type: 'sink', idx: 4}
+    17:
+      length: 50
+      upstream: {type: 'sink', idx: 5}
+    18:
+      length: 50
+      upstream: {type: 'sink', idx: 6}
+    19:
+      length: 50
+      upstream: {type: 'sink', idx: 7}
+    20:
+      length: 50
+      upstream: {type: 'sink', idx: 8}
+    21:
+      length: 50
+      upstream: {type: 'sink', idx: 9}
+    22:
+      length: 50
+      upstream: {type: 'sink', idx: 10}
+    23:
+      length: 50
+      upstream: {type: 'sink', idx: 11}
+    24:
+      length: 50
+      upstream: {type: 'sink', idx: 12}
+    25:
+      length: 150
+      upstream: {type: 'conveyor', idx: 10, pos: 475}
+    26:
+      length: 265
+      upstream: {type: 'conveyor', idx: 27, pos: 320}
+    27:
+      length: 570
+      upstream: {type: 'conveyor', idx: 27, pos: 20}
+  diverters:
+    0:
+      conveyor: 26
+      pos: 50
+      upstream_conv: 0
+    1:
+      conveyor: 27
+      pos: 50
+      upstream_conv: 1
+    2:
+      conveyor: 26
+      pos: 90
+      upstream_conv: 2
+    3:
+      conveyor: 26
+      pos: 130
+      upstream_conv: 3
+    4:
+      conveyor: 27
+      pos: 100
+      upstream_conv: 4
+    5:
+      conveyor: 27
+      pos: 130
+      upstream_conv: 5
+    6:
+      conveyor: 3
+      pos: 40
+      upstream_conv: 6
+    7:
+      conveyor: 27
+      pos: 210
+      upstream_conv: 7
+    8:
+      conveyor: 26
+      pos: 215
+      upstream_conv: 8
+    9:
+      conveyor: 27
+      pos: 330
+      upstream_conv: 9
+    10:
+      conveyor: 27
+      pos: 350
+      upstream_conv: 10
+    11:
+      conveyor: 10
+      pos: 105
+      upstream_conv: 11
+    12:
+      conveyor: 10
+      pos: 225
+      upstream_conv: 12
+    13:
+      conveyor: 10
+      pos: 235
+      upstream_conv: 13
+    14:
+      conveyor: 10
+      pos: 245
+      upstream_conv: 14
+    15:
+      conveyor: 10
+      pos: 255
+      upstream_conv: 15
+    16:
+      conveyor: 10
+      pos: 265
+      upstream_conv: 16
+    17:
+      conveyor: 10
+      pos: 275
+      upstream_conv: 17
+    18:
+      conveyor: 10
+      pos: 285
+      upstream_conv: 18
+    19:
+      conveyor: 8
+      pos: 90
+      upstream_conv: 19
+    20:
+      conveyor: 8
+      pos: 100
+      upstream_conv: 20
+    21:
+      conveyor: 8
+      pos: 110
+      upstream_conv: 21
+    22:
+      conveyor: 8
+      pos: 120
+      upstream_conv: 22
+    23:
+      conveyor: 8
+      pos: 130
+      upstream_conv: 23
+    24:
+      conveyor: 8
+      pos: 140
+      upstream_conv: 24
+    25:
+      conveyor: 10
+      pos: 305
+      upstream_conv: 25
+settings:
+  bags_distr:
+    sequence:
+      - {bags_number: 100, delta: 20, sinks: [0, 1, 2, 3, 4, 5, 6]}
+      - {bags_number: 100, delta: 20}
+      - {bags_number: 100, delta: 20, sinks: [7, 8, 9, 10, 11, 12]} 
+      - {bags_number: 100, delta: 20}
+      - {bags_number: 100, delta: 20, sinks: [0, 1, 2, 3, 4, 5, 6]} 
+      - {bags_number: 100, delta: 20}
+      - {bags_number: 100, delta: 20, sinks: [7, 8, 9, 10, 11, 12]} 
+  conveyor_env:
+    speed: 1
+    energy_consumption: 1
+  conveyor:
+    stop_delay: 40
+    slowdown_delay: 1
+  router:
+    simple_q:
+      energy_reward_weight: 0.4 # * 0.0002
+      learning_rate: 0.5
+    dqn: &dqn
+      energy_reward_weight: 1
+      optimizer: 'rmsprop'
+      scope: 'conveyor_test_ng'
+      activation: 'relu'
+      layers: [64, 64]
+      additional_inputs:
+        - tag: 'amatrix'
+      batch_size: 1
+      mem_capacity: 1
+    dqn_oneout:
+      <<: *dqn
+    dqn_emb:
+      <<: *dqn
+      energy_reward_weight: 0.5
+      additional_inputs: []
+      embedding:
+        alg: 'lap'
+        dim: 12
