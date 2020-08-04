@@ -146,7 +146,7 @@ def make_conveyor_topology_graph(config) -> nx.DiGraph:
             v_pos = sections[i][-1]
             edge_len = v_pos - u_pos
 
-            assert edge_len >= 2, f"Conveyor section of conveyor {conv_id} is way too short!"
+            assert edge_len >= 2, f"Conveyor section of conveyor {conv_id} is way too short (positions: {u_pos} and {v_pos})!"
             DG.add_edge(u, v, length=edge_len, conveyor=conv_id, end_pos=v_pos)
 
             if (i > 1) or (u[0] != 'diverter'):

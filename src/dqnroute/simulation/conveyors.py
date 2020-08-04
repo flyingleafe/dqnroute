@@ -499,6 +499,8 @@ class ConveyorsRunner(SimulationRunner):
                 cur_sources = period.get('sources', sources)
                 cur_sinks = period.get('sinks', sinks)
                 simult_sources = period.get("simult_sources", 1)
+                #print(period, cur_sources)
+                #assert False
 
                 for i in range(0, period['bags_number'] // simult_sources):
                     srcs = random.sample(cur_sources, simult_sources)

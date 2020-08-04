@@ -29,6 +29,7 @@ class RouterGraph:
                        + [(2, key) for key in self.node_keys if key[0] == "sink"] \
                        + [(1, key) for key in self.node_keys if key[0] not in ["source", "sink"]]
         self.node_keys = [x[1] for x in sorted(self.node_keys)]
+        print(f"Graph size = {len(self.node_keys)}")
         self.node_keys_to_indices = {key: i for i, key in enumerate(self.node_keys)}
         self.indices_to_node_keys = {i: key for i, key in enumerate(self.node_keys)}
         
