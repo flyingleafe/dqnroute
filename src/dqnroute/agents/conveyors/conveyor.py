@@ -283,6 +283,7 @@ class SimpleRouterConveyor(StopDelayConveyor, RouterContainer):
             self.next_node[u] = v
             self.prev_node[v] = u
             if agent_type(u) == 'junction':
+                #print(conv_idx)
                 w, cid = [(w, cid) for w, _, cid in self.topology.in_edges(u, data='conveyor')
                           if cid != conv_idx][0]
                 self.down_conv[u] = (cid, w)

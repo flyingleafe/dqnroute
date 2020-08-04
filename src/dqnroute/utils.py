@@ -300,6 +300,11 @@ def conveyor_edges(topology, conv_idx):
 
 def conveyor_adj_nodes(topology, conv_idx, only_own=False, data=False):
     conv_edges = conveyor_edges(topology, conv_idx)
+    
+    #print(sorted(list(set([cid for u, v, cid in topology.edges(data='conveyor')]))))
+    #print([(u, v) for u, v, cid in topology.edges(data='conveyor')])
+    #print([(u, v) for u, v, cid in topology.edges(data='conveyor') if cid == conv_idx])
+    
     nodes = [conv_edges[0][0]]
     for _, v in conv_edges:
         nodes.append(v)
