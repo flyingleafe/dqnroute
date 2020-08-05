@@ -382,15 +382,22 @@ class RewardAgent(object):
     def registerResentPkg(self, pkg: Package, Q_estimate: float, action, data) -> RewardMsg:
         rdata = self._getRewardData(pkg, data)
         self._pending_pkgs[pkg.id] = (action, rdata, data)
+        
+        # Igor Buzhinsky's hack to suppress a no-key exception in receiveReward
+        self._last_tuple = action, rdata, data
+        
         return self._mkReward(pkg, Q_estimate, rdata)
 
     def receiveReward(self, msg: RewardMsg):
         try:
             action, old_reward_data, saved_data = self._pending_pkgs.pop(msg.pkg.id)
         except KeyError:
-            self.log('not our package: {}, path:\n  {}\n'
-                     .format(msg.pkg, msg.pkg.node_path), force=True)
-            raise
+            #self.log(f'not our package: {msg.pkg}, path:\n  {msg.pkg.node_path}\n', force=True)
+            #raise
+            
+            # Igor Buzhinsky's hack to suppress this exception:
+            action, old_reward_data, saved_data = self._last_tuple
+            self.log(f'Exception suppressed with Igor Buzhinsky\'s hack: not our package: {msg.pkg}, path:\n  {msg.pkg.node_path}\n', force=True)
 
         reward = self._computeReward(msg, old_reward_data)
         return action, reward, saved_data

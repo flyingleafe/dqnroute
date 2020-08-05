@@ -96,8 +96,7 @@ class LinkStateRouter(Router, AbstractStateHandler):
         if len(allowed_nbrs) == 1:
             return allowed_nbrs[0], []
 
-        path = nx.dijkstra_path(self.network, self.id, pkg.dst,
-                                weight=self.edge_weight)
+        path = nx.dijkstra_path(self.network, self.id, pkg.dst, weight=self.edge_weight)
         if path[1] in allowed_nbrs:
             return path[1], []
 
@@ -106,8 +105,7 @@ class LinkStateRouter(Router, AbstractStateHandler):
             min_len = INFTY
             for nbr in allowed_nbrs:
                 elen = self.network[self.id][nbr][self.edge_weight]
-                plen = nx.dijkstra_path_length(self.network, nbr, pkg.dst,
-                                               weight=self.edge_weight)
+                plen = nx.dijkstra_path_length(self.network, nbr, pkg.dst, weight=self.edge_weight)
                 if elen + plen < min_len:
                     min_nbr = nbr
                     min_len = elen + plen
