@@ -1,0 +1,1 @@
+ipython Verify.py -- --command deterministic_test --config_file ../launches/igor/tarau2010.yaml --force_pretrain --force_train
