@@ -5,17 +5,11 @@ configuration:
     1: {upstream_conv: 27}
   conveyors:
     0:
-      length: 20
-      upstream: {type: 'conveyor', idx: 28, pos: 0}
-    28:
-      length: 20
-      upstream: {type: 'conveyor', idx: 26, pos: 70}
+      length: 100
+      upstream: {type: 'conveyor', idx: 10, pos: 55}
     1:
-      length: 20
-      upstream: {type: 'conveyor', idx: 29, pos: 0}
-    29:
-      length: 20
-      upstream: {type: 'conveyor', idx: 27, pos: 70}
+      length: 250
+      upstream: {type: 'conveyor', idx: 27, pos: 20}
     2:
       length: 30
       upstream: {type: 'conveyor', idx: 27, pos: 180}
@@ -41,8 +35,8 @@ configuration:
       length: 220
       upstream: {type: 'conveyor', idx: 10, pos: 40}
     10:
-      length: 575
-      upstream: {type: 'conveyor', idx: 10, pos: 55}
+      length: 475
+      upstream: {type: 'conveyor', idx: 0, pos: 0}
     11:
       length: 20
       upstream: {type: 'conveyor', idx: 8, pos: 70}
@@ -86,23 +80,15 @@ configuration:
       length: 50
       upstream: {type: 'sink', idx: 12}
     25:
-      length: 150
-      upstream: {type: 'conveyor', idx: 10, pos: 475}
+      length: 155
+      upstream: {type: 'conveyor', idx: 0, pos: 5}
     26:
-      length: 265
-      upstream: {type: 'conveyor', idx: 27, pos: 320}
+      length: 270
+      upstream: {type: 'conveyor', idx: 1, pos: 5}
     27:
-      length: 570
-      upstream: {type: 'conveyor', idx: 27, pos: 20}
+      length: 320
+      upstream: {type: 'conveyor', idx: 1, pos: 0}
   diverters:
-    0:
-      conveyor: 26
-      pos: 50
-      upstream_conv: 0
-    1:
-      conveyor: 27
-      pos: 50
-      upstream_conv: 1
     2:
       conveyor: 26
       pos: 90
@@ -132,12 +118,12 @@ configuration:
       pos: 215
       upstream_conv: 8
     9:
-      conveyor: 27
-      pos: 330
+      conveyor: 1
+      pos: 10
       upstream_conv: 9
     10:
-      conveyor: 27
-      pos: 350
+      conveyor: 1
+      pos: 30
       upstream_conv: 10
     11:
       conveyor: 10
@@ -202,13 +188,13 @@ configuration:
 settings:
   bags_distr:
     sequence:
-      - {bags_number: 100, delta: 20, sinks: [0, 1, 2, 3, 4, 5, 6]}
-      - {bags_number: 100, delta: 20}
-      - {bags_number: 100, delta: 20, sinks: [7, 8, 9, 10, 11, 12]} 
-      - {bags_number: 100, delta: 20}
-      - {bags_number: 100, delta: 20, sinks: [0, 1, 2, 3, 4, 5, 6]} 
-      - {bags_number: 100, delta: 20}
-      - {bags_number: 100, delta: 20, sinks: [7, 8, 9, 10, 11, 12]} 
+      - {bags_number: 200, delta: 20, sinks: [0, 1, 2, 3, 4, 5, 6]}
+      - {bags_number: 200, delta: 20}
+      - {bags_number: 200, delta: 20, sinks: [7, 8, 9, 10, 11, 12]} 
+      - {bags_number: 200, delta: 20}
+      - {bags_number: 200, delta: 20, sinks: [0, 1, 2, 3, 4, 5, 6]} 
+      - {bags_number: 200, delta: 20}
+      - {bags_number: 200, delta: 20, sinks: [7, 8, 9, 10, 11, 12]} 
   conveyor_env:
     speed: 1
     energy_consumption: 1
