@@ -197,14 +197,11 @@ def train(args, dir_with_models: str, pretrain_filename: str, train_filename: st
     os.environ["IGOR_OVERRIDDEN_DQN_LOAD_FILENAME"] = pretrain_filename
     os.environ["IGOR_TRAIN_PROBABILITY_SMOOTHING"] = str(args.probability_smoothing)
     
-    def get_net(world):
-        return next(iter(next(iter(world.handlers.values())).routers.values())).brain
+    if not retrain:
+        os.environ["IGOR_OMIT_TRAINING"] = "True"
     
-    if retrain:
-        event_series, runner = run_single(file=scenario, router_type=router_type, progress_step=500,
-                                          ignore_saved=[True], random_seed=args.random_seed)
-    else:
-        runner = ConveyorsRunner(router_type=router_type, params_override={}, run_params=scenario)
+    event_series, runner = run_single(file=scenario, router_type=router_type, progress_step=500,
+                                      ignore_saved=[True], random_seed=args.random_seed)
         
     world = runner.world
     net = next(iter(next(iter(world.handlers.values())).routers.values())).brain
