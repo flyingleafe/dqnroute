@@ -19,7 +19,7 @@ parser.add_argument("--command", type=str, required=True,
                     help="one of deterministic_test, embedding_adversarial, q_adversarial, compare")
 parser.add_argument("--config_file", type=str, required=True,
                     help="YAML config file with the topology graph and other configuration info")
-parser.add_argument("--smoothing", type=float, default=0.01,
+parser.add_argument("--probability_smoothing", type=float, default=0.01,
                     help="smoothing (0..1) of probabilities during learning and verification (defaut: 0.01)")
 parser.add_argument("--random_seed", type=int, default=42,
                     help="random seed for pretraining and training (default: 42)")
@@ -175,6 +175,8 @@ else:
 # 3. train
 
 def train(args, dir_with_models: str, pretrain_filename: str, train_filename: str):
+    """ ALMOST COPIED FROM THE TRAINING NOTEBOOK """
+    
     def run_single(file: str, router_type: str, random_seed: int, **kwargs):
         job_id = mk_job_id(router_type, random_seed)
         with tqdm(desc=job_id) as bar:
@@ -189,6 +191,7 @@ def train(args, dir_with_models: str, pretrain_filename: str, train_filename: st
     
     # Igor: I did not see an easy way to change the code in a clean way
     os.environ["IGOR_OVERRIDED_DQN_LOAD_FILENAME"] = pretrain_filename
+    os.environ["IGOR_TRAIN_PROBABILITY_SMOOTHING"] = str(args.probability_smoothing)
     event_series, runner = run_single(file=scenario, router_type=router_type, progress_step=500,
                                       ignore_saved=[True], random_seed=args.random_seed)
     
@@ -201,15 +204,16 @@ if args.force_train or not train_path.exists():
 else:
     print(f"Using the already trained model {train_path}...")
 
-# TODO write trained model
-# TODO implement smoothing
+# TODO write the trained model
 
 
 if args.command == "deterministic_test":
     pass
 elif args.command == "embedding_adversarial":
+    # TODO use the same smoothing in adversarial search
     pass
 elif args.command == "q_adversarial":
+    # TODO use the same smoothing in adversarial search
     pass
 elif args.command == "compare":
     # TODO compare the trained model with Vyatkin/black

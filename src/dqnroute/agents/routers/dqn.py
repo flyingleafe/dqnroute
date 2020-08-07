@@ -35,6 +35,12 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         self.additional_inputs = additional_inputs
         self.nodes = nodes
         self.max_act_time = max_act_time
+        
+        # added by Igor to add probability smoothing support:
+        if "IGOR_TRAIN_PROBABILITY_SMOOTHING" in os.environ:
+            self.probability_smoothing = float(os.environ["IGOR_TRAIN_PROBABILITY_SMOOTHING"])
+        else:
+            self.probability_smoothing = 0.0
 
         if brain is None:
             self.brain = self._makeBrain(additional_inputs=additional_inputs, **kwargs)
@@ -72,8 +78,7 @@ class DQNRouter(LinkStateRouter, RewardAgent):
             return super().handleMsgFrom(sender, msg)
 
     def _makeBrain(self, additional_inputs=[], **kwargs):
-        return QNetwork(len(self.nodes), additional_inputs=additional_inputs,
-                        one_out=False, **kwargs)
+        return QNetwork(len(self.nodes), additional_inputs=additional_inputs, one_out=False, **kwargs)
 
     def _act(self, pkg: Package, allowed_nbrs: List[AgentId]):
         state = self._getNNState(pkg, allowed_nbrs)
@@ -89,8 +94,7 @@ class DQNRouter(LinkStateRouter, RewardAgent):
 
     def _predict(self, x):
         self.brain.eval()
-        return self.brain(*map(torch.from_numpy, x))\
-                   .clone().detach().numpy()
+        return self.brain(*map(torch.from_numpy, x)).clone().detach().numpy()
 
     def _train(self, x, y):
         self.brain.train()
@@ -170,6 +174,13 @@ class DQNRouterOO(DQNRouter):
         state = self._getNNState(pkg, allowed_nbrs)
         prediction = self._predict(state).flatten()
         distr = softmax(prediction, MIN_TEMP)
+        
+        # Igor: probability smoothing
+        if len(distr) == 2:
+            #print(distr)
+            distr = (1 - self.probability_smoothing) * distr + self.probability_smoothing / 2
+            #print(distr)
+        
         to_idx = sample_distr(distr)
         estimate = -np.dot(prediction, distr)
 

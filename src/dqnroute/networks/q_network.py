@@ -94,8 +94,7 @@ class QNetwork(SaveableModel):
                 inp = inp.transpose(0, 1)
 
             if inp.size()[1] != dim:
-                raise Exception('Wrong `{}` input dimension: expected {}, actual {}'
-                                .format(tag, dim, inp.size()[1]))
+                raise Exception(f'Wrong `{tag}` input dimension: expected {dim}, actual {inp.size()[1]}')
 
             if tag == 'amatrix':
                 input_tensors.append(torch.flatten(inp, start_dim=1))
