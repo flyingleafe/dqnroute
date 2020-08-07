@@ -1,11 +1,13 @@
 import numpy as np
-import torch
 import matplotlib.pyplot as plt
 import argparse
 import yaml
 from pathlib import Path
 from tqdm import tqdm
 from typing import *
+
+import torch
+import pygraphviz as pgv
 
 import os
 current_dir = os.getcwd()
@@ -232,11 +234,89 @@ g = RouterGraph(world)
 print("Reachability matrix:")
 g.print_reachability_matrix()
 
+def visualize(g: RouterGraph):
+    gv_graph = pgv.AGraph(directed=True)
 
-# TODO visualize
+    def get_gv_node_name(node_key: AgentId):
+        return f"{node_key[0]}\n{node_key[1]}"
 
+    for i, node_key in g.indices_to_node_keys.items():
+        gv_graph.add_node(i)
+        n = gv_graph.get_node(i)
+        n.attr["label"] = get_gv_node_name(node_key)
+        n.attr["shape"] = "box"
+        n.attr["style"] = "filled"
+        n.attr["fixedsize"] = "true"
+        if node_key[0] == "source":
+            n.attr["fillcolor"] = "#8888FF"
+            n.attr["width"] = "0.6"
+        elif node_key[0] == "sink":
+            n.attr["fillcolor"] = "#88FF88"
+            n.attr["width"] = "0.5"
+        elif node_key[0] == "diverter":
+            n.attr["fillcolor"] = "#FF9999"
+            n.attr["width"] = "0.7"
+        else:
+            n.attr["fillcolor"] = "#EEEEEE"
+            n.attr["width"] = "0.7"
+
+    for from_node in g.node_keys:
+        i1 = g.node_keys_to_indices[from_node]
+        for to_node in g.get_out_nodes(from_node):
+            i2 = g.node_keys_to_indices[to_node]
+            gv_graph.add_edge(i1, i2)
+            e = gv_graph.get_edge(i1, i2)
+            e.attr["label"] = g.get_edge_length(from_node, to_node)
+
+    prefix = f"../img/topology_graph{filename_suffix}."
+    gv_graph.write(prefix + "gv")
+    for prog in ["dot", "circo", "twopi"]:
+        prog_prefix = f"{prefix}{prog}."
+        for fmt in ["pdf", "png"]:
+            path = f"{prog_prefix}{fmt}"
+            print(f"Drawing {path} ...")
+            gv_graph.draw(path, prog=prog, args="-Gdpi=300 -Gmargin=0 -Grankdir=LR")
+
+visualize(g)
+
+# FIXME compute node embeddings when loading the model
+
+# TODO refactoring: extract graph drawing to somewhere
+
+print(f"Running command {args.command}...")
 if args.command == "deterministic_test":
-    pass
+    for source in g.sources:
+        for sink in g.sinks:
+            print(f"Testing delivery from {source} to {sink}...")
+            current_node = source
+            visited_nodes = set()
+            sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
+            while True:
+                if current_node in visited_nodes:
+                    print("    FAIL due to cycle")
+                    break
+                visited_nodes.add(current_node)
+                print("    in:", current_node)
+                if current_node[0] == "sink":
+                    print("    ", end="")
+                    print("OK" if current_node == sink else "FAIL due to wrong destination")
+                    break
+                elif current_node[0] in ["source", "junction"]:
+                    out_nodes = g.get_out_nodes(current_node)
+                    assert len(out_nodes) == 1
+                    current_node = out_nodes[0]
+                elif current_node[0] == "diverter":
+                    current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(current_node, sink)
+                    q_values = []
+                    for neighbor, neighbor_embedding in zip(neighbors, neighbor_embeddings):
+                        with torch.no_grad():
+                            q = g.q_forward(current_embedding, sink_embedding, neighbor_embedding).item()
+                        print(f"        Q({current_node} -> {neighbor} | {sink}) = {q:.4f}")
+                        q_values += [q]
+                    best_neighbor_index = np.argmax(np.array(q_values))
+                    current_node = neighbors[best_neighbor_index]
+                else:
+                    raise AssertionError()
 elif args.command == "embedding_adversarial":
     # TODO use the same smoothing in adversarial search
     pass
