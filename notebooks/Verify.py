@@ -1,13 +1,17 @@
-import numpy as np
-import matplotlib.pyplot as plt
 import argparse
 import yaml
 from pathlib import Path
 from tqdm import tqdm
 from typing import *
+from collections import OrderedDict
+
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 import torch
 import pygraphviz as pgv
+import sympy
 
 import os
 current_dir = os.getcwd()
@@ -17,6 +21,8 @@ from dqnroute.networks import *
 os.chdir(current_dir)
 
 from router_graph import RouterGraph
+from adversarial import PGDAdversary
+from ml_util import Util
 
 parser = argparse.ArgumentParser(description="Verifier of baggage routing neural networks.")
 parser.add_argument("--command", type=str, required=True,
@@ -31,6 +37,8 @@ parser.add_argument("--force_pretrain", action="store_true",
                     help="whether not to load previously saved pretrained models and force recomputation")
 parser.add_argument("--force_train", action="store_true",
                     help="whether not to load previously saved trained models and force recomputation")
+parser.add_argument("--simple_path_cost", action="store_true",
+                    help="use the number of transitions instead of the total conveyor length as path cost")
 
 parser.add_argument("--pretrain_num_episodes", type=int, default=10000,
                     help="pretrain_num_episodes (default: 10000)")
@@ -178,42 +186,44 @@ else:
 
 # 3. train
 
-def train(args, dir_with_models: str, pretrain_filename: str, train_filename: str, retrain: bool):
-    """ ALMOST COPIED FROM THE TRAINING NOTEBOOK """
-    
-    def run_single(file: str, router_type: str, random_seed: int, **kwargs):
-        job_id = mk_job_id(router_type, random_seed)
-        with tqdm(desc=job_id) as bar:
-            queue = DummyProgressbarQueue(bar)
-            runner = ConveyorsRunner(run_params=file, router_type=router_type,
-                                     random_seed=random_seed, progress_queue=queue, **kwargs)
-            event_series = runner.run(**kwargs)
-        return event_series, runner
+def run_single(file: str, router_type: str, random_seed: int, **kwargs):
+    job_id = mk_job_id(router_type, random_seed)
+    with tqdm(desc=job_id) as bar:
+        queue = DummyProgressbarQueue(bar)
+        runner = ConveyorsRunner(run_params=file, router_type=router_type, random_seed=random_seed,
+                                 progress_queue=queue, **kwargs)
+        event_series = runner.run(**kwargs)
+    return event_series, runner
 
-    router_type='dqn_emb'
-    #router_type='link_state'
-    
+def train(args, dir_with_models: str, pretrain_filename: str, train_filename: str,
+          router_type: str, retrain: bool, work_with_files: bool):
     # Igor: I did not see an easy way to change the code in a clean way
     os.environ["IGOR_OVERRIDDEN_DQN_LOAD_FILENAME"] = pretrain_filename
     os.environ["IGOR_TRAIN_PROBABILITY_SMOOTHING"] = str(args.probability_smoothing)
     
-    if not retrain:
+    if retrain:
+        if "IGOR_OMIT_TRAINING" in os.environ:
+            del os.environ["IGOR_OMIT_TRAINING"]
+    else:
         os.environ["IGOR_OMIT_TRAINING"] = "True"
     
     event_series, runner = run_single(file=scenario, router_type=router_type, progress_step=500,
                                       ignore_saved=[True], random_seed=args.random_seed)
-        
-    world = runner.world
-    net = next(iter(next(iter(world.handlers.values())).routers.values())).brain
-    net._label = train_filename
     
-     # Igor: save or load the trained network
-    if retrain:
-        net.save()
+    if router_type == "dqn_emb":
+        world = runner.world
+        net = next(iter(next(iter(world.handlers.values())).routers.values())).brain
+        net._label = train_filename    
+        # save or load the trained network
+        if work_with_files:
+            if retrain:
+                net.save()
+            else:
+                net.restore()
     else:
-        net.restore()
+        world = None
     
-    return world
+    return event_series, world
     
 
 train_filename = f"igor_trained{filename_suffix}"
@@ -223,7 +233,7 @@ if retrain:
     print(f"Training {train_path}...")
 else:
     print(f"Using the already trained model {train_path}...")
-world = train(args, dir_with_models, pretrain_filename, train_filename, retrain)
+_, world = train(args, dir_with_models, pretrain_filename, train_filename, "dqn_emb", retrain, True)
 
 
 # 4. load the router graph
@@ -276,9 +286,73 @@ def visualize(g: RouterGraph):
 
 visualize(g)
 
-# FIXME compute node embeddings when loading the model
-
 # TODO refactoring: extract graph drawing to somewhere
+
+
+def get_markov_chain_solution(g: RouterGraph, sink: AgentId, reachable_nodes: List[AgentId], reachable_diverters: List[AgentId]):
+    reachable_nodes_to_indices = {node_key: i for i, node_key in enumerate(reachable_nodes)}
+    sink_index = reachable_nodes_to_indices[sink]
+    print(f"  sink index = {sink_index}")
+
+    reachable_diverters_to_indices = {node_key: i for i, node_key in enumerate(reachable_diverters)}
+
+    system_size = len(reachable_nodes)
+    matrix = [[0 for _ in range(system_size)] for _ in range(system_size)]
+    bias = [[0] for _ in range(system_size)]
+
+    params = sympy.symbols([f"p{i}" for i in range(len(reachable_diverters))])
+    print(f"  parameters: {params}")
+
+    # fill the system of linear equations
+    for i in range(system_size):
+        node_key = reachable_nodes[i]
+        matrix[i][i] = 1
+        if i == sink_index:
+            # zero hitting time for the target sink
+            assert node_key[0] == "sink"
+        elif node_key[0] in ["source", "junction", "diverter"]:
+            next_node_keys = [node_key for node_key in g.get_out_nodes(node_key) if g.reachable[node_key, sink]]
+            if args.simple_path_cost:
+                bias[i][0] = 1
+            if len(next_node_keys) == 1:
+                # only one possible destination
+                # either sink, junction, or a diverter with only one option due to reachability shielding
+                next_node_key = next_node_keys[0]
+                matrix[i][reachable_nodes_to_indices[next_node_key]] = -1
+                if not args.simple_path_cost:
+                    bias[i][0] = g.get_edge_length(node_key, next_node_key)
+            elif len(next_node_key) == 2:
+                # two possible destinations
+                k1, k2 = next_node_keys[0], next_node_keys[1]
+                p = params[reachable_diverters_to_indices[node_key]]
+                print(f"      {p} = P({node_key} -> {k1})" )
+                print(f"  1 - {p} = P({node_key} -> {k2})" )
+                if k1 != sink:
+                    matrix[i][reachable_nodes_to_indices[k1]] = -p
+                if k2 != sink:
+                    matrix[i][reachable_nodes_to_indices[k2]] = p - 1
+                if not args.simple_path_cost:
+                    bias[i][0] = g.get_edge_length(node_key, k1) * p + g.get_edge_length(node_key, k2) * (1 - p)
+            else:
+                assert False
+        else:
+            assert False
+    matrix = sympy.Matrix(matrix)
+    #print(f"  matrix: {matrix}")
+    bias = sympy.Matrix(bias)
+    print(f"  bias: {bias}")
+    solution = matrix.inv() @ bias
+    #print(f"  solution: {solution}")
+    return params, solution
+
+def smooth(p):
+    # smoothing
+    # to get rid of 0 and 1 probabilities that lead to saturated gradients
+    return (1 - args.probability_smoothing) * p  + args.probability_smoothing / 2
+
+def q_values_to_first_probability(qs: torch.tensor) -> torch.tensor:
+    return smooth((qs / MIN_TEMP).softmax(dim=0)[0])
+
 
 print(f"Running command {args.command}...")
 if args.command == "deterministic_test":
@@ -315,13 +389,273 @@ if args.command == "deterministic_test":
                 else:
                     raise AssertionError()
 elif args.command == "embedding_adversarial":
-    # TODO use the same smoothing in adversarial search
-    pass
+    adv = PGDAdversary(rho=1.5, steps=100, step_size=0.02, random_start=True, stop_loss=1e5, verbose=2,
+                       norm="scaled_l_2", n_repeat=2, repeat_mode="min")
+    for sink in g.sinks:
+        print(f"Measuring robustness of delivery to {sink}...")
+        # reindex nodes so that only the nodes from which the sink is reachable are considered
+        # (otherwise, the solution will need to include infinite hitting times)
+        reachable_nodes = [node_key for node_key in g.node_keys if g.reachable[node_key, sink]]
+        print(f"  Nodes from which {sink} is reachable: {reachable_nodes}")
+
+        reachable_diverters = [node_key for node_key in reachable_nodes if node_key[0] == "diverter"]
+        reachable_sources = [node_key for node_key in reachable_nodes if node_key[0] == "source"]
+
+        params, solution = get_markov_chain_solution(g, sink, reachable_nodes, reachable_diverters)
+
+        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
+        embedding_size = sink_embedding.flatten().shape[0]
+        # gather all embeddings that we need to compute the objective
+        stored_embeddings = OrderedDict({sink: sink_embedding})
+        for diverter in reachable_diverters:
+            diverter_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(diverter, sink)
+            stored_embeddings[diverter] = diverter_embedding
+            for neighbor, neighbor_embedding in zip(neighbors, neighbor_embeddings):
+                stored_embeddings[neighbor] = neighbor_embedding
+
+        def pack_embeddings(embedding_dict: OrderedDict) -> torch.tensor:
+            return torch.cat(tuple(embedding_dict.values())).flatten()
+
+        def unpack_embeddings(embedding_vector: torch.tensor) -> OrderedDict:
+            embedding_dict = OrderedDict()
+            for i, (key, value) in enumerate(stored_embeddings.items()):
+                embedding_dict[key] = embedding_vector[i*embedding_size:(i + 1)*embedding_size]\
+                    .reshape(1, embedding_size)
+            return embedding_dict
+
+        initial_vector = pack_embeddings(stored_embeddings)
+
+        for source in reachable_sources:
+            print(f"  Measuring robustness of delivery from {source} to {sink}...")
+            source_index = g.node_keys_to_indices[source]
+            symbolic_objective = sympy.simplify(solution[source_index])
+            print(f"    Expected delivery cost from {source} = {symbolic_objective}")
+            objective = sympy.lambdify(params, symbolic_objective)        
+
+            def get_gradient(x: torch.tensor) -> Tuple[torch.tensor, float, str]:
+                """
+                :param x: parameter vector (the one expected to converge to an adversarial example)
+                Returns a tuple (gradient pointing to the direction of the adversarial attack,
+                                 the corresponding loss function value,
+                                 auxiliary information for printing during optimization)."""
+                #assert not torch.isnan(x).any()
+                x = Util.optimizable_clone(x.flatten())
+                embedding_dict = unpack_embeddings(x)
+                objective_inputs = []
+                perturbed_sink_embeddings = embedding_dict[sink].repeat(2, 1)
+                # source embedding does not influence the decision, use default value:
+                for diverter in reachable_diverters:
+                    perturbed_diverter_embeddings = embedding_dict[diverter].repeat(2, 1)
+                    _, current_neighbors, _ = g.node_to_embeddings(diverter, sink)
+                    perturbed_neighbor_embeddings = torch.cat([embedding_dict[current_neighbor]
+                                                               for current_neighbor in current_neighbors])
+                    q_values = g.q_forward(perturbed_diverter_embeddings, perturbed_sink_embeddings,
+                                           perturbed_neighbor_embeddings).flatten()
+                    #assert not torch.isnan(q_values).any()
+                    objective_inputs += [q_values_to_first_probability(q_values)]
+                objective_value = objective(*objective_inputs)
+                #print(objective_value.detach().cpu().numpy())
+                objective_value.backward()
+                aux_info = [np.round(x.detach().cpu().item(), 4) for x in objective_inputs]
+                aux_info = {param: value for param, value in zip(params, aux_info)}
+                aux_info = f"param_values = {aux_info}"
+                return x.grad, objective_value.item(), aux_info
+            adv.perturb(initial_vector, get_gradient)
 elif args.command == "q_adversarial":
-    # TODO use the same smoothing in adversarial search
-    pass
+    plot_index = 0
+    for sink in g.sinks:
+        print(f"Measuring robustness of delivery to {sink}...")
+        # reindex nodes so that only the nodes from which the sink is reachable are considered
+        # (otherwise, the solution will need to include infinite hitting times)
+        reachable_nodes = [node_key for node_key in g.node_keys if g.reachable[node_key, sink]]
+        print(f"  nodes from which {sink} is reachable: {reachable_nodes}")
+
+        reachable_diverters = [node_key for node_key in reachable_nodes if node_key[0] == "diverter"]
+        reachable_sources = [node_key for node_key in reachable_nodes if node_key[0] == "source"]
+
+        params, solution = get_markov_chain_solution(g, sink, reachable_nodes, reachable_diverters)
+
+        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
+        embedding_size = sink_embedding.flatten().shape[0]
+        sink_embeddings = sink_embedding.repeat(2, 1)
+
+        for source in reachable_sources:
+            print(f"  Measuring robustness of delivery from {source} to {sink}...")
+            source_index = g.node_keys_to_indices[source]
+            symbolic_objective = sympy.simplify(solution[source_index])
+            print(f"    Expected delivery cost from {source} = {symbolic_objective}")
+            objective = sympy.lambdify(params, symbolic_objective)
+
+            # stage 1: linear change of parameters
+            filename = "saved-net.bin"
+            torch.save(g.q_network.ff_net, filename)
+            Util.set_param_requires_grad(g.q_network.ff_net, True)
+
+            def get_objective():
+                objective_inputs = []
+                for diverter in reachable_diverters:
+                    diverter_embedding, current_neighbors, neighbor_embeddings = g.node_to_embeddings(diverter, sink)
+                    diverter_embeddings = diverter_embedding.repeat(2, 1)
+                    neighbor_embeddings = torch.cat(neighbor_embeddings, dim=0)
+                    q_values = g.q_forward(diverter_embeddings, sink_embeddings, neighbor_embeddings).flatten()
+                    objective_inputs += [q_values_to_first_probability(q_values)]
+                return objective(*objective_inputs).item()
+
+            # TODO also include junctions?? but they do not have corresponding routers!
+            for node_key in g.sources + g.diverters:
+                curent_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
+
+                for neighbor_key, neighbor_embedding in zip(neighbors, neighbor_embeddings):
+                    with torch.no_grad():
+                        reference_q = g.q_forward(curent_embedding, sink_embedding, neighbor_embedding).flatten().item()
+                    actual_qs = reference_q + np.linspace(-50, 50, 351)
+
+                    opt = torch.optim.SGD(g.q_network.parameters(), lr=0.01)
+                    opt.zero_grad()
+                    predicted_q = g.q_forward(curent_embedding, sink_embedding, neighbor_embedding).flatten()
+                    predicted_q.backward()
+
+                    def gd_step(predicted_q, actual_q, lr: float):
+                        for p in g.q_network.parameters():
+                            if p.grad is not None:
+                                mse_gradient = 2 * (predicted_q - actual_q) * p.grad 
+                                p -= lr * mse_gradient
+                    #opt = torch.optim.RMSprop(g.q_network.ff_net.parameters(), lr=0.001)
+                    objective_values = []
+                    lr = 0.001
+                    with torch.no_grad():
+                        for actual_q in actual_qs:
+                            gd_step(predicted_q, actual_q, lr)
+                            objective_values += [get_objective()]
+                            gd_step(predicted_q, actual_q, -lr)
+                    objective_values = torch.tensor(objective_values)
+                    label = f"Delivery cost from {source} to {sink} when making optimization step with current={node_key}, neighbor={neighbor_key}"
+                    print(f"{label}...")
+                    if torch.isinf(objective_values).any():
+                        print("      INFINITIES PRESENT IN COMPUTED VALUES")
+                        inf_indices = torch.isinf(objective_values)
+                        if sum(inf_indices) == objective_values.numel():
+                            continue
+                        regular_values = objective_values[~inf_indices]
+                        neginf_indices = (objective_values < 0) & inf_indices
+                        posinf_indices = (objective_values > 0) & inf_indices
+                        objective_values[neginf_indices] = min(regular_values) - 5
+                        objective_values[posinf_indices] = max(regular_values) + 5
+                    plt.figure(figsize=(14, 2))
+                    plt.yscale("log")
+                    plt.title(label)
+                    plt.plot(actual_qs, objective_values)
+                    gap = max(objective_values) - min(objective_values)
+                    y_delta = 0 if gap > 0 else 5
+                    plt.vlines(reference_q, min(objective_values) - y_delta, max(objective_values) + y_delta)
+                    plt.hlines(objective_values[len(objective_values) // 2], min(actual_qs), max(actual_qs))
+                    #plt.show()
+                    plt.savefig(f"../img/{filename_suffix}_{plot_index}.pdf")
+                    plt.close()
+                    plot_index += 1
 elif args.command == "compare":
-    # TODO compare the trained model with Vyatkin/black
-    pass
+    _legend_txt_replace = {
+        'networks': {
+            'link_state': 'Shortest paths',
+            'simple_q': 'Q-routing',
+            'pred_q': 'PQ-routing',
+            'glob_dyn': 'Global-dynamic',
+            'dqn': 'DQN',
+            'dqn_oneout': 'DQN (1-out)',
+            'dqn_emb': 'DQN-LE',
+            'centralized_simple': 'Centralized control'
+        },
+        'conveyors': {
+            'link_state': 'Vyatkin-Black',
+            'simple_q': 'Q-routing',
+            'pred_q': 'PQ-routing',
+            'glob_dyn': 'Global-dynamic',
+            'dqn': 'DQN',
+            'dqn_oneout': 'DQN (1-out)',
+            'dqn_emb': 'DQN-LE',
+            'centralized_simple': 'BSR'
+        }
+    }
+
+    _targets = {'time': 'avg', 'energy': 'sum', 'collisions': 'sum'}
+
+    _ylabels = {
+        'time': 'Mean delivery time',
+        'energy': 'Total energy consumption',
+        'collisions': 'Cargo collisions'
+    }
+    
+    router_types = ["dqn_emb", "link_state", "simple_q"]
+    series = []
+    for router_type in router_types:
+        s, _ = train(args, dir_with_models, pretrain_filename, train_filename, router_type, True, False)
+        series += [s.getSeries(add_avg=True)]
+    
+    dfs = []
+    for router_type, s in zip(router_types, series):
+        df = s.copy()
+        add_cols(df, router_type=router_type, seed=args.random_seed)
+        dfs.append(df)
+    dfs = pd.concat(dfs, axis=0)
+    
+    def print_sums(df):
+        types = set(df['router_type'])
+        for tp in types:
+            x = df.loc[df['router_type']==tp, 'count'].sum()
+            txt = _legend_txt_replace.get(tp, tp)
+            print('  {}: {}'.format(txt, x))
+    
+    def plot_data(data, meaning='time', figsize=(15,5), xlim=None, ylim=None,
+              xlabel='Simulation time', ylabel=None,
+              font_size=14, title=None, save_path=None,
+              draw_collisions=False, context='networks', **kwargs):
+        if 'time' not in data.columns:
+            datas = split_dataframe(data, preserved_cols=['router_type', 'seed'])
+            for tag, df in datas:
+                if tag == 'collisions' and not draw_collisions:
+                    print('Number of collisions:')
+                    print_sums(df)
+                    continue
+
+                xlim = kwargs.get(tag+'_xlim', xlim)
+                ylim = kwargs.get(tag+'_ylim', ylim)
+                save_path = kwargs.get(tag+'_save_path', save_path)
+                plot_data(df, meaning=tag, figsize=figsize, xlim=xlim, ylim=ylim,
+                          xlabel=xlabel, ylabel=ylabel, font_size=font_size,
+                          title=title, save_path=save_path, context='conveyors')
+            return 
+
+        target = _targets[meaning]
+        if ylabel is None:
+            ylabel = _ylabels[meaning]
+
+        fig = plt.figure(figsize=figsize)
+        ax = sns.lineplot(x='time', y=target, hue='router_type', data=data,
+                          err_kws={'alpha': 0.1})
+
+        handles, labels = ax.get_legend_handles_labels()
+        new_labels = list(map(lambda l: _legend_txt_replace[context].get(l, l), labels[1:]))
+        ax.legend(handles=handles[1:], labels=new_labels, fontsize=font_size)
+
+        ax.tick_params(axis='both', which='both', labelsize=int(font_size*0.75))
+
+        if xlim is not None:
+            ax.set_xlim(xlim)
+        if ylim is not None:
+            ax.set_ylim(ylim)
+        if title is not None:
+            ax.set_title(title)
+
+        ax.set_xlabel(xlabel, fontsize=font_size)
+        ax.set_ylabel(ylabel, fontsize=font_size)
+
+        #plt.show(fig)
+
+        if save_path is not None:
+            fig.savefig('../img/' + save_path, bbox_inches='tight')
+    
+    plot_data(dfs, figsize=(10, 8), font_size=22, energy_ylim=(7e6, 2.3e7),
+              time_save_path='conveyors-break-1-time.pdf', energy_save_path='conveyors-break-1-energy.pdf')
+
 else:
     raise RuntimeError(f"Unknown command {args.command}.")

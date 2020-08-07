@@ -3,6 +3,7 @@ import pprint
 import math
 import numpy as np
 import networkx as nx
+import os
 
 from typing import List, Callable, Dict, Tuple
 from functools import reduce
@@ -473,6 +474,11 @@ class ConveyorsRunner(SimulationRunner):
         yield self.env.timeout(1)
 
         bag_id = 1
+        
+        # added by Igor to support loading already trained models
+        if "IGOR_OMIT_TRAINING" in os.environ:
+            return
+        
         for period in bag_distr['sequence']:
             try:
                 action = period['action']
