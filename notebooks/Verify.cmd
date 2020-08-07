@@ -1,1 +1,1 @@
-ipython Verify.py -- --command deterministic_test --config_file ../launches/igor/conveyor_cyclic_energy_test.yaml --pretrain_num_episodes 10 --force_train & REM --force_pretrain
+ipython Verify.py -- --command deterministic_test --config_file ../launches/igor/conveyor_cyclic_energy_test.yaml --pretrain_num_episodes 10  --force_pretrain --force_train & REM

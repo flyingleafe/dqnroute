@@ -7,6 +7,7 @@ import numpy as np
 import networkx as nx
 import pandas as pd
 import pprint
+import os
 
 from typing import List, Tuple, Dict, Union
 from ..base import *
@@ -40,6 +41,10 @@ class DQNRouter(LinkStateRouter, RewardAgent):
             if random_init:
                 self.brain.init_xavier()
             else:
+                # added by Igor to override the filename of the loaded model:
+                if "IGOR_OVERRIDED_DQN_LOAD_FILENAME" in os.environ:
+                    self.brain._label = os.environ["IGOR_OVERRIDED_DQN_LOAD_FILENAME"]
+                
                 self.brain.restore()
                 self.log('Restored model {}'.format(self.brain._label))
 

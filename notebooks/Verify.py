@@ -54,7 +54,7 @@ print(f"Embedding dimension: {emb_dim}, graph size: {graph_size}")
 
 # 2. pretrain
 
-def pretrain(args, pretrain_dir: str, pretrain_filename: str):
+def pretrain(args, dir_with_models: str, pretrain_filename: str):
     """ ALMOST COPIED FROM THE PRETRAINING NOTEBOOK """
     
     def gen_episodes_progress(num_episodes, **kwargs):
@@ -153,37 +153,55 @@ def pretrain(args, pretrain_dir: str, pretrain_filename: str):
                                       save_path='../logs/data_conveyor1_oneinp_new.csv')
     data_conv.loc[:, 'working'] = 1.0
     conv_emb = CachedEmbedding(LaplacianEigenmap, dim=emb_dim)
-    args = {'scope': pretrain_dir, 'activation': 'relu', 'layers': [64, 64], 'embedding_dim': conv_emb.dim}
+    args = {'scope': dir_with_models, 'activation': 'relu', 'layers': [64, 64], 'embedding_dim': conv_emb.dim}
     conveyor_network_ng_emb = QNetwork(graph_size, **args)
     conveyor_network_ng_emb_ws = QNetwork(graph_size, additional_inputs=[{'tag': 'working', 'dim': 1}], **args)
     conveyor_network_ng_emb_losses = qnetwork_pretrain(conveyor_network_ng_emb, shuffle(data_conv), epochs=10,
-                                                       embedding=conv_emb)
-    conveyor_network_ng_emb_ws_losses = qnetwork_pretrain(conveyor_network_ng_emb_ws, shuffle(data_conv), epochs=20,
-                                                          embedding=conv_emb)
+                                                       embedding=conv_emb, save_net=True)
+    #conveyor_network_ng_emb_ws_losses = qnetwork_pretrain(conveyor_network_ng_emb_ws, shuffle(data_conv), epochs=20,
+    #                                                      embedding=conv_emb, save_net=False)
 
-pretrain_dir = 'conveyor_test_ng'
-pretrain_filename = f"igor_pretrained_{emb_dim}_{graph_size}_{os.path.split(scenario)[1]}.bin"
-pretrain_path = Path(TORCH_MODELS_DIR) / pretrain_dir / pretrain_filename
+dir_with_models = 'conveyor_test_ng'
+filename_suffix = f"_{emb_dim}_{graph_size}_{os.path.split(scenario)[1]}.bin"
+pretrain_filename = f"igor_pretrained{filename_suffix}"
+pretrain_path = Path(TORCH_MODELS_DIR) / dir_with_models / pretrain_filename
 if args.force_pretrain or not pretrain_path.exists():
     print(f"Pretraining {pretrain_path}...")
-    pretrain(args, pretrain_dir, pretrain_filename)
+    pretrain(args, dir_with_models, pretrain_filename)
 else:
     print(f"Using the already pretrained model {pretrain_path}...")
 
 
 # 3. train
 
-def run_single(file: str, router_type: str, random_seed: int, **kwargs):
-    job_id = mk_job_id(router_type, random_seed)
-    with tqdm(desc=job_id) as bar:
-        queue = DummyProgressbarQueue(bar)
-        runner = ConveyorsRunner(run_params=file, router_type=router_type,
-                                 random_seed=random_seed, progress_queue=queue, **kwargs)
-        event_series = runner.run(**kwargs)
-    return event_series, runner
+def train(args, dir_with_models: str, pretrain_filename: str, train_filename: str):
+    def run_single(file: str, router_type: str, random_seed: int, **kwargs):
+        job_id = mk_job_id(router_type, random_seed)
+        with tqdm(desc=job_id) as bar:
+            queue = DummyProgressbarQueue(bar)
+            runner = ConveyorsRunner(run_params=file, router_type=router_type,
+                                     random_seed=random_seed, progress_queue=queue, **kwargs)
+            event_series = runner.run(**kwargs)
+        return event_series, runner
 
+    router_type='dqn_emb'
+    #router_type='link_state'
+    
+    # Igor: I did not see an easy way to change the code in a clean way
+    os.environ["IGOR_OVERRIDED_DQN_LOAD_FILENAME"] = pretrain_filename
+    event_series, runner = run_single(file=scenario, router_type=router_type, progress_step=500,
+                                      ignore_saved=[True], random_seed=args.random_seed)
+    
 
-# TODO train
+train_filename = f"igor_trained{filename_suffix}"
+train_path = Path(TORCH_MODELS_DIR) / dir_with_models / train_filename
+if args.force_train or not train_path.exists():
+    print(f"Training {train_path}...")
+    train(args, dir_with_models, pretrain_filename, train_filename)
+else:
+    print(f"Using the already trained model {train_path}...")
+
+# TODO write trained model
 # TODO implement smoothing
 
 
