@@ -14,6 +14,8 @@ from dqnroute import *
 from dqnroute.networks import *
 os.chdir(current_dir)
 
+from router_graph import RouterGraph
+
 parser = argparse.ArgumentParser(description="Verifier of baggage routing neural networks.")
 parser.add_argument("--command", type=str, required=True,
                     help="one of deterministic_test, embedding_adversarial, q_adversarial, compare")
@@ -174,7 +176,7 @@ else:
 
 # 3. train
 
-def train(args, dir_with_models: str, pretrain_filename: str, train_filename: str):
+def train(args, dir_with_models: str, pretrain_filename: str, train_filename: str, retrain: bool):
     """ ALMOST COPIED FROM THE TRAINING NOTEBOOK """
     
     def run_single(file: str, router_type: str, random_seed: int, **kwargs):
@@ -190,22 +192,48 @@ def train(args, dir_with_models: str, pretrain_filename: str, train_filename: st
     #router_type='link_state'
     
     # Igor: I did not see an easy way to change the code in a clean way
-    os.environ["IGOR_OVERRIDED_DQN_LOAD_FILENAME"] = pretrain_filename
+    os.environ["IGOR_OVERRIDDEN_DQN_LOAD_FILENAME"] = pretrain_filename
     os.environ["IGOR_TRAIN_PROBABILITY_SMOOTHING"] = str(args.probability_smoothing)
-    event_series, runner = run_single(file=scenario, router_type=router_type, progress_step=500,
-                                      ignore_saved=[True], random_seed=args.random_seed)
+    
+    def get_net(world):
+        return next(iter(next(iter(world.handlers.values())).routers.values())).brain
+    
+    if retrain:
+        event_series, runner = run_single(file=scenario, router_type=router_type, progress_step=500,
+                                          ignore_saved=[True], random_seed=args.random_seed)
+    else:
+        runner = ConveyorsRunner(router_type=router_type, params_override={}, run_params=scenario)
+        
+    world = runner.world
+    net = next(iter(next(iter(world.handlers.values())).routers.values())).brain
+    net._label = train_filename
+    
+     # Igor: save or load the trained network
+    if retrain:
+        net.save()
+    else:
+        net.restore()
+    
+    return world
     
 
 train_filename = f"igor_trained{filename_suffix}"
 train_path = Path(TORCH_MODELS_DIR) / dir_with_models / train_filename
-if args.force_train or not train_path.exists():
+retrain = args.force_train or not train_path.exists()
+if retrain:
     print(f"Training {train_path}...")
-    train(args, dir_with_models, pretrain_filename, train_filename)
 else:
     print(f"Using the already trained model {train_path}...")
+world = train(args, dir_with_models, pretrain_filename, train_filename, retrain)
 
-# TODO write the trained model
 
+# 4. load the router graph
+g = RouterGraph(world)
+print("Reachability matrix:")
+g.print_reachability_matrix()
+
+
+# TODO visualize
 
 if args.command == "deterministic_test":
     pass

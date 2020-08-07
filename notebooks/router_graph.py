@@ -7,12 +7,12 @@ from dqnroute import *
 os.chdir(current_dir)
 
 class RouterGraph:
-    def __init__(self, runner: ConveyorsRunner):
+    def __init__(self, world: ConveyorsEnvironment):
         # 1. explore
-        print(type(runner.world).mro()[:-1])
-        self.world = runner.world
-        self.graph = runner.world.topology_graph
-        self.routers = runner.world.handlers
+        #print(type(world).mro()[:-1])
+        self.world = world
+        self.graph = world.topology_graph
+        self.routers = world.handlers
         self.q_network = None
         for node_key, router_keeper in self.routers.items():
             print("node", node_key, type(router_keeper).__name__)
@@ -43,7 +43,7 @@ class RouterGraph:
         self.diverters = nodes_of_type("diverter")
         
         # 5. find edge lengths from junctions and diverter-routers 
-        self.conveyor_models: dict = runner.world.conveyor_models
+        self.conveyor_models: dict = world.conveyor_models
         self._agent_id_to_edge_lengths = {}
         self._node_to_conveyor_ids = {}
         
@@ -55,19 +55,19 @@ class RouterGraph:
                 self._node_to_conveyor_ids[cp[0]] = {conveyor_index}
             
             # attribute a sink to this conveyor, if any:
-            upstream = runner.world.layout["conveyors"][conveyor_index]["upstream"]
+            upstream = world.layout["conveyors"][conveyor_index]["upstream"]
             #print(upstream)
             if upstream["type"] == "sink":
                 self._node_to_conveyor_ids[("sink", upstream["idx"])] = {conveyor_index}
             
             # add source in the beginning, if any:
-            for source_index, source_dict in runner.world.layout["sources"].items():
+            for source_index, source_dict in world.layout["sources"].items():
                 if source_dict["upstream_conv"] == conveyor_index:
                     checkpoints = [(("source", source_index), 0)] + checkpoints
                     break
                     
             # add diverter in the beginning, if any:
-            for diverter_index, diverter_dict in runner.world.layout["diverters"].items():
+            for diverter_index, diverter_dict in world.layout["diverters"].items():
                 if diverter_dict["upstream_conv"] == conveyor_index:
                     checkpoints = [(("sourcing_diverter", diverter_index), 0)] + checkpoints
                     break
@@ -100,7 +100,7 @@ class RouterGraph:
         
         # add junctions also to the conveyors that they end
         for conveyor_index in self.conveyor_models.keys():
-            upstream = runner.world.layout["conveyors"][conveyor_index]["upstream"]
+            upstream = world.layout["conveyors"][conveyor_index]["upstream"]
             if upstream["type"] == "conveyor":
                 upstream_conv: int = upstream["idx"]
                 upstream_pos: int = upstream["pos"]

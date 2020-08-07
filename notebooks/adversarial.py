@@ -35,24 +35,6 @@ class NopAdversary(Adversary):
     def perturb(self, initial_vector: torch.tensor,
                 get_gradient: Callable[[torch.tensor], Tuple[torch.tensor, float]]) -> torch.tensor:
         return initial_vector
-    
-
-class FGSMAdversary(Adversary):
-    """
-    Implements Fast Gradient Sign Method (FGSM).
-    """
-    
-    def __init__(self, eps: float):
-        """
-        Constructs FGSMAdversary.
-        :param eps: positive number used to scale the sign of the gradient.
-        """
-        super().__init__()
-        self.eps = eps
-        
-    def perturb(self, initial_vector: torch.tensor,
-                get_gradient: Callable[[torch.tensor], Tuple[torch.tensor, float]]) -> torch.tensor:
-        return initial_vector + self.eps * torch.sign(get_gradient(initial_vector)[0])
 
 
 class PGDAdversary(Adversary):
@@ -62,7 +44,8 @@ class PGDAdversary(Adversary):
     
     def __init__(self, rho: float = 0.1, steps: int = 25, step_size: float = 0.1, random_start: bool = True,
                  stop_loss: float = 0, verbose: int = 1, norm: str = "scaled_l_2",
-                 n_repeat: int = 1, repeat_mode: str = None, initial_smoothing_alpha: float = 0.01):
+                 n_repeat: int = 1, repeat_mode: str = None,
+                 initial_smoothing_alpha: float = 0.01, scale_down_smoothing: bool = False):
         """
         Constructs PGDAdversary. 
         :param rho > 0: bound on perturbation norm.
@@ -78,6 +61,8 @@ class PGDAdversary(Adversary):
             stop_loss will prevent subsequent runs. In mode 'min', all runs will be performed, and if a run
             finds a smaller perturbation according to norm, it will tighten rho on the next run.
         :param initial_smoothing_alpha: initial value of the probability smoothing parameter.
+        :param scale_down_smoothing: whether to scale down smoothing_alpha during the search (use only if
+            there is no probability smoothing in the learning algorithm).
         """
         super().__init__()
         self.rho = rho
@@ -97,6 +82,7 @@ class PGDAdversary(Adversary):
         self.n_repeat = n_repeat
         self.shrinking_repeats = repeat_mode == "min"
         self.initial_smoothing_alpha = initial_smoothing_alpha
+        self.scale_down_smoothing = scale_down_smoothing
     
     def norm_(self, x: torch.tensor) -> float:
         """
@@ -161,9 +147,10 @@ class PGDAdversary(Adversary):
 
                 found = False
                 for i in range(self.steps):
-                    # in the end of optimization, alpha becomes ~20 times smaller than in the beginning:
-                    smoothing_alpha *= (1 - 3 / self.steps) #!!!
-                    assert not torch.isnan(perturbation).any()
+                    if self.scale_down_smoothing:
+                        # in the end of optimization, alpha becomes ~20 times smaller than in the beginning
+                        smoothing_alpha *= (1 - 3 / self.steps) #!!!
+                    #assert not torch.isnan(perturbation).any()
                     perturbed_vector = x1 + perturbation
                     classification_gradient, classification_loss, aux_info = get_gradient(perturbed_vector, smoothing_alpha)
                     if self.verbose > 0:

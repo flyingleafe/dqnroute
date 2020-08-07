@@ -145,8 +145,7 @@ def gen_episodes(num_episodes: int, context: str, one_out=True, sinks = None, ba
         factory = runner.world.factory
     else:
         factory = runner.world.factory.sub_factory
-    df = _gen_episodes(factory, num_episodes, sinks=sinks, bar=bar,
-                       random_seed=random_seed)
+    df = _gen_episodes(factory, num_episodes, sinks=sinks, bar=bar, random_seed=random_seed)
 
     if save_path is not None:
         df.to_csv(save_path, index=False)

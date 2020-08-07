@@ -511,8 +511,7 @@ class ConveyorsRunner(SimulationRunner):
 
                         dst = random.choice(cur_sinks)
                         bag = Bag(bag_id, ('sink', dst), self.env.now, None)
-                        logger.debug("Sending random bag #{} from {} to {} at time {}"
-                                     .format(bag_id, src, dst, self.env.now))
+                        logger.debug(f"Sending random bag #{bag_id} from {src} to {dst} at time {self.env.now}")
                         yield self.world.handleWorldEvent(BagAppearanceEvent(src, bag))
 
                         bag_id += 1
