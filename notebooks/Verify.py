@@ -8,7 +8,6 @@ from collections import OrderedDict
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-
 import torch
 import pygraphviz as pgv
 import sympy
@@ -41,12 +40,16 @@ parser.add_argument("--simple_path_cost", action="store_true",
                     help="use the number of transitions instead of the total conveyor length as path cost")
 parser.add_argument("--skip_graphviz", action="store_true",
                     help="do not visualize graphs")
+parser.add_argument("--softmax_temperature", type=float, default=1.5,
+                    help="custom softmax temperature (higher temperature means larger entropy in routing decisions; default: 1.5)")
 
 parser.add_argument("--pretrain_num_episodes", type=int, default=10000,
                     help="pretrain_num_episodes (default: 10000)")
 
 args = parser.parse_args()
 
+
+os.environ["IGOR_OVERRDIDDED_SOFTMAX_TEMPERATURE"] = str(args.softmax_temperature)
 
 # 1. load scenario
 scenario = args.config_file
@@ -349,12 +352,11 @@ def get_markov_chain_solution(g: RouterGraph, sink: AgentId, reachable_nodes: Li
     return params, solution
 
 def smooth(p):
-    # smoothing
-    # to get rid of 0 and 1 probabilities that lead to saturated gradients
+    # smoothing to get rid of 0 and 1 probabilities that lead to saturated gradients
     return (1 - args.probability_smoothing) * p  + args.probability_smoothing / 2
 
 def q_values_to_first_probability(qs: torch.tensor) -> torch.tensor:
-    return smooth((qs / MIN_TEMP).softmax(dim=0)[0])
+    return smooth((qs / args.softmax_temperature).softmax(dim=0)[0])
 
 
 print(f"Running command {args.command}...")
@@ -422,8 +424,7 @@ elif args.command == "embedding_adversarial":
         def unpack_embeddings(embedding_vector: torch.tensor) -> OrderedDict:
             embedding_dict = OrderedDict()
             for i, (key, value) in enumerate(stored_embeddings.items()):
-                embedding_dict[key] = embedding_vector[i*embedding_size:(i + 1)*embedding_size]\
-                    .reshape(1, embedding_size)
+                embedding_dict[key] = embedding_vector[i*embedding_size:(i + 1)*embedding_size].reshape(1, embedding_size)
             return embedding_dict
 
         initial_vector = pack_embeddings(stored_embeddings)
@@ -534,16 +535,6 @@ elif args.command == "q_adversarial":
                     objective_values = torch.tensor(objective_values)
                     label = f"Delivery cost from {source} to {sink} when making optimization step with current={node_key}, neighbor={neighbor_key}"
                     print(f"{label}...")
-                    if torch.isinf(objective_values).any():
-                        print("      INFINITIES PRESENT IN COMPUTED VALUES")
-                        inf_indices = torch.isinf(objective_values)
-                        if sum(inf_indices) == objective_values.numel():
-                            continue
-                        regular_values = objective_values[~inf_indices]
-                        neginf_indices = (objective_values < 0) & inf_indices
-                        posinf_indices = (objective_values > 0) & inf_indices
-                        objective_values[neginf_indices] = min(regular_values) - 5
-                        objective_values[posinf_indices] = max(regular_values) + 5
                     plt.figure(figsize=(14, 2))
                     plt.yscale("log")
                     plt.title(label)
@@ -552,40 +543,26 @@ elif args.command == "q_adversarial":
                     y_delta = 0 if gap > 0 else 5
                     plt.vlines(reference_q, min(objective_values) - y_delta, max(objective_values) + y_delta)
                     plt.hlines(objective_values[len(objective_values) // 2], min(actual_qs), max(actual_qs))
-                    #plt.show()
                     plt.savefig(f"../img/{filename_suffix}_{plot_index}.pdf")
                     plt.close()
                     plot_index += 1
 elif args.command == "compare":
     _legend_txt_replace = {
         'networks': {
-            'link_state': 'Shortest paths',
-            'simple_q': 'Q-routing',
-            'pred_q': 'PQ-routing',
-            'glob_dyn': 'Global-dynamic',
-            'dqn': 'DQN',
-            'dqn_oneout': 'DQN (1-out)',
-            'dqn_emb': 'DQN-LE',
-            'centralized_simple': 'Centralized control'
-        },
-        'conveyors': {
-            'link_state': 'Vyatkin-Black',
-            'simple_q': 'Q-routing',
-            'pred_q': 'PQ-routing',
-            'glob_dyn': 'Global-dynamic',
-            'dqn': 'DQN',
-            'dqn_oneout': 'DQN (1-out)',
-            'dqn_emb': 'DQN-LE',
-            'centralized_simple': 'BSR'
+            'link_state': 'Shortest paths', 'simple_q': 'Q-routing', 'pred_q': 'PQ-routing',
+            'glob_dyn': 'Global-dynamic', 'dqn': 'DQN', 'dqn_oneout': 'DQN (1-out)',
+            'dqn_emb': 'DQN-LE', 'centralized_simple': 'Centralized control'
+        }, 'conveyors': {
+            'link_state': 'Vyatkin-Black', 'simple_q': 'Q-routing', 'pred_q': 'PQ-routing',
+            'glob_dyn': 'Global-dynamic', 'dqn': 'DQN', 'dqn_oneout': 'DQN (1-out)',
+            'dqn_emb': 'DQN-LE', 'centralized_simple': 'BSR'
         }
     }
 
     _targets = {'time': 'avg', 'energy': 'sum', 'collisions': 'sum'}
 
     _ylabels = {
-        'time': 'Mean delivery time',
-        'energy': 'Total energy consumption',
-        'collisions': 'Cargo collisions'
+        'time': 'Mean delivery time', 'energy': 'Total energy consumption', 'collisions': 'Cargo collisions'
     }
     
     router_types = ["dqn_emb", "link_state", "simple_q"]

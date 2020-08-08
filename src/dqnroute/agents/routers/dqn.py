@@ -41,6 +41,12 @@ class DQNRouter(LinkStateRouter, RewardAgent):
             self.probability_smoothing = float(os.environ["IGOR_TRAIN_PROBABILITY_SMOOTHING"])
         else:
             self.probability_smoothing = 0.0
+            
+        # added by Igor to allow custom temperatures for softmax:
+        if "IGOR_OVERRDIDDED_SOFTMAX_TEMPERATURE" in os.environ:
+            self.min_temp = float(os.environ["IGOR_OVERRDIDDED_SOFTMAX_TEMPERATURE"])
+        else:
+            self.min_temp = MIN_TEMP
 
         if brain is None:
             self.brain = self._makeBrain(additional_inputs=additional_inputs, **kwargs)
@@ -83,7 +89,7 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     def _act(self, pkg: Package, allowed_nbrs: List[AgentId]):
         state = self._getNNState(pkg, allowed_nbrs)
         prediction = self._predict(state)[0]
-        distr = softmax(prediction, MIN_TEMP)
+        distr = softmax(prediction, self.min_temp)
         estimate = -np.dot(prediction, distr)
 
         to = -1
@@ -173,7 +179,7 @@ class DQNRouterOO(DQNRouter):
     def _act(self, pkg: Package, allowed_nbrs: List[AgentId]):
         state = self._getNNState(pkg, allowed_nbrs)
         prediction = self._predict(state).flatten()
-        distr = softmax(prediction, MIN_TEMP)
+        distr = softmax(prediction, self.min_temp)
         
         # Igor: probability smoothing
         if len(distr) == 2:
