@@ -1,5 +1,0 @@
-REM ipython Verify.py -- --command deterministic_test --config_file ../launches/igor/conveyor_cyclic_energy_test.yaml --pretrain_num_episodes 10 & REM --force_pretrain --force_train 
-REM ipython Verify.py -- --command embedding_adversarial --config_file ../launches/igor/conveyor_cyclic_energy_test.yaml --pretrain_num_episodes 10 & REM --force_pretrain --force_train
-REM ipython Verify.py -- --command embedding_adversarial --config_file ../launches/igor/tarau2010.yaml --pretrain_num_episodes 10 & REM --force_pretrain --force_train
-REM ipython Verify.py -- --command q_adversarial --config_file ../launches/igor/tarau2010.yaml --pretrain_num_episodes 10 & REM --force_pretrain --force_train
-ipython Verify.py -- --command compare --config_file ../launches/igor/acyclic_conveyor_energy_test.yaml --pretrain_num_episodes 10 & REM --force_pretrain --force_train
