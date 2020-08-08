@@ -39,6 +39,8 @@ parser.add_argument("--force_train", action="store_true",
                     help="whether not to load previously saved trained models and force recomputation")
 parser.add_argument("--simple_path_cost", action="store_true",
                     help="use the number of transitions instead of the total conveyor length as path cost")
+parser.add_argument("--skip_graphviz", action="store_true",
+                    help="do not visualize graphs")
 
 parser.add_argument("--pretrain_num_episodes", type=int, default=10000,
                     help="pretrain_num_episodes (default: 10000)")
@@ -284,7 +286,8 @@ def visualize(g: RouterGraph):
             print(f"Drawing {path} ...")
             gv_graph.draw(path, prog=prog, args="-Gdpi=300 -Gmargin=0 -Grankdir=LR")
 
-visualize(g)
+if not args.skip_graphviz:
+    visualize(g)
 
 # TODO refactoring: extract graph drawing to somewhere
 
@@ -390,7 +393,7 @@ if args.command == "deterministic_test":
                     raise AssertionError()
 elif args.command == "embedding_adversarial":
     adv = PGDAdversary(rho=1.5, steps=100, step_size=0.02, random_start=True, stop_loss=1e5, verbose=2,
-                       norm="scaled_l_2", n_repeat=2, repeat_mode="min")
+                       norm="scaled_l_2", n_repeat=2, repeat_mode="min", dtype=torch.float64)
     for sink in g.sinks:
         print(f"Measuring robustness of delivery to {sink}...")
         # reindex nodes so that only the nodes from which the sink is reachable are considered
@@ -630,8 +633,7 @@ elif args.command == "compare":
             ylabel = _ylabels[meaning]
 
         fig = plt.figure(figsize=figsize)
-        ax = sns.lineplot(x='time', y=target, hue='router_type', data=data,
-                          err_kws={'alpha': 0.1})
+        ax = sns.lineplot(x='time', y=target, hue='router_type', data=data, err_kws={'alpha': 0.1})
 
         handles, labels = ax.get_legend_handles_labels()
         new_labels = list(map(lambda l: _legend_txt_replace[context].get(l, l), labels[1:]))
@@ -648,8 +650,6 @@ elif args.command == "compare":
 
         ax.set_xlabel(xlabel, fontsize=font_size)
         ax.set_ylabel(ylabel, fontsize=font_size)
-
-        #plt.show(fig)
 
         if save_path is not None:
             fig.savefig('../img/' + save_path, bbox_inches='tight')
