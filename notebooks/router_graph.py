@@ -1,3 +1,5 @@
+import pygraphviz as pgv
+
 from ml_util import Util
 
 import os
@@ -9,19 +11,20 @@ os.chdir(current_dir)
 class RouterGraph:
     def __init__(self, world: ConveyorsEnvironment):
         # 1. explore
-        #print(type(world).mro()[:-1])
         self.world = world
         self.graph = world.topology_graph
         self.routers = world.handlers
-        self.q_network = None
+        
+        self.node_to_router = {}
         for node_key, router_keeper in self.routers.items():
-            print("node", node_key, type(router_keeper).__name__)
-            out_nodes = self.get_out_nodes(node_key)
             for router_key, router in router_keeper.routers.items():
-                print("    router", router_key, type(router).__name__)
+                self.node_to_router[node_key] = router_key
                 self.q_network = router.brain
                 self.node_repr = router._nodeRepr
         self.q_network.ff_net = Util.conditional_to_cuda(self.q_network.ff_net)
+        
+        # increase analysis precision:
+        self.q_network = self.q_network.double()
         
         # 2. load nodes and sort them
         self.node_keys: List[AgentId] = list(self.graph.nodes)
@@ -116,6 +119,37 @@ class RouterGraph:
         print(self._agent_id_to_edge_lengths)
         print(self._node_to_conveyor_ids)
     
+    def to_graphviz(self):
+        gv_graph = pgv.AGraph(directed=True)
+
+        for i, node_key in self.indices_to_node_keys.items():
+            gv_graph.add_node(i)
+            n = gv_graph.get_node(i)
+            
+            label = f"{node_key[0]} {node_key[1]}"
+            if node_key in self.node_to_router:
+                # if there is a router in this node, add it to the label
+                r = self.node_to_router[node_key]
+                label = f"{label}\n{r[0]} {r[1]}"
+                n.attr["height"] = "0.5"
+            else:
+                n.attr["height"] = "0.3"
+
+            fill_colors = {"source": "#8888FF", "sink": "#88FF88", "diverter": "#FF9999", "junction": "#EEEEEE"}
+            for k, v in {"shape": "box", "style": "filled", "fixedsize": "true", "width": "0.85",
+                         "fillcolor": fill_colors[node_key[0]], "label": label}.items():
+                n.attr[k] = v
+            
+        for from_node in self.node_keys:
+            i1 = self.node_keys_to_indices[from_node]
+            for to_node in self.get_out_nodes(from_node):
+                i2 = self.node_keys_to_indices[to_node]
+                gv_graph.add_edge(i1, i2)
+                e = gv_graph.get_edge(i1, i2)
+                e.attr["label"] = self.get_edge_length(from_node, to_node)
+        
+        return gv_graph
+    
     def q_forward(self, current_embedding, sink_embedding, neighbor_embedding):
         return self.q_network.forward(current_embedding, sink_embedding, neighbor_embedding)
     
@@ -171,8 +205,8 @@ class RouterGraph:
         else:
             raise AssertionError(f"Unexpected node type: {node_key[0]}")
     
-    def _get_router_embedding(self, router: AgentId):
-        return Util.conditional_to_cuda(torch.FloatTensor([self.node_repr(router[1])]))
+    def _get_router_embedding(self, router: AgentId) -> torch.tensor:
+        return Util.conditional_to_cuda(torch.DoubleTensor([self.node_repr(router[1])]))
     
     def node_to_embeddings(self, current_node: AgentId, sink: AgentId) -> Tuple[torch.tensor, List[torch.tensor]]:
         current_router = list(self.routers[current_node].routers.keys())

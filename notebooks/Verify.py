@@ -9,7 +9,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
-import pygraphviz as pgv
 import sympy
 
 import os
@@ -247,39 +246,7 @@ print("Reachability matrix:")
 g.print_reachability_matrix()
 
 def visualize(g: RouterGraph):
-    gv_graph = pgv.AGraph(directed=True)
-
-    def get_gv_node_name(node_key: AgentId):
-        return f"{node_key[0]}\n{node_key[1]}"
-
-    for i, node_key in g.indices_to_node_keys.items():
-        gv_graph.add_node(i)
-        n = gv_graph.get_node(i)
-        n.attr["label"] = get_gv_node_name(node_key)
-        n.attr["shape"] = "box"
-        n.attr["style"] = "filled"
-        n.attr["fixedsize"] = "true"
-        if node_key[0] == "source":
-            n.attr["fillcolor"] = "#8888FF"
-            n.attr["width"] = "0.6"
-        elif node_key[0] == "sink":
-            n.attr["fillcolor"] = "#88FF88"
-            n.attr["width"] = "0.5"
-        elif node_key[0] == "diverter":
-            n.attr["fillcolor"] = "#FF9999"
-            n.attr["width"] = "0.7"
-        else:
-            n.attr["fillcolor"] = "#EEEEEE"
-            n.attr["width"] = "0.7"
-
-    for from_node in g.node_keys:
-        i1 = g.node_keys_to_indices[from_node]
-        for to_node in g.get_out_nodes(from_node):
-            i2 = g.node_keys_to_indices[to_node]
-            gv_graph.add_edge(i1, i2)
-            e = gv_graph.get_edge(i1, i2)
-            e.attr["label"] = g.get_edge_length(from_node, to_node)
-
+    gv_graph = g.to_graphviz()
     prefix = f"../img/topology_graph{filename_suffix}."
     gv_graph.write(prefix + "gv")
     for prog in ["dot", "circo", "twopi"]:
@@ -477,6 +444,8 @@ elif args.command == "q_adversarial":
         reachable_diverters = [node_key for node_key in reachable_nodes if node_key[0] == "diverter"]
         reachable_sources = [node_key for node_key in reachable_nodes if node_key[0] == "source"]
 
+        reachable_diverters, reachable_sources = g.get_diverters_and_sources_with_path_to(sink)
+        
         params, solution = get_markov_chain_solution(g, sink, reachable_nodes, reachable_diverters)
 
         sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
@@ -558,9 +527,7 @@ elif args.command == "compare":
             'dqn_emb': 'DQN-LE', 'centralized_simple': 'BSR'
         }
     }
-
     _targets = {'time': 'avg', 'energy': 'sum', 'collisions': 'sum'}
-
     _ylabels = {
         'time': 'Mean delivery time', 'energy': 'Total energy consumption', 'collisions': 'Cargo collisions'
     }
@@ -586,8 +553,7 @@ elif args.command == "compare":
             print('  {}: {}'.format(txt, x))
     
     def plot_data(data, meaning='time', figsize=(15,5), xlim=None, ylim=None,
-              xlabel='Simulation time', ylabel=None,
-              font_size=14, title=None, save_path=None,
+              xlabel='Simulation time', ylabel=None, font_size=14, title=None, save_path=None,
               draw_collisions=False, context='networks', **kwargs):
         if 'time' not in data.columns:
             datas = split_dataframe(data, preserved_cols=['router_type', 'seed'])

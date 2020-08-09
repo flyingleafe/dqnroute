@@ -26,16 +26,6 @@ class Adversary(ABC):
         """
         pass
 
-    
-class NopAdversary(Adversary):
-    """
-    Dummy adversary that acts like an identity function.
-    """
-    
-    def perturb(self, initial_vector: torch.tensor,
-                get_gradient: Callable[[torch.tensor], Tuple[torch.tensor, float]]) -> torch.tensor:
-        return initial_vector
-
 
 class PGDAdversary(Adversary):
     """
@@ -44,8 +34,7 @@ class PGDAdversary(Adversary):
     
     def __init__(self, rho: float = 0.1, steps: int = 25, step_size: float = 0.1, random_start: bool = True,
                  stop_loss: float = 0, verbose: int = 1, norm: str = "scaled_l_2",
-                 n_repeat: int = 1, repeat_mode: str = None,
-                 initial_smoothing_alpha: float = 0.01, scale_down_smoothing: bool = False):
+                 n_repeat: int = 1, repeat_mode: str = None, dtype: type = torch.float32):
         """
         Constructs PGDAdversary. 
         :param rho > 0: bound on perturbation norm.
@@ -60,9 +49,7 @@ class PGDAdversary(Adversary):
         :param repeat_mode: 'any' or 'min': In mode 'any', n_repeat runs are identical and any run that reaches
             stop_loss will prevent subsequent runs. In mode 'min', all runs will be performed, and if a run
             finds a smaller perturbation according to norm, it will tighten rho on the next run.
-        :param initial_smoothing_alpha: initial value of the probability smoothing parameter.
-        :param scale_down_smoothing: whether to scale down smoothing_alpha during the search (use only if
-            there is no probability smoothing in the learning algorithm).
+        :param dtype: dtype.
         """
         super().__init__()
         self.rho = rho
@@ -81,8 +68,7 @@ class PGDAdversary(Adversary):
         assert repeat_mode in [None, "any", "min"], "if repeat_mode is set, it must be either 'any' or 'min'"
         self.n_repeat = n_repeat
         self.shrinking_repeats = repeat_mode == "min"
-        self.initial_smoothing_alpha = initial_smoothing_alpha
-        self.scale_down_smoothing = scale_down_smoothing
+        self.dtype = dtype
     
     def norm_(self, x: torch.tensor) -> float:
         """
@@ -124,20 +110,18 @@ class PGDAdversary(Adversary):
             for run_n in range(self.n_repeat):
                 x1 = initial_vector * 1
                 perturbation = x1 * 0
-                
-                smoothing_alpha = self.initial_smoothing_alpha
 
                 if random_start:
                     # random vector within the rho-ball
                     if self.inf_norm:
                         # uniform
-                        perturbation = (torch.rand(1, x1.numel()) - 0.5) * 2 * rho
+                        perturbation = (torch.rand(1, x1.numel(), dtype=self.dtype) - 0.5) * 2 * rho
                         # possibly reduce radius to encourage search of vectors with smaller norms
                         perturbation *= np.random.rand()
                     else:
                         # uniform radius, random direction
                         # note that this distribution is not uniform in terms of R^n!
-                        perturbation = torch.randn(1, x1.numel())
+                        perturbation = torch.randn(1, x1.numel(), dtype=self.dtype)
                         perturbation /= self.norm_(perturbation) / rho
                         perturbation *= np.random.rand()
                     perturbation = Util.conditional_to_cuda(perturbation)
@@ -147,12 +131,9 @@ class PGDAdversary(Adversary):
 
                 found = False
                 for i in range(self.steps):
-                    if self.scale_down_smoothing:
-                        # in the end of optimization, alpha becomes ~20 times smaller than in the beginning
-                        smoothing_alpha *= (1 - 3 / self.steps) #!!!
                     #assert not torch.isnan(perturbation).any()
                     perturbed_vector = x1 + perturbation
-                    classification_gradient, classification_loss, aux_info = get_gradient(perturbed_vector, smoothing_alpha)
+                    classification_gradient, classification_loss, aux_info = get_gradient(perturbed_vector)
                     if self.verbose > 0:
                         if classification_loss > self.stop_loss or i == self.steps - 1 or i % 5 == 0 and self.verbose > 1:
                             print(f"step {i:3d}: objective = {classification_loss:7f}, "
