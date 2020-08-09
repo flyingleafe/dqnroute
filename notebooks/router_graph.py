@@ -25,6 +25,7 @@ class RouterGraph:
                 nw = router.network
         self.q_network.ff_net = Util.conditional_to_cuda(self.q_network.ff_net)
         
+        
         # add junction -> router mapping
         for conveyor_index, m in world.conveyor_models.items():
             router_keeper = self.routers[("conveyor", conveyor_index)].routers
@@ -32,7 +33,10 @@ class RouterGraph:
             junction_keys = [cp_index for cp_index, cp in m.checkpoints if cp_index[0] == "junction"]
             for router_key, junction_key in zip(router_keys, junction_keys):
                 self.node_to_router[junction_key] = router_key
-                
+        
+        #self.router_to_node = {v: k for k, v in self.node_to_router.items()}
+        #print(sorted([(self.router_to_node[from_node], self.router_to_node[to_node]) for from_node, to_node in nw.edges()]))
+        
         # increase analysis precision:
         self.q_network = self.q_network.double()
         
@@ -73,7 +77,7 @@ class RouterGraph:
             upstream = world.layout["conveyors"][conveyor_index]["upstream"]
             #print(upstream)
             if upstream["type"] == "sink":
-                self._node_to_conveyor_ids[("sink", upstream["idx"])] = {conveyor_index}
+                self._node_to_conveyor_ids[("sink", upstream["idx"])].add(conveyor_index)
             
             # add source in the beginning, if any:
             for source_index, source_dict in world.layout["sources"].items():
@@ -149,7 +153,10 @@ class RouterGraph:
             for k, v in {"shape": "box", "style": "filled", "fixedsize": "true", "width": "0.9", "height": "0.7",
                          "fillcolor": fill_colors[node_key[0]], "label": label}.items():
                 n.attr[k] = v
-            
+        
+        #for from_node in self.node_keys:
+        #    print(f"{from_node} -> {self.get_out_nodes(from_node)}")
+        
         for from_node in self.node_keys:
             i1 = self.node_keys_to_indices[from_node]
             for to_node in self.get_out_nodes(from_node):
@@ -160,7 +167,7 @@ class RouterGraph:
                 # compute the conveyor of the edge as the only node forming the intersection
                 # of the nodes of the edge
                 intersection = list(self._node_to_conveyor_ids[from_node].intersection(self._node_to_conveyor_ids[to_node]))
-                assert len(intersection) == 1
+                assert len(intersection) == 1, f"{from_node} at {self._node_to_conveyor_ids[from_node]}, {to_node} at {self._node_to_conveyor_ids[to_node]}"
                 e.attr["label"] = f"{self.get_edge_length(from_node, to_node)} [c{intersection[0]}]"
         
         return gv_graph
