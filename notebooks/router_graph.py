@@ -205,13 +205,11 @@ class RouterGraph:
                 print(1 if self.reachable[from_node, to_node] else 0, end="")
             print(f" # from {from_node}")
     
-    def _get_router_embedding(self, router: AgentId) -> torch.tensor:
-        return Util.conditional_to_cuda(torch.DoubleTensor([self.node_repr(router[1])]))
+    def _get_router_embedding(self, router_key: AgentId) -> torch.tensor:
+        return Util.conditional_to_cuda(torch.DoubleTensor([self.node_repr(router_key[1])]))
     
     def node_to_embeddings(self, current_node: AgentId, sink: AgentId) -> Tuple[torch.tensor, List[torch.tensor]]:
-        current_router = list(self.routers[current_node].routers.keys())
-        assert len(current_router) == 1
-        current_router = current_router[0]
+        current_router = self.node_to_router[current_node]
         current_embedding = self._get_router_embedding(current_router)
         if current_node[0] == "sink":
             out_nodes = []

@@ -264,34 +264,35 @@ class MarkovAnalyzer:
     def __init__(self, g: RouterGraph, sink: AgentId):
         self.g = g
         # reindex nodes so that only the nodes from which the sink is reachable are considered
-        reachable_nodes = [node_key for node_key in g.node_keys if g.reachable[node_key, sink]]
-        print(f"  Nodes from which {sink} is reachable: {reachable_nodes}")
-
-        self.reachable_diverters = [node_key for node_key in reachable_nodes if node_key[0] == "diverter"]
-        self.reachable_sources = [node_key for node_key in reachable_nodes if node_key[0] == "source"]
-    
-        reachable_nodes_to_indices = {node_key: i for i, node_key in enumerate(reachable_nodes)}
+        self.reachable_nodes = [node_key for node_key in g.node_keys if g.reachable[node_key, sink]]
+        print(f"  Nodes from which {sink} is reachable: {self.reachable_nodes}")
+        self.reachable_sources = [node_key for node_key in self.reachable_nodes if node_key[0] == "source"]
+        reachable_nodes_to_indices = {node_key: i for i, node_key in enumerate(self.reachable_nodes)}
         sink_index = reachable_nodes_to_indices[sink]
-        print(f"  sink index = {sink_index}")
+        #print(f"  sink index = {sink_index}")
 
-        reachable_diverters_to_indices = {node_key: i for i, node_key in enumerate(self.reachable_diverters)}
+        # filter out reachable diverters that have only one option due to shielding
+        next_nodes = lambda from_key: [to_key for to_key in g.get_out_nodes(from_key) if g.reachable[to_key, sink]]
+        self.nontrivial_diverters = [from_key for from_key in self.reachable_nodes if len(next_nodes(from_key)) > 1]
+        assert all(node_key[0] == "diverter" for node_key in self.nontrivial_diverters)
+        nontrivial_diverters_to_indices = {node_key: i for i, node_key in enumerate(self.nontrivial_diverters)}
 
-        system_size = len(reachable_nodes)
+        system_size = len(self.reachable_nodes)
         matrix = [[0 for _ in range(system_size)] for _ in range(system_size)]
         bias = [[0] for _ in range(system_size)]
 
-        self.params = sympy.symbols([f"p{i}" for i in range(len(self.reachable_diverters))])
+        self.params = sympy.symbols([f"p{i}" for i in range(len(self.nontrivial_diverters))])
         print(f"  parameters: {self.params}")
 
         # fill the system of linear equations
         for i in range(system_size):
-            node_key = reachable_nodes[i]
+            node_key = self.reachable_nodes[i]
             matrix[i][i] = 1
             if i == sink_index:
                 # zero hitting time for the target sink
                 assert node_key[0] == "sink"
             elif node_key[0] in ["source", "junction", "diverter"]:
-                next_node_keys = [node_key for node_key in g.get_out_nodes(node_key) if g.reachable[node_key, sink]]
+                next_node_keys = next_nodes(node_key)
                 if args.simple_path_cost:
                     bias[i][0] = 1
                 if len(next_node_keys) == 1:
@@ -304,7 +305,7 @@ class MarkovAnalyzer:
                 elif len(next_node_key) == 2:
                     # two possible destinations
                     k1, k2 = next_node_keys[0], next_node_keys[1]
-                    p = self.params[reachable_diverters_to_indices[node_key]]
+                    p = self.params[nontrivial_diverters_to_indices[node_key]]
                     print(f"      {p} = P({node_key} -> {k1})" )
                     print(f"  1 - {p} = P({node_key} -> {k2})" )
                     if k1 != sink:
@@ -383,11 +384,8 @@ elif args.command == "embedding_adversarial":
         embedding_size = sink_embedding.flatten().shape[0]
         # gather all embeddings that we need to compute the objective
         stored_embeddings = OrderedDict({sink: sink_embedding})
-        for diverter in ma.reachable_diverters:
-            diverter_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(diverter, sink)
-            stored_embeddings[diverter] = diverter_embedding
-            for neighbor, neighbor_embedding in zip(neighbors, neighbor_embeddings):
-                stored_embeddings[neighbor] = neighbor_embedding
+        for node_key in ma.reachable_nodes:
+            stored_embeddings[node_key], _, _ = g.node_to_embeddings(node_key, sink)
 
         def pack_embeddings(embedding_dict: OrderedDict) -> torch.tensor:
             return torch.cat(tuple(embedding_dict.values())).flatten()
@@ -410,27 +408,24 @@ elif args.command == "embedding_adversarial":
                 Returns a tuple (gradient pointing to the direction of the adversarial attack,
                                  the corresponding loss function value,
                                  auxiliary information for printing during optimization)."""
-                #assert not torch.isnan(x).any()
                 x = Util.optimizable_clone(x.flatten())
                 embedding_dict = unpack_embeddings(x)
                 objective_inputs = []
                 perturbed_sink_embeddings = embedding_dict[sink].repeat(2, 1)
-                # source embedding does not influence the decision, use default value:
-                for diverter in ma.reachable_diverters:
+                for diverter in ma.nontrivial_diverters:
                     perturbed_diverter_embeddings = embedding_dict[diverter].repeat(2, 1)
                     _, current_neighbors, _ = g.node_to_embeddings(diverter, sink)
                     perturbed_neighbor_embeddings = torch.cat([embedding_dict[current_neighbor]
                                                                for current_neighbor in current_neighbors])
                     q_values = g.q_forward(perturbed_diverter_embeddings, perturbed_sink_embeddings,
                                            perturbed_neighbor_embeddings).flatten()
-                    #assert not torch.isnan(q_values).any()
                     objective_inputs += [q_values_to_first_probability(q_values)]
                 objective_value = objective(*objective_inputs)
                 #print(objective_value.detach().cpu().numpy())
                 objective_value.backward()
                 aux_info = ", ".join([f"{param}={value.detach().cpu().item():.4f}"
                                       for param, value in zip(ma.params, objective_inputs)])
-                return x.grad, objective_value.item(), f"param_values: [{aux_info}]"
+                return x.grad, objective_value.item(), f"[{aux_info}]"
             adv.perturb(initial_vector, get_gradient)
 elif args.command == "q_adversarial":
     plot_index = 0
@@ -452,7 +447,7 @@ elif args.command == "q_adversarial":
 
             def get_objective():
                 objective_inputs = []
-                for diverter in ma.reachable_diverters:
+                for diverter in ma.nontrivial_diverters:
                     diverter_embedding, current_neighbors, neighbor_embeddings = g.node_to_embeddings(diverter, sink)
                     diverter_embeddings = diverter_embedding.repeat(2, 1)
                     neighbor_embeddings = torch.cat(neighbor_embeddings, dim=0)
@@ -460,8 +455,7 @@ elif args.command == "q_adversarial":
                     objective_inputs += [q_values_to_first_probability(q_values)]
                 return objective(*objective_inputs).item()
 
-            # TODO also include junctions?? but they do not have corresponding routers!
-            for node_key in g.sources + g.diverters:
+            for node_key in g.node_keys:
                 curent_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
 
                 for neighbor_key, neighbor_embedding in zip(neighbors, neighbor_embeddings):
