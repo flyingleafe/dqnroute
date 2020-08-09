@@ -262,6 +262,7 @@ if not args.skip_graphviz:
 
 class MarkovAnalyzer:
     def __init__(self, g: RouterGraph, sink: AgentId):
+        self.g = g
         # reindex nodes so that only the nodes from which the sink is reachable are considered
         reachable_nodes = [node_key for node_key in g.node_keys if g.reachable[node_key, sink]]
         print(f"  Nodes from which {sink} is reachable: {reachable_nodes}")
@@ -322,7 +323,14 @@ class MarkovAnalyzer:
         print(f"  bias: {bias}")
         self.solution = matrix.inv() @ bias
         #print(f"  solution: {self.solution}")
-
+        
+    def get_objective(self, source: AgentId):
+        source_index = g.node_keys_to_indices[source]
+        symbolic_objective = sympy.simplify(self.solution[source_index])
+        print(f"    Expected delivery cost from {source} = {symbolic_objective}")
+        objective = sympy.lambdify(self.params, symbolic_objective)
+        return symbolic_objective, objective
+        
 def smooth(p):
     # smoothing to get rid of 0 and 1 probabilities that lead to saturated gradients
     return (1 - args.probability_smoothing) * p  + args.probability_smoothing / 2
@@ -394,10 +402,7 @@ elif args.command == "embedding_adversarial":
 
         for source in ma.reachable_sources:
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
-            source_index = g.node_keys_to_indices[source]
-            symbolic_objective = sympy.simplify(ma.solution[source_index])
-            print(f"    Expected delivery cost from {source} = {symbolic_objective}")
-            objective = sympy.lambdify(ma.params, symbolic_objective)        
+            symbolic_objective, objective = ma.get_objective(source)
 
             def get_gradient(x: torch.tensor) -> Tuple[torch.tensor, float, str]:
                 """
@@ -438,10 +443,7 @@ elif args.command == "q_adversarial":
 
         for source in ma.reachable_sources:
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
-            source_index = g.node_keys_to_indices[source]
-            symbolic_objective = sympy.simplify(ma.solution[source_index])
-            print(f"    Expected delivery cost from {source} = {symbolic_objective}")
-            objective = sympy.lambdify(ma.params, symbolic_objective)
+            symbolic_objective, objective = ma.get_objective(source)
 
             # stage 1: linear change of parameters
             filename = "saved-net.bin"

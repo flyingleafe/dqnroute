@@ -136,7 +136,7 @@ class RouterGraph:
                 n.attr["height"] = "0.3"
 
             fill_colors = {"source": "#8888FF", "sink": "#88FF88", "diverter": "#FF9999", "junction": "#EEEEEE"}
-            for k, v in {"shape": "box", "style": "filled", "fixedsize": "true", "width": "0.85",
+            for k, v in {"shape": "box", "style": "filled", "fixedsize": "true", "width": "0.87",
                          "fillcolor": fill_colors[node_key[0]], "label": label}.items():
                 n.attr[k] = v
             
