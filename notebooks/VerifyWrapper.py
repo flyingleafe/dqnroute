@@ -9,8 +9,8 @@ config = ("acyclic_conveyor_energy_test.yaml", 1.5)   # Mukhutdinov
 #config = ("tarau2010.yaml", 1.5)                       # Fictitious graph from the literature
 #config = ("johnstone2010.yaml", 3.0)                  # Almost real graph from the literature
 
-command = "deterministic_test"
-#command = "embedding_adversarial"
+#command = "deterministic_test"
+command = "embedding_adversarial"
 #command = "q_adversarial"
 #command = "compare"
 

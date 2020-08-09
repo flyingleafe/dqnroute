@@ -259,64 +259,69 @@ def visualize(g: RouterGraph):
 if not args.skip_graphviz:
     visualize(g)
 
-# TODO refactoring: extract graph drawing to somewhere
 
+class MarkovAnalyzer:
+    def __init__(self, g: RouterGraph, sink: AgentId):
+        # reindex nodes so that only the nodes from which the sink is reachable are considered
+        reachable_nodes = [node_key for node_key in g.node_keys if g.reachable[node_key, sink]]
+        print(f"  Nodes from which {sink} is reachable: {reachable_nodes}")
 
-def get_markov_chain_solution(g: RouterGraph, sink: AgentId, reachable_nodes: List[AgentId], reachable_diverters: List[AgentId]):
-    reachable_nodes_to_indices = {node_key: i for i, node_key in enumerate(reachable_nodes)}
-    sink_index = reachable_nodes_to_indices[sink]
-    print(f"  sink index = {sink_index}")
+        self.reachable_diverters = [node_key for node_key in reachable_nodes if node_key[0] == "diverter"]
+        self.reachable_sources = [node_key for node_key in reachable_nodes if node_key[0] == "source"]
+    
+        reachable_nodes_to_indices = {node_key: i for i, node_key in enumerate(reachable_nodes)}
+        sink_index = reachable_nodes_to_indices[sink]
+        print(f"  sink index = {sink_index}")
 
-    reachable_diverters_to_indices = {node_key: i for i, node_key in enumerate(reachable_diverters)}
+        reachable_diverters_to_indices = {node_key: i for i, node_key in enumerate(self.reachable_diverters)}
 
-    system_size = len(reachable_nodes)
-    matrix = [[0 for _ in range(system_size)] for _ in range(system_size)]
-    bias = [[0] for _ in range(system_size)]
+        system_size = len(reachable_nodes)
+        matrix = [[0 for _ in range(system_size)] for _ in range(system_size)]
+        bias = [[0] for _ in range(system_size)]
 
-    params = sympy.symbols([f"p{i}" for i in range(len(reachable_diverters))])
-    print(f"  parameters: {params}")
+        self.params = sympy.symbols([f"p{i}" for i in range(len(self.reachable_diverters))])
+        print(f"  parameters: {self.params}")
 
-    # fill the system of linear equations
-    for i in range(system_size):
-        node_key = reachable_nodes[i]
-        matrix[i][i] = 1
-        if i == sink_index:
-            # zero hitting time for the target sink
-            assert node_key[0] == "sink"
-        elif node_key[0] in ["source", "junction", "diverter"]:
-            next_node_keys = [node_key for node_key in g.get_out_nodes(node_key) if g.reachable[node_key, sink]]
-            if args.simple_path_cost:
-                bias[i][0] = 1
-            if len(next_node_keys) == 1:
-                # only one possible destination
-                # either sink, junction, or a diverter with only one option due to reachability shielding
-                next_node_key = next_node_keys[0]
-                matrix[i][reachable_nodes_to_indices[next_node_key]] = -1
-                if not args.simple_path_cost:
-                    bias[i][0] = g.get_edge_length(node_key, next_node_key)
-            elif len(next_node_key) == 2:
-                # two possible destinations
-                k1, k2 = next_node_keys[0], next_node_keys[1]
-                p = params[reachable_diverters_to_indices[node_key]]
-                print(f"      {p} = P({node_key} -> {k1})" )
-                print(f"  1 - {p} = P({node_key} -> {k2})" )
-                if k1 != sink:
-                    matrix[i][reachable_nodes_to_indices[k1]] = -p
-                if k2 != sink:
-                    matrix[i][reachable_nodes_to_indices[k2]] = p - 1
-                if not args.simple_path_cost:
-                    bias[i][0] = g.get_edge_length(node_key, k1) * p + g.get_edge_length(node_key, k2) * (1 - p)
+        # fill the system of linear equations
+        for i in range(system_size):
+            node_key = reachable_nodes[i]
+            matrix[i][i] = 1
+            if i == sink_index:
+                # zero hitting time for the target sink
+                assert node_key[0] == "sink"
+            elif node_key[0] in ["source", "junction", "diverter"]:
+                next_node_keys = [node_key for node_key in g.get_out_nodes(node_key) if g.reachable[node_key, sink]]
+                if args.simple_path_cost:
+                    bias[i][0] = 1
+                if len(next_node_keys) == 1:
+                    # only one possible destination
+                    # either sink, junction, or a diverter with only one option due to reachability shielding
+                    next_node_key = next_node_keys[0]
+                    matrix[i][reachable_nodes_to_indices[next_node_key]] = -1
+                    if not args.simple_path_cost:
+                        bias[i][0] = g.get_edge_length(node_key, next_node_key)
+                elif len(next_node_key) == 2:
+                    # two possible destinations
+                    k1, k2 = next_node_keys[0], next_node_keys[1]
+                    p = self.params[reachable_diverters_to_indices[node_key]]
+                    print(f"      {p} = P({node_key} -> {k1})" )
+                    print(f"  1 - {p} = P({node_key} -> {k2})" )
+                    if k1 != sink:
+                        matrix[i][reachable_nodes_to_indices[k1]] = -p
+                    if k2 != sink:
+                        matrix[i][reachable_nodes_to_indices[k2]] = p - 1
+                    if not args.simple_path_cost:
+                        bias[i][0] = g.get_edge_length(node_key, k1) * p + g.get_edge_length(node_key, k2) * (1 - p)
+                else:
+                    assert False
             else:
                 assert False
-        else:
-            assert False
-    matrix = sympy.Matrix(matrix)
-    #print(f"  matrix: {matrix}")
-    bias = sympy.Matrix(bias)
-    print(f"  bias: {bias}")
-    solution = matrix.inv() @ bias
-    #print(f"  solution: {solution}")
-    return params, solution
+        matrix = sympy.Matrix(matrix)
+        #print(f"  matrix: {matrix}")
+        bias = sympy.Matrix(bias)
+        print(f"  bias: {bias}")
+        self.solution = matrix.inv() @ bias
+        #print(f"  solution: {self.solution}")
 
 def smooth(p):
     # smoothing to get rid of 0 and 1 probabilities that lead to saturated gradients
@@ -365,21 +370,12 @@ elif args.command == "embedding_adversarial":
                        norm="scaled_l_2", n_repeat=2, repeat_mode="min", dtype=torch.float64)
     for sink in g.sinks:
         print(f"Measuring robustness of delivery to {sink}...")
-        # reindex nodes so that only the nodes from which the sink is reachable are considered
-        # (otherwise, the solution will need to include infinite hitting times)
-        reachable_nodes = [node_key for node_key in g.node_keys if g.reachable[node_key, sink]]
-        print(f"  Nodes from which {sink} is reachable: {reachable_nodes}")
-
-        reachable_diverters = [node_key for node_key in reachable_nodes if node_key[0] == "diverter"]
-        reachable_sources = [node_key for node_key in reachable_nodes if node_key[0] == "source"]
-
-        params, solution = get_markov_chain_solution(g, sink, reachable_nodes, reachable_diverters)
-
+        ma = MarkovAnalyzer(g, sink)
         sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
         embedding_size = sink_embedding.flatten().shape[0]
         # gather all embeddings that we need to compute the objective
         stored_embeddings = OrderedDict({sink: sink_embedding})
-        for diverter in reachable_diverters:
+        for diverter in ma.reachable_diverters:
             diverter_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(diverter, sink)
             stored_embeddings[diverter] = diverter_embedding
             for neighbor, neighbor_embedding in zip(neighbors, neighbor_embeddings):
@@ -396,12 +392,12 @@ elif args.command == "embedding_adversarial":
 
         initial_vector = pack_embeddings(stored_embeddings)
 
-        for source in reachable_sources:
+        for source in ma.reachable_sources:
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
             source_index = g.node_keys_to_indices[source]
-            symbolic_objective = sympy.simplify(solution[source_index])
+            symbolic_objective = sympy.simplify(ma.solution[source_index])
             print(f"    Expected delivery cost from {source} = {symbolic_objective}")
-            objective = sympy.lambdify(params, symbolic_objective)        
+            objective = sympy.lambdify(ma.params, symbolic_objective)        
 
             def get_gradient(x: torch.tensor) -> Tuple[torch.tensor, float, str]:
                 """
@@ -415,7 +411,7 @@ elif args.command == "embedding_adversarial":
                 objective_inputs = []
                 perturbed_sink_embeddings = embedding_dict[sink].repeat(2, 1)
                 # source embedding does not influence the decision, use default value:
-                for diverter in reachable_diverters:
+                for diverter in ma.reachable_diverters:
                     perturbed_diverter_embeddings = embedding_dict[diverter].repeat(2, 1)
                     _, current_neighbors, _ = g.node_to_embeddings(diverter, sink)
                     perturbed_neighbor_embeddings = torch.cat([embedding_dict[current_neighbor]
@@ -427,37 +423,25 @@ elif args.command == "embedding_adversarial":
                 objective_value = objective(*objective_inputs)
                 #print(objective_value.detach().cpu().numpy())
                 objective_value.backward()
-                aux_info = [np.round(x.detach().cpu().item(), 4) for x in objective_inputs]
-                aux_info = {param: value for param, value in zip(params, aux_info)}
-                aux_info = f"param_values = {aux_info}"
-                return x.grad, objective_value.item(), aux_info
+                aux_info = ", ".join([f"{param}={value.detach().cpu().item():.4f}"
+                                      for param, value in zip(ma.params, objective_inputs)])
+                return x.grad, objective_value.item(), f"param_values: [{aux_info}]"
             adv.perturb(initial_vector, get_gradient)
 elif args.command == "q_adversarial":
     plot_index = 0
     for sink in g.sinks:
         print(f"Measuring robustness of delivery to {sink}...")
-        # reindex nodes so that only the nodes from which the sink is reachable are considered
-        # (otherwise, the solution will need to include infinite hitting times)
-        reachable_nodes = [node_key for node_key in g.node_keys if g.reachable[node_key, sink]]
-        print(f"  nodes from which {sink} is reachable: {reachable_nodes}")
-
-        reachable_diverters = [node_key for node_key in reachable_nodes if node_key[0] == "diverter"]
-        reachable_sources = [node_key for node_key in reachable_nodes if node_key[0] == "source"]
-
-        reachable_diverters, reachable_sources = g.get_diverters_and_sources_with_path_to(sink)
-        
-        params, solution = get_markov_chain_solution(g, sink, reachable_nodes, reachable_diverters)
-
+        ma = MarkovAnalyzer(g, sink)
         sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
         embedding_size = sink_embedding.flatten().shape[0]
         sink_embeddings = sink_embedding.repeat(2, 1)
 
-        for source in reachable_sources:
+        for source in ma.reachable_sources:
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
             source_index = g.node_keys_to_indices[source]
-            symbolic_objective = sympy.simplify(solution[source_index])
+            symbolic_objective = sympy.simplify(ma.solution[source_index])
             print(f"    Expected delivery cost from {source} = {symbolic_objective}")
-            objective = sympy.lambdify(params, symbolic_objective)
+            objective = sympy.lambdify(ma.params, symbolic_objective)
 
             # stage 1: linear change of parameters
             filename = "saved-net.bin"
@@ -466,7 +450,7 @@ elif args.command == "q_adversarial":
 
             def get_objective():
                 objective_inputs = []
-                for diverter in reachable_diverters:
+                for diverter in ma.reachable_diverters:
                     diverter_embedding, current_neighbors, neighbor_embeddings = g.node_to_embeddings(diverter, sink)
                     diverter_embeddings = diverter_embedding.repeat(2, 1)
                     neighbor_embeddings = torch.cat(neighbor_embeddings, dim=0)
