@@ -426,6 +426,16 @@ elif args.command == "q_adversarial":
                     plt.close()
                     plot_index += 1
 elif args.command == "q_adversarial_lipschitz":
+    print(g.q_network.ff_net)
+    
+    to_sympy = lambda x: sympy.Matrix(x.detach().cpu().numpy())
+    A = to_sympy(g.q_network.ff_net.fc1.weight)
+    b = to_sympy(g.q_network.ff_net.fc1.bias)
+    C = to_sympy(g.q_network.ff_net.fc2.weight)
+    d = to_sympy(g.q_network.ff_net.output.bias)
+    E = to_sympy(g.q_network.ff_net.output.weight)
+    f = to_sympy(g.q_network.ff_net.output.bias)
+    
     for sink in g.sinks:
         print(f"Measuring robustness of delivery to {sink}...")
         ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
@@ -435,6 +445,7 @@ elif args.command == "q_adversarial_lipschitz":
 
         for param, diverter_key in zip(ma.params, ma.nontrivial_diverters):
             print(param, diverter_key)
+            
         assert False
         
         # TODO
@@ -444,7 +455,6 @@ elif args.command == "q_adversarial_lipschitz":
         for source in ma.reachable_sources:
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
             symbolic_objective, objective = ma.get_objective(source)
-        
         
             # TODO
             #  compute a pool of bounds
@@ -456,6 +466,7 @@ elif args.command == "q_adversarial_lipschitz":
             #    see just p_i -> subsitute with the bound
             
             # TODO upper-bound expressions using SYMPY solvers?
+            # TODO or even simpler: try to prove an upper bound on the function for each interval
     
 elif args.command == "compare":
     _legend_txt_replace = {
