@@ -16,15 +16,16 @@ current_dir = os.getcwd()
 os.chdir("../src")
 from dqnroute import *
 from dqnroute.networks import *
+from dqnroute.verification.router_graph import RouterGraph
+from dqnroute.verification.adversarial import PGDAdversary
+from dqnroute.verification.ml_util import Util
+from dqnroute.verification.markov_analyzer import MarkovAnalyzer
 os.chdir(current_dir)
 
-from router_graph import RouterGraph
-from adversarial import PGDAdversary
-from ml_util import Util
 
 parser = argparse.ArgumentParser(description="Verifier of baggage routing neural networks.")
 parser.add_argument("--command", type=str, required=True,
-                    help="one of deterministic_test, embedding_adversarial, q_adversarial, compare")
+                    help="one of deterministic_test, embedding_adversarial, q_adversarial, q_adversarial_lipschitz, compare")
 parser.add_argument("--config_file", type=str, required=True,
                     help="YAML config file with the topology graph and other configuration info")
 parser.add_argument("--probability_smoothing", type=float, default=0.01,
@@ -41,6 +42,8 @@ parser.add_argument("--skip_graphviz", action="store_true",
                     help="do not visualize graphs")
 parser.add_argument("--softmax_temperature", type=float, default=1.5,
                     help="custom softmax temperature (higher temperature means larger entropy in routing decisions; default: 1.5)")
+parser.add_argument("--cost_bound", type=float, default=100.0,
+                    help="upper bound on delivery cost to verify (default: 100)")
 
 parser.add_argument("--pretrain_num_episodes", type=int, default=10000,
                     help="pretrain_num_episodes (default: 10000)")
@@ -259,79 +262,6 @@ def visualize(g: RouterGraph):
 if not args.skip_graphviz:
     visualize(g)
 
-
-class MarkovAnalyzer:
-    def __init__(self, g: RouterGraph, sink: AgentId):
-        self.g = g
-        # reindex nodes so that only the nodes from which the sink is reachable are considered
-        self.reachable_nodes = [node_key for node_key in g.node_keys if g.reachable[node_key, sink]]
-        print(f"  Nodes from which {sink} is reachable: {self.reachable_nodes}")
-        self.reachable_sources = [node_key for node_key in self.reachable_nodes if node_key[0] == "source"]
-        reachable_nodes_to_indices = {node_key: i for i, node_key in enumerate(self.reachable_nodes)}
-        sink_index = reachable_nodes_to_indices[sink]
-        #print(f"  sink index = {sink_index}")
-
-        # filter out reachable diverters that have only one option due to shielding
-        next_nodes = lambda from_key: [to_key for to_key in g.get_out_nodes(from_key) if g.reachable[to_key, sink]]
-        self.nontrivial_diverters = [from_key for from_key in self.reachable_nodes if len(next_nodes(from_key)) > 1]
-        assert all(node_key[0] == "diverter" for node_key in self.nontrivial_diverters)
-        nontrivial_diverters_to_indices = {node_key: i for i, node_key in enumerate(self.nontrivial_diverters)}
-
-        system_size = len(self.reachable_nodes)
-        matrix = [[0 for _ in range(system_size)] for _ in range(system_size)]
-        bias = [[0] for _ in range(system_size)]
-
-        self.params = sympy.symbols([f"p{i}" for i in range(len(self.nontrivial_diverters))])
-        print(f"  parameters: {self.params}")
-
-        # fill the system of linear equations
-        for i in range(system_size):
-            node_key = self.reachable_nodes[i]
-            matrix[i][i] = 1
-            if i == sink_index:
-                # zero hitting time for the target sink
-                assert node_key[0] == "sink"
-            elif node_key[0] in ["source", "junction", "diverter"]:
-                next_node_keys = next_nodes(node_key)
-                if args.simple_path_cost:
-                    bias[i][0] = 1
-                if len(next_node_keys) == 1:
-                    # only one possible destination
-                    # either sink, junction, or a diverter with only one option due to reachability shielding
-                    next_node_key = next_node_keys[0]
-                    matrix[i][reachable_nodes_to_indices[next_node_key]] = -1
-                    if not args.simple_path_cost:
-                        bias[i][0] = g.get_edge_length(node_key, next_node_key)
-                elif len(next_node_key) == 2:
-                    # two possible destinations
-                    k1, k2 = next_node_keys[0], next_node_keys[1]
-                    p = self.params[nontrivial_diverters_to_indices[node_key]]
-                    print(f"      {p} = P({node_key} -> {k1})" )
-                    print(f"  1 - {p} = P({node_key} -> {k2})" )
-                    if k1 != sink:
-                        matrix[i][reachable_nodes_to_indices[k1]] = -p
-                    if k2 != sink:
-                        matrix[i][reachable_nodes_to_indices[k2]] = p - 1
-                    if not args.simple_path_cost:
-                        bias[i][0] = g.get_edge_length(node_key, k1) * p + g.get_edge_length(node_key, k2) * (1 - p)
-                else:
-                    assert False
-            else:
-                assert False
-        matrix = sympy.Matrix(matrix)
-        #print(f"  matrix: {matrix}")
-        bias = sympy.Matrix(bias)
-        print(f"  bias: {bias}")
-        self.solution = matrix.inv() @ bias
-        #print(f"  solution: {self.solution}")
-        
-    def get_objective(self, source: AgentId):
-        source_index = g.node_keys_to_indices[source]
-        symbolic_objective = sympy.simplify(self.solution[source_index])
-        print(f"    Expected delivery cost from {source} = {symbolic_objective}")
-        objective = sympy.lambdify(self.params, symbolic_objective)
-        return symbolic_objective, objective
-        
 def smooth(p):
     # smoothing to get rid of 0 and 1 probabilities that lead to saturated gradients
     return (1 - args.probability_smoothing) * p  + args.probability_smoothing / 2
@@ -379,7 +309,7 @@ elif args.command == "embedding_adversarial":
                        norm="scaled_l_2", n_repeat=2, repeat_mode="min", dtype=torch.float64)
     for sink in g.sinks:
         print(f"Measuring robustness of delivery to {sink}...")
-        ma = MarkovAnalyzer(g, sink)
+        ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
         sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
         embedding_size = sink_embedding.flatten().shape[0]
         # gather all embeddings that we need to compute the objective
@@ -431,7 +361,7 @@ elif args.command == "q_adversarial":
     plot_index = 0
     for sink in g.sinks:
         print(f"Measuring robustness of delivery to {sink}...")
-        ma = MarkovAnalyzer(g, sink)
+        ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
         sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
         embedding_size = sink_embedding.flatten().shape[0]
         sink_embeddings = sink_embedding.repeat(2, 1)
@@ -495,6 +425,38 @@ elif args.command == "q_adversarial":
                     plt.savefig(f"../img/{filename_suffix}_{plot_index}.pdf")
                     plt.close()
                     plot_index += 1
+elif args.command == "q_adversarial_lipschitz":
+    for sink in g.sinks:
+        print(f"Measuring robustness of delivery to {sink}...")
+        ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
+        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
+        embedding_size = sink_embedding.flatten().shape[0]
+        sink_embeddings = sink_embedding.repeat(2, 1)
+
+        for param, diverter_key in zip(ma.params, ma.nontrivial_diverters):
+            print(param, diverter_key)
+        assert False
+        
+        # TODO
+        #  compute a pool of bounds
+    
+        
+        for source in ma.reachable_sources:
+            print(f"  Measuring robustness of delivery from {source} to {sink}...")
+            symbolic_objective, objective = ma.get_objective(source)
+        
+        
+            # TODO
+            #  compute a pool of bounds
+            #  construct kappa
+            #  substitute ps with functions
+            #  get symbolic derivative
+            #  recursive estimation for the symbolic derivative
+            #    see Derivative(p_i) -> subsitute the bound
+            #    see just p_i -> subsitute with the bound
+            
+            # TODO upper-bound expressions using SYMPY solvers?
+    
 elif args.command == "compare":
     _legend_txt_replace = {
         'networks': {

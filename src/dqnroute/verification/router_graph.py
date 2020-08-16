@@ -1,12 +1,12 @@
+from typing import *
+
 import pygraphviz as pgv
+import torch
 
-from ml_util import Util
+from ..utils import AgentId
+from ..simulation.conveyors import ConveyorsEnvironment
 
-import os
-current_dir = os.getcwd()
-os.chdir("../src")
-from dqnroute import *
-os.chdir(current_dir)
+from .ml_util import Util
 
 class RouterGraph:
     def __init__(self, world: ConveyorsEnvironment):

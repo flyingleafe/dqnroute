@@ -4,7 +4,7 @@ from typing import *
 from abc import ABC, abstractmethod
 import contextlib
 
-from ml_util import Util
+from .ml_util import Util
 
 
 class Adversary(ABC):
