@@ -69,7 +69,7 @@ class MarkovAnalyzer:
         #print(f"  solution: {self.solution}")
         
     def get_objective(self, source: AgentId):
-        source_index = g.node_keys_to_indices[source]
+        source_index = self.g.node_keys_to_indices[source]
         symbolic_objective = sympy.simplify(self.solution[source_index])
         print(f"    Expected delivery cost from {source} = {symbolic_objective}")
         objective = sympy.lambdify(self.params, symbolic_objective)

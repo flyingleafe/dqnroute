@@ -386,11 +386,11 @@ elif args.command == "q_adversarial":
                 return objective(*objective_inputs).item()
 
             for node_key in g.node_keys:
-                curent_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
+                current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
 
                 for neighbor_key, neighbor_embedding in zip(neighbors, neighbor_embeddings):
                     with torch.no_grad():
-                        reference_q = g.q_forward(curent_embedding, sink_embedding, neighbor_embedding).flatten().item()
+                        reference_q = g.q_forward(current_embedding, sink_embedding, neighbor_embedding).flatten().item()
                     actual_qs = reference_q + np.linspace(-50, 50, 351)
 
                     opt = torch.optim.SGD(g.q_network.parameters(), lr=0.01)
@@ -426,15 +426,76 @@ elif args.command == "q_adversarial":
                     plt.close()
                     plot_index += 1
 elif args.command == "q_adversarial_lipschitz":
-    print(g.q_network.ff_net)
-    
+    net = g.q_network.ff_net
+    print(net)
     to_sympy = lambda x: sympy.Matrix(x.detach().cpu().numpy())
-    A = to_sympy(g.q_network.ff_net.fc1.weight)
-    b = to_sympy(g.q_network.ff_net.fc1.bias)
-    C = to_sympy(g.q_network.ff_net.fc2.weight)
-    d = to_sympy(g.q_network.ff_net.output.bias)
-    E = to_sympy(g.q_network.ff_net.output.weight)
-    f = to_sympy(g.q_network.ff_net.output.bias)
+    A = to_sympy(net.fc1.weight)
+    b = to_sympy(net.fc1.bias)
+    C = to_sympy(net.fc2.weight)
+    d = to_sympy(net.fc2.bias)
+    E = to_sympy(net.output.weight)
+    f = to_sympy(net.output.bias)
+    
+    class relu(sympy.Function):
+        @classmethod
+        def eval(cls, x):
+            return x.applyfunc(lambda elem: sympy.Max(elem, 0))
+
+        def _eval_is_real(self):
+            return True
+    
+    def base_bound(expr) -> float:
+        if type(expr).__name__ in ["Float", "Integer"]:
+            return np.abs(float(expr))
+        if type(expr).__name__ == "NegativeOne":
+            return 1.0
+        raise RuntimeError(f"Unexpected type {type(expr)} of expression {expr}")
+    
+    def estimate_upper_bound(expr, param_name, abs_param_bound) -> float:
+        if type(expr).__name__ == "Add":
+            return sum([estimate_upper_bound(x, param_name, abs_param_bound) for x in expr.args])
+        if type(expr).__name__ == "Mul":
+            return np.prod([estimate_upper_bound(x, param_name, abs_param_bound) for x in expr.args])
+        if type(expr).__name__ == "Symbol":
+            if str(expr) == param_name:
+                return abs_param_bound
+            raise RuntimeError(f"Unexpected symbol {expr}")
+        if type(expr).__name__ == "Max":
+            if len(expr.args) == 2 and str(expr.args[0] == "0"):
+                return estimate_upper_bound(expr.args[1], param_name, abs_param_bound)
+            raise RuntimeError(f"Unexpected Max expression {expr}")
+        if type(expr).__name__ == "Heaviside":
+            return 1.0
+        return base_bound(expr)
+    
+    def estimate_top_level_upper_bound(expr, ps_function_names: list, derivative_bounds: dict) -> float:
+        if type(expr).__name__ == "Add":
+            return sum([estimate_top_level_upper_bound(x, ps_function_names, derivative_bounds)
+                        for x in expr.args])
+        if type(expr).__name__ == "Mul":
+            return np.prod([estimate_top_level_upper_bound(x, ps_function_names, derivative_bounds)
+                            for x in expr.args])
+        if type(expr).__name__ in ps_function_names:
+            # p(beta) = (1 - smoothing_alpha) sigmoid(logit(beta)) + smoothing_alpha/2
+            return 1 - args.probability_smoothing / 2
+            #return plain_bounds[type(expr).__name__]
+        if type(expr).__name__ == "Derivative":
+            assert type(expr.args[0]).__name__ in ps_function_names
+            # p(beta) = (1 - smoothing_alpha) sigmoid(logit(beta)) + smoothing_alpha/2
+            # p'(beta) = (1 - smoothing_alpha) sigmoid'(logit(beta)) logit'(beta)
+            # the derivative of sigmoid is at most 1/4
+            return derivative_bounds[type(expr.args[0]).__name__] / 4 * (1 - args.probability_smoothing)
+        return base_bound(expr)
+    
+    def to_scalar(x):
+        assert x.shape == (1, 1)
+        return x[0, 0]
+        
+    def round_expr(expr, num_digits):
+        return expr.xreplace({n : round(n, num_digits) for n in expr.atoms(sympy.Number)})
+        
+    params = sympy.symbols(["β"])
+    beta = params[0]
     
     for sink in g.sinks:
         print(f"Measuring robustness of delivery to {sink}...")
@@ -442,31 +503,109 @@ elif args.command == "q_adversarial_lipschitz":
         sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
         embedding_size = sink_embedding.flatten().shape[0]
         sink_embeddings = sink_embedding.repeat(2, 1)
-
-        for param, diverter_key in zip(ma.params, ma.nontrivial_diverters):
-            print(param, diverter_key)
-            
-        assert False
         
-        # TODO
-        #  compute a pool of bounds
-    
+        lr = 0.001
+        delta_q_max = 10.0
+        # 2 comes from differentiating a square
+        beta_bound = 2 * lr * delta_q_max
+        
+        ps_function_names = [f"p{i}" for i in range(len(ma.params))]
+        function_ps = [sympy.Function(name) for name in ps_function_names]
+        evaluated_function_ps = [f(beta) for f in function_ps]
         
         for source in ma.reachable_sources:
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
             symbolic_objective, objective = ma.get_objective(source)
         
-            # TODO
-            #  compute a pool of bounds
-            #  construct kappa
-            #  substitute ps with functions
-            #  get symbolic derivative
-            #  recursive estimation for the symbolic derivative
-            #    see Derivative(p_i) -> subsitute the bound
-            #    see just p_i -> subsitute with the bound
-            
-            # TODO upper-bound expressions using SYMPY solvers?
-            # TODO or even simpler: try to prove an upper bound on the function for each interval
+            for node_key in g.node_keys:
+                current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
+
+                for neighbor_key, neighbor_embedding in zip(neighbors, neighbor_embeddings):
+                    print(f"    Considering learning step {node_key} -> {neighbor_key}...")
+                    opt = torch.optim.SGD(g.q_network.parameters(), lr=0.01)
+                    opt.zero_grad()
+                    predicted_q = g.q_forward(current_embedding, sink_embedding, neighbor_embedding).flatten()
+                    predicted_q.backward()
+                    print(f"      Reference Q value = {predicted_q.item()}")
+
+                    A_hat = to_sympy(net.fc1.weight.grad)
+                    b_hat = to_sympy(net.fc1.bias.grad)
+                    C_hat = to_sympy(net.fc2.weight.grad)
+                    d_hat = to_sympy(net.fc2.bias.grad)
+                    E_hat = to_sympy(net.output.weight.grad)
+                    f_hat = to_sympy(net.output.bias.grad)
+
+                    def sympy_q(beta, x):
+                        result = relu((A + beta * A_hat) @ x      + b + beta * b_hat)
+                        result = relu((C + beta * C_hat) @ result + d + beta * d_hat)
+                        return        (E + beta * E_hat) @ result + f + beta * f_hat
+                    
+                    print(f"      cost(p) = {symbolic_objective}")
+                    assert type(symbolic_objective).__name__ == "Mul"
+                    
+                    # walk through the product
+                    # if this is pow(something, -1), something is the denominator
+                    # the rest goes to the numerator
+                    
+                    nominator = 1
+                    
+                    for arg in symbolic_objective.args:
+                        if type(arg).__name__ == "Pow":
+                            assert type(arg.args[1]).__name__ == "NegativeOne", type(arg.args[1]).__name__
+                            denominator = arg.args[0]
+                        else:
+                            nominator *= arg 
+                    
+                    print(f"      nominator(p) = {nominator}")
+                    print(f"      denominator(p) = {denominator}")
+                    
+                    # compute the sign of v, then ensure that it is "+"
+                    # the values to subsitute are arbitrary within (0, 1)
+                    denominator_value = denominator.subs([(param, 0.5) for param in ma.params]).simplify()
+                    print(f"      denominator(0.5) = {denominator_value:.4f}")
+                    if float(str(denominator_value)) < 0:
+                        nominator *= -1
+                        denominator *= -1
+                    kappa = nominator - args.cost_bound * denominator
+                    print(f"      κ(p) = {kappa}, κ(p) < 0?")
+                    
+                    kappa = kappa.subs(list(zip(ma.params, evaluated_function_ps)))
+                    print(f"      κ(β) = {kappa}, κ(β) < 0?")
+                    dkappa_dbeta = kappa.diff(beta)
+                    print(f"      dκ(β)/dβ = {dkappa_dbeta}")
+                    
+                    #  compute a pool of bounds
+                    plain_bounds = {}
+                    derivative_bounds = {}
+                    for param, diverter_key in zip(ma.params, ma.nontrivial_diverters):
+                        diverter_embedding, current_neighbors, neighbor_embeddings = g.node_to_embeddings(diverter_key, sink)
+                        print(f"      Computing logits for {param} = P{diverter_key} -> {current_neighbors[0]})....")
+                        #print(param, diverter_key)
+
+                        delta_e = lambda nbr: to_sympy(torch.cat((diverter_embedding - sink_embedding,
+                                                                  nbr - sink_embedding), dim=1).T)
+                        delta_e1 = delta_e(neighbor_embeddings[0])
+                        delta_e2 = delta_e(neighbor_embeddings[1])
+                        #print(delta_e1)
+                        #print(delta_e2)
+                        
+                        MOCK = False
+                        if MOCK:
+                            derivative_bounds[param.name] = 50.0
+                            continue
+                        
+                        logit = to_scalar(sympy_q(beta, delta_e1) - sympy_q(beta, delta_e2))
+                        print(f"      logit = {str(round_expr(logit, 3))[:200]} ...")
+                        dlogit_dbeta = logit.diff(beta)
+                        print(f"      dlogit_dbeta = {str(round_expr(dlogit_dbeta, 3))[:200]} ...")
+                        print(f"      Computing logit bounds for {param} = P{diverter_key} -> {current_neighbors[0]})...")
+                        derivative_bounds[param.name] = estimate_upper_bound(dlogit_dbeta, "β", beta_bound)
+
+                    print(f"      Computing the final upper bound on dκ(β)/dβ...")
+                    top_level_bound = estimate_top_level_upper_bound(dkappa_dbeta, ps_function_names, derivative_bounds)
+                    print(f"      Final upper bound on the Lipschitz constant = {top_level_bound}")
+                    
+                    # TODO prove an upper bound on the function for each interval
     
 elif args.command == "compare":
     _legend_txt_replace = {

@@ -1,11 +1,11 @@
 import os
 
 def run(command: str, config_file: str, temperature: float, more_args: str = ""):
-    os.system(f"ipython Verify.py -- --command {command} --config_file ../launches/igor/{config_file} --softmax_temperature {temperature} {more_args}")
+    os.system(f"ipython Verify.py -- --command {command} --config_file ../launches/igor/{config_file} --softmax_temperature {temperature} --cost_bound 123.5 {more_args}")
 
 #config = ("acyclic_conveyor_energy_test.yaml", 1.5)   # Mukhutdinov
-config = ("conveyor_cyclic_energy_test.yaml", 1.5)    # Very simple fictitious graph with cycle
-#config = ("conveyor_cyclic2_energy_test.yaml", 1.5)   # A complication of the previous example
+#config = ("conveyor_cyclic_energy_test.yaml", 1.5)    # Very simple fictitious graph with cycle
+config = ("conveyor_cyclic2_energy_test.yaml", 1.5)   # A complication of the previous example
 #config = ("tarau2010.yaml", 4.5)                       # Fictitious graph from the literature
 #config = ("johnstone2010.yaml", 3.0)                  # Almost real graph from the literature
 
