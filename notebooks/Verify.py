@@ -494,8 +494,7 @@ elif args.command == "q_adversarial_lipschitz":
     def round_expr(expr, num_digits):
         return expr.xreplace({n : round(n, num_digits) for n in expr.atoms(sympy.Number)})
         
-    params = sympy.symbols(["β"])
-    beta = params[0]
+    beta = sympy.Symbol("β", real=True)
     
     for sink in g.sinks:
         print(f"Measuring robustness of delivery to {sink}...")
@@ -586,8 +585,7 @@ elif args.command == "q_adversarial_lipschitz":
                                                                   nbr - sink_embedding), dim=1).T)
                         delta_e1 = delta_e(neighbor_embeddings[0])
                         delta_e2 = delta_e(neighbor_embeddings[1])
-                        #print(delta_e1)
-                        #print(delta_e2)
+                        #print(delta_e1, delta_e2)
                         
                         MOCK = False
                         if MOCK:
