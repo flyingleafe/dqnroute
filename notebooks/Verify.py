@@ -445,41 +445,41 @@ elif args.command == "q_adversarial_lipschitz":
             return True
     
     def base_bound(expr) -> float:
-        if type(expr).__name__ in ["Float", "Integer"]:
+        if type(expr) in [sympy.Float, sympy.Integer]:
             return np.abs(float(expr))
-        if type(expr).__name__ == "NegativeOne":
+        if type(expr) == sympy.numbers.NegativeOne:
             return 1.0
         raise RuntimeError(f"Unexpected type {type(expr)} of expression {expr}")
     
     def estimate_upper_bound(expr, param_name, abs_param_bound) -> float:
-        if type(expr).__name__ == "Add":
+        if type(expr) == sympy.Add:
             return sum([estimate_upper_bound(x, param_name, abs_param_bound) for x in expr.args])
-        if type(expr).__name__ == "Mul":
+        if type(expr) == sympy.Mul:
             return np.prod([estimate_upper_bound(x, param_name, abs_param_bound) for x in expr.args])
-        if type(expr).__name__ == "Symbol":
+        if type(expr) == sympy.Symbol:
             if str(expr) == param_name:
                 return abs_param_bound
             raise RuntimeError(f"Unexpected symbol {expr}")
-        if type(expr).__name__ == "Max":
+        if type(expr) == sympy.Max:
             if len(expr.args) == 2 and str(expr.args[0] == "0"):
                 return estimate_upper_bound(expr.args[1], param_name, abs_param_bound)
             raise RuntimeError(f"Unexpected Max expression {expr}")
-        if type(expr).__name__ == "Heaviside":
+        if type(expr) == sympy.Heaviside:
             return 1.0
         return base_bound(expr)
     
     def estimate_top_level_upper_bound(expr, ps_function_names: list, derivative_bounds: dict) -> float:
-        if type(expr).__name__ == "Add":
+        if type(expr) == sympy.Add:
             return sum([estimate_top_level_upper_bound(x, ps_function_names, derivative_bounds)
                         for x in expr.args])
-        if type(expr).__name__ == "Mul":
+        if type(expr) == sympy.Mul:
             return np.prod([estimate_top_level_upper_bound(x, ps_function_names, derivative_bounds)
                             for x in expr.args])
         if type(expr).__name__ in ps_function_names:
             # p(beta) = (1 - smoothing_alpha) sigmoid(logit(beta)) + smoothing_alpha/2
             return 1 - args.probability_smoothing / 2
             #return plain_bounds[type(expr).__name__]
-        if type(expr).__name__ == "Derivative":
+        if type(expr) == sympy.Derivative:
             assert type(expr.args[0]).__name__ in ps_function_names
             # p(beta) = (1 - smoothing_alpha) sigmoid(logit(beta)) + smoothing_alpha/2
             # p'(beta) = (1 - smoothing_alpha) sigmoid'(logit(beta)) logit'(beta)
