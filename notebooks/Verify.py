@@ -436,6 +436,12 @@ elif args.command == "q_adversarial_lipschitz":
     E = to_sympy(net.output.weight)
     f = to_sympy(net.output.bias)
     
+    def round_expr(expr: sympy.Expr, num_digits: int) -> sympy.Expr:
+        return expr.xreplace({n : round(n, num_digits) for n in expr.atoms(sympy.Number)})
+
+    def expr_to_string(expr: sympy.Expr) -> str:
+        return str(round_expr(expr, 2)).replace("Max(0, ", "ReLU(")
+    
     class relu(sympy.Function):
         @classmethod
         def eval(cls, x):
@@ -451,22 +457,91 @@ elif args.command == "q_adversarial_lipschitz":
             return 1.0
         raise RuntimeError(f"Unexpected type {type(expr)} of expression {expr}")
     
-    def estimate_upper_bound(expr, param_name, abs_param_bound) -> float:
-        if type(expr) == sympy.Add:
-            return sum([estimate_upper_bound(x, param_name, abs_param_bound) for x in expr.args])
-        if type(expr) == sympy.Mul:
-            return np.prod([estimate_upper_bound(x, param_name, abs_param_bound) for x in expr.args])
-        if type(expr) == sympy.Symbol:
-            if str(expr) == param_name:
-                return abs_param_bound
-            raise RuntimeError(f"Unexpected symbol {expr}")
-        if type(expr) == sympy.Max:
-            if len(expr.args) == 2 and str(expr.args[0] == "0"):
-                return estimate_upper_bound(expr.args[1], param_name, abs_param_bound)
-            raise RuntimeError(f"Unexpected Max expression {expr}")
-        if type(expr) == sympy.Heaviside:
-            return 1.0
-        return base_bound(expr)
+    def to_intervals(points):
+        return list(zip(points, points[1:]))
+    
+    def get_subs_value(interval: Tuple[float, float]) -> float:
+        return (interval[1] - interval[0]) / 2
+    
+    def get_bottom_decision_points(expr: sympy.Expr, param: sympy.Symbol) -> Tuple[set, bool]:
+        result_set = set()
+        all_args_plain = True
+        for arg in expr.args:
+            arg_set, arg_plain = get_bottom_decision_points(arg, param)
+            result_set.update(arg_set)
+            all_args_plain = all_args_plain and arg_plain
+        if all_args_plain and type(expr) in [sympy.Heaviside, sympy.Max]:
+            # new decision point
+            index = 1 if type(expr) == sympy.Max else 0
+            #solutions = [0]
+            #print(expr.args[index])
+            # even though the expressions are simple, this works very slowly:
+            solutions = sympy.solve(expr.args[index], param)
+            #assert len(solutions) == 1
+            result_set.add(solutions[0])
+            #print(expr, solutions[0])
+            all_args_plain = False
+        return result_set, all_args_plain
+    
+    def resolve_bottom_decisions(expr: sympy.Expr, param: sympy.Symbol, param_point: float) -> Tuple[sympy.Expr, bool]:
+        if type(expr) in [sympy.Float, sympy.Integer, sympy.numbers.NegativeOne, sympy.Symbol]:
+            return expr, True
+        if type(expr) in [sympy.Heaviside, sympy.Max]:
+            return expr.subs(param, param_point).simplify(), False
+        all_args_plain = True
+        arg_expressions = []
+        for arg in expr.args:
+            arg_expr, arg_plain = resolve_bottom_decisions(arg, param, param_point)
+            arg_expressions += [arg_expr]
+            all_args_plain = all_args_plain and arg_plain
+        #print(type(expr), arg_expressions)
+        return type(expr)(*arg_expressions), all_args_plain
+    
+    def estimate_upper_bound(expr: sympy.Expr, param: sympy.Symbol, abs_param_bound: float) -> float:
+        points = [p for p in get_bottom_decision_points(expr, param)[0] if np.abs(p) < abs_param_bound]
+        points = sorted(points)
+        points = [-abs_param_bound] + points + [abs_param_bound]
+        print(f"      {points}")
+        intervals = to_intervals(points)
+        print(f"      {intervals}")
+        all_values = set()
+        
+        for interval in intervals:
+            print(f"      {interval}")
+            e = resolve_bottom_decisions(expr, param, get_subs_value(interval))[0].simplify()
+            final_decision_points = get_bottom_decision_points(e, param)[0]
+            final_decision_points = [p for p in final_decision_points if interval[0] < p < interval[1]]
+            final_decision_points = [interval[0]] + final_decision_points + [interval[1]]
+            refined_intervals = to_intervals(final_decision_points)
+            for refined_interval in refined_intervals:
+                refined_e = resolve_bottom_decisions(e, param, get_subs_value(refined_interval))[0].simplify()
+                derivative = refined_e.diff(param)
+                # find stationary points of the derivative
+                additional_points = [p for p in sympy.solve(derivative, param)
+                                     if refined_interval[0] < p < refined_interval[1]]
+                all_points = [refined_interval[0]] + additional_points + [refined_interval[1]]
+                all_values.update([np.abs(float(refined_e.subs(param, p).simplify())) for p in all_points])
+                print(f"        {refined_interval}")
+                print(f"          {expr_to_string(refined_e)}; additional points: {additional_points}")
+        return max(all_values)
+        
+    
+    #def estimate_upper_bound(expr, param_name, abs_param_bound) -> float:
+    #    if type(expr) == sympy.Add:
+    #        return sum([estimate_upper_bound(x, param_name, abs_param_bound) for x in expr.args])
+    #    if type(expr) == sympy.Mul:
+    #        return np.prod([estimate_upper_bound(x, param_name, abs_param_bound) for x in expr.args])
+    #    if type(expr) == sympy.Symbol:
+    #        if str(expr) == param_name:
+    #            return abs_param_bound
+    #        raise RuntimeError(f"Unexpected symbol {expr}")
+    #    if type(expr) == sympy.Max:
+    #        if len(expr.args) == 2 and str(expr.args[0] == "0"):
+    #            return estimate_upper_bound(expr.args[1], param_name, abs_param_bound)
+    #        raise RuntimeError(f"Unexpected Max expression {expr}")
+    #    if type(expr) == sympy.Heaviside:
+    #        return 1.0
+    #    return base_bound(expr)
     
     def estimate_top_level_upper_bound(expr, ps_function_names: list, derivative_bounds: dict) -> float:
         if type(expr) == sympy.Add:
@@ -491,7 +566,7 @@ elif args.command == "q_adversarial_lipschitz":
         assert x.shape == (1, 1)
         return x[0, 0]
         
-    def round_expr(expr, num_digits):
+    def round_expr(expr: sympy.Expr, num_digits) -> sympy.Expr:
         return expr.xreplace({n : round(n, num_digits) for n in expr.atoms(sympy.Number)})
         
     beta = sympy.Symbol("β", real=True)
@@ -533,6 +608,16 @@ elif args.command == "q_adversarial_lipschitz":
                     d_hat = to_sympy(net.fc2.bias.grad)
                     E_hat = to_sympy(net.output.weight.grad)
                     f_hat = to_sympy(net.output.bias.grad)
+                    
+                    MOCK = True
+                    if MOCK:
+                        dim = 6
+                        #print(A.shape, b.shape, C.shape, d.shape, E.shape, f.shape)
+                        A = A[:dim, :]; A_hat = A_hat[:dim, :]
+                        b = b[:dim, :]; b_hat = b_hat[:dim, :]
+                        C = C[:dim, :dim]; C_hat = C_hat[:dim, :dim]
+                        d = b[:dim, :]; d_hat = d_hat[:dim, :]
+                        E = E[:, :dim]; E_hat = E_hat[:, :dim]
 
                     def sympy_q(beta, x):
                         result = relu((A + beta * A_hat) @ x      + b + beta * b_hat)
@@ -540,7 +625,7 @@ elif args.command == "q_adversarial_lipschitz":
                         return        (E + beta * E_hat) @ result + f + beta * f_hat
                     
                     print(f"      cost(p) = {symbolic_objective}")
-                    assert type(symbolic_objective).__name__ == "Mul"
+                    assert type(symbolic_objective) == sympy.Mul
                     
                     # walk through the product
                     # if this is pow(something, -1), something is the denominator
@@ -549,8 +634,8 @@ elif args.command == "q_adversarial_lipschitz":
                     nominator = 1
                     
                     for arg in symbolic_objective.args:
-                        if type(arg).__name__ == "Pow":
-                            assert type(arg.args[1]).__name__ == "NegativeOne", type(arg.args[1]).__name__
+                        if type(arg) == sympy.Pow:
+                            assert type(arg.args[1]) == sympy.numbers.NegativeOne, type(arg.args[1])
                             denominator = arg.args[0]
                         else:
                             nominator *= arg 
@@ -587,17 +672,12 @@ elif args.command == "q_adversarial_lipschitz":
                         delta_e2 = delta_e(neighbor_embeddings[1])
                         #print(delta_e1, delta_e2)
                         
-                        MOCK = False
-                        if MOCK:
-                            derivative_bounds[param.name] = 50.0
-                            continue
-                        
                         logit = to_scalar(sympy_q(beta, delta_e1) - sympy_q(beta, delta_e2))
-                        print(f"      logit = {str(round_expr(logit, 3))[:200]} ...")
+                        print(f"      logit = {str(round_expr(logit, 3))[:500]} ...")
                         dlogit_dbeta = logit.diff(beta)
-                        print(f"      dlogit_dbeta = {str(round_expr(dlogit_dbeta, 3))[:200]} ...")
+                        print(f"      dlogit_dbeta = {str(round_expr(dlogit_dbeta, 3))[:500]} ...")
                         print(f"      Computing logit bounds for {param} = P{diverter_key} -> {current_neighbors[0]})...")
-                        derivative_bounds[param.name] = estimate_upper_bound(dlogit_dbeta, "β", beta_bound)
+                        derivative_bounds[param.name] = estimate_upper_bound(dlogit_dbeta, beta, beta_bound)
 
                     print(f"      Computing the final upper bound on dκ(β)/dβ...")
                     top_level_bound = estimate_top_level_upper_bound(dkappa_dbeta, ps_function_names, derivative_bounds)
