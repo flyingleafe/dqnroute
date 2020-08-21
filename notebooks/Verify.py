@@ -45,6 +45,10 @@ parser.add_argument("--softmax_temperature", type=float, default=1.5,
                     help="custom softmax temperature (higher temperature means larger entropy in routing decisions; default: 1.5)")
 parser.add_argument("--cost_bound", type=float, default=100.0,
                     help="upper bound on delivery cost to verify (default: 100)")
+parser.add_argument("--verification_lr", type=float, default=0.001,
+                    help="learning rate in learning step verification (default: 0.001)")
+parser.add_argument("--verification_max_delta_q", type=float, default=10.0,
+                    help="maximum ΔQ in learning step verification (default: 10.0)")
 
 parser.add_argument("--pretrain_num_episodes", type=int, default=10000,
                     help="pretrain_num_episodes (default: 10000)")
@@ -263,7 +267,8 @@ def visualize(g: RouterGraph):
 if not args.skip_graphviz:
     visualize(g)
     
-sa = SymbolicAnalyzer(g, args.softmax_temperature, args.probability_smoothing, lr=0.001, delta_q_max=10.0)
+sa = SymbolicAnalyzer(g, args.softmax_temperature, args.probability_smoothing,
+                      args.verification_lr, delta_q_max=args.verification_max_delta_q)
 
 print(f"Running command {args.command}...")
 if args.command == "deterministic_test":
@@ -383,7 +388,7 @@ elif args.command == "q_adversarial":
                     for i, actual_q in enumerate(actual_qs):
                         ps = sa.compute_ps(ma, diverter, sink, sink_embeddings, reference_q, actual_q)
                         objective_values[i] = lambdified_objective(*ps).item()
-                        kappa_values[i] = lambdified_kappa(*ps).item()
+                        kappa_values[i] = lambdified_kappa(*ps)
 
                     # plot
                     fig, axes = plt.subplots(2, 1, figsize=(13, 6))
@@ -408,13 +413,7 @@ elif args.command == "q_adversarial":
                     plot_index += 1
 elif args.command == "q_adversarial_lipschitz":
     print(sa.net)
-    to_sympy = lambda x: sympy.Matrix(x.detach().cpu().numpy())
-    A = to_sympy(sa.net.fc1.weight)
-    b = to_sympy(sa.net.fc1.bias)
-    C = to_sympy(sa.net.fc2.weight)
-    d = to_sympy(sa.net.fc2.bias)
-    E = to_sympy(sa.net.output.weight)
-    f = to_sympy(sa.net.output.bias)
+    sa.load_matrices()
     
     for sink in g.sinks:
         print(f"Measuring robustness of delivery to {sink}...")
@@ -425,7 +424,7 @@ elif args.command == "q_adversarial_lipschitz":
         
         ps_function_names = [f"p{i}" for i in range(len(ma.params))]
         function_ps = [sympy.Function(name) for name in ps_function_names]
-        evaluated_function_ps = [f(beta) for f in function_ps]
+        evaluated_function_ps = [f(sa.beta) for f in function_ps]
         
         for source in ma.reachable_sources:
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
@@ -436,84 +435,99 @@ elif args.command == "q_adversarial_lipschitz":
 
                 for neighbor_key, neighbor_embedding in zip(neighbors, neighbor_embeddings):
                     print(f"    Considering learning step {node_key} -> {neighbor_key}...")
-                    opt = torch.optim.SGD(g.q_network.parameters(), lr=0.01)
-                    opt.zero_grad()
-                    predicted_q = g.q_forward(current_embedding, sink_embedding, neighbor_embedding).flatten()
-                    predicted_q.backward()
-                    print(f"      Reference Q value = {predicted_q.item()}")
-
-                    A_hat = to_sympy(sa.net.fc1.weight.grad)
-                    b_hat = to_sympy(sa.net.fc1.bias.grad)
-                    C_hat = to_sympy(sa.net.fc2.weight.grad)
-                    d_hat = to_sympy(sa.net.fc2.bias.grad)
-                    E_hat = to_sympy(sa.net.output.weight.grad)
-                    f_hat = to_sympy(sa.net.output.bias.grad)
+                    reference_q = sa.compute_gradients(current_embedding, sink_embedding,
+                                                       neighbor_embedding).flatten().item()
+                    print(f"      Reference Q value = {reference_q}")
+                    sa.load_grad_matrices()
                     
-                    MOCK = True
+                    MOCK = False
                     if MOCK:
-                        dim = 6
+                        dim = 7
                         #print(A.shape, b.shape, C.shape, d.shape, E.shape, f.shape)
-                        A = A[:dim, :];    A_hat = A_hat[:dim, :]
-                        b = b[:dim, :];    b_hat = b_hat[:dim, :]
-                        C = C[:dim, :dim]; C_hat = C_hat[:dim, :dim]
-                        d = b[:dim, :];    d_hat = d_hat[:dim, :]
-                        E = E[:,    :dim]; E_hat = E_hat[:,    :dim]
+                        sa.A = sa.A[:dim, :];    sa.A_hat = sa.A_hat[:dim, :]
+                        sa.b = sa.b[:dim, :];    sa.b_hat = sa.b_hat[:dim, :]
+                        sa.C = sa.C[:dim, :dim]; sa.C_hat = sa.C_hat[:dim, :dim]
+                        sa.d = sa.b[:dim, :];    sa.d_hat = sa.d_hat[:dim, :]
+                        sa.E = sa.E[:,    :dim]; sa.E_hat = sa.E_hat[:,    :dim]
 
-                    def sympy_q(beta: sympy.Symbol, x: sympy.Expr) -> sympy.Expr:
-                        result = relu((A + beta * A_hat) @ x      + b + beta * b_hat)
-                        result = relu((C + beta * C_hat) @ result + d + beta * d_hat)
-                        return        (E + beta * E_hat) @ result + f + beta * f_hat
-                    
-                    print(f"      cost(p) = {objective}")
-                    kappa = sa.get_transformed_cost(ma, objective, args.cost_bound)
-                    print(f"      κ(p) = {kappa}, κ(p) < 0?")
-                    kappa = kappa.subs(list(zip(ma.params, evaluated_function_ps)))
-                    print(f"      κ(β) = {kappa}, κ(β) < 0?")
-                    dkappa_dbeta = kappa.diff(beta)
+                    print(f"      τ(p) = {objective}, τ(p) < {args.cost_bound}?")
+                    kappa_of_p = sa.get_transformed_cost(ma, objective, args.cost_bound)
+                    lambdified_kappa = sympy.lambdify(ma.params, kappa_of_p)
+                    print(f"      κ(p) = {kappa_of_p}, κ(p) < 0?")
+                    kappa_of_beta = kappa_of_p.subs(list(zip(ma.params, evaluated_function_ps)))
+                    print(f"      κ(β) = {kappa_of_beta}, κ(β) < 0?")
+                    dkappa_dbeta = kappa_of_beta.diff(sa.beta)
                     print(f"      dκ(β)/dβ = {dkappa_dbeta}")
                     
                     #  compute a pool of bounds
-                    plain_bounds = {}
                     derivative_bounds = {}
                     for param, diverter_key in zip(ma.params, ma.nontrivial_diverters):
                         diverter_embedding, current_neighbors, neighbor_embeddings = g.node_to_embeddings(diverter_key, sink)
-                        print(f"      Computing logits for {param} = P{diverter_key} -> {current_neighbors[0]})....")
+                        print(f"      Computing logits for {param} = P({diverter_key} -> {current_neighbors[0]})....")
                         #print(param, diverter_key)
 
-                        delta_e = [to_sympy(torch.cat((sink_embedding - diverter_embedding,
-                                                       neighbor_embeddings[i] - diverter_embedding), dim=1).T) for i in range(2)]
+                        delta_e = [sa.tensor_to_sympy(torch.cat((sink_embedding - diverter_embedding,
+                                                                 neighbor_embeddings[i] - diverter_embedding), dim=1).T)
+                                   for i in range(2)]
                         #print(delta_e)
                         
-                        logit = to_scalar(sympy_q(beta, delta_e[0]) - sympy_q(beta, delta_e[1])) / args.softmax_temperature
-                        print(f"      logit = {str(round_expr(logit, 3))[:500]} ...")
-                        dlogit_dbeta = logit.diff(beta)
-                        print(f"      dlogit_dbeta = {str(round_expr(dlogit_dbeta, 3))[:500]} ...")
-                        print(f"      Computing logit bounds for {param} = P{diverter_key} -> {current_neighbors[0]})...")
-                        derivative_bounds[param.name] = estimate_upper_bound(dlogit_dbeta, beta, beta_bound)
+                        logit = sa.to_scalar(sa.sympy_q(delta_e[0]) - sa.sympy_q(delta_e[1])) / args.softmax_temperature
+                        print(f"      logit = {sa.expr_to_string(logit)[:500]} ...")
+                        dlogit_dbeta = logit.diff(sa.beta)
+                        print(f"      dlogit/dβ = {sa.expr_to_string(dlogit_dbeta)[:500]} ...")
+                        print(f"      Computing logit bounds for {param} = P({diverter_key} -> {current_neighbors[0]})...")
+                        derivative_bounds[param.name] = sa.estimate_upper_bound(dlogit_dbeta)
 
                     print(f"      Computing the final upper bound on dκ(β)/dβ...")
-                    top_level_bound = estimate_top_level_upper_bound(dkappa_dbeta, ps_function_names, derivative_bounds)
-                    print(f"      Final upper bound on the Lipschitz constant = {top_level_bound}")
+                    top_level_bound = sa.estimate_top_level_upper_bound(dkappa_dbeta, ps_function_names, derivative_bounds)
+                    print(f"      Final upper bound on the Lipschitz constant of κ(β): {top_level_bound}")
                     
-                    grid_size = 2
-                    computed_values = None
+                    grid_size = 3
+                    old_kappa_values = None
+                    
+                    def intermediate(x):
+                        return x[1:][range(0, len(x) - 1, 2)]
+                    
+                    def merge_arrays(outer: np.ndarray, inner: np.ndarray) -> np.ndarray:
+                        result = np.empty(len(outer) + len(inner))
+                        result[range(0, len(result), 2)] = outer
+                        result[1:][range(0, len(result) - 1, 2)] = inner
+                        #print(outer)
+                        #print(inner)
+                        #print("->", result)
+                        return result
+                    
                     while True:
-                        print(f"      Using the grid of size {grid_size}...")
-                        beta_values = np.linspace(-beta_bound, beta_bound, grid_size)
-                        if computed_values is None:
-                            computed_values = np.empty(grid_size)
-                            for i, beta_value in enumerate(beta_values):
-                                pass
-                                # TODO evaluate ps
-                                # then substitute to kappa
-                        else:
-                            pass
-                        # TODO reuse previous computations
+                        print(f"      Grid size = {grid_size}...")
+                        beta_values = np.linspace(-sa.beta_bound, sa.beta_bound, grid_size)
+                        remaining_beta_values = beta_values if old_kappa_values is None else intermediate(beta_values)
+                        actual_qs = reference_q + remaining_beta_values / sa.lr / 2
+                        #print(actual_qs)
+                        kappa_values = np.empty(len(actual_qs))
+                        for i, actual_q in enumerate(actual_qs):
+                            ps = sa.compute_ps(ma, diverter, sink, sink_embeddings, reference_q, actual_q)
+                            #print(ps)
+                            kappa_values[i] = lambdified_kappa(*ps)
+                        # 1. try to find counterexample 
+                        worst_index = kappa_values.argmax()
+                        worst_value = kappa_values[worst_index]
+                        if worst_value >= 0:
+                            print(f"        Counterexample found: q = {actual_qs[worst_index]}, Δq = {actual_qs[worst_index] - reference_q}, β = {beta_values[worst_index]}, κ = {worst_value}")
+                            break
+                        # 2. try to find proof
+                        if old_kappa_values is not None:
+                            kappa_values = merge_arrays(old_kappa_values, kappa_values)
+                        kappa_upper_bound = -np.infty
+                        for beta_interval, kappa_interval in zip(sa.to_intervals(beta_values), sa.to_intervals(kappa_values)):
+                            max_on_interval = (top_level_bound * (beta_interval[1] - beta_interval[0]) + sum(kappa_interval)) / 2
+                            kappa_upper_bound = max(kappa_upper_bound, max_on_interval)
+                        print(f"        Computed upper bound on κ(β): {kappa_upper_bound}")
+                        if kappa_upper_bound < 0:
+                            print("        Proof found!")
+                            break
+                        # 3. otherwise, increase the size of the grid
                         grid_size = (grid_size - 1) * 2 + 1
-                    
-                    
-                    # TODO prove an upper bound on the function for each interval
-    
+                        old_kappa_values = kappa_values
 elif args.command == "compare":
     _legend_txt_replace = {
         'networks': {

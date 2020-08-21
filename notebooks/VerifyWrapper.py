@@ -11,13 +11,13 @@ config = ("conveyor_cyclic2_energy_test.yaml", 1.5)   # A complication of the pr
 
 #command = "deterministic_test"
 #command = "embedding_adversarial"
-command = "q_adversarial"
-#command = "q_adversarial_lipschitz"
+#command = "q_adversarial"
+command = "q_adversarial_lipschitz"
 #command = "compare"
 
 run(command, config[0], config[1],
     #more_args=""
-    more_args="--skip_graphviz"
+    more_args="--skip_graphviz --verification_lr 0.0001"
     #more_args="--force_train"
     #more_args="--skip_graphviz --force_pretrain --force_train"
     )

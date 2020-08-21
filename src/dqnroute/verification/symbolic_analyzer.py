@@ -29,6 +29,32 @@ class SymbolicAnalyzer:
         self.delta_q_max = delta_q_max
         # 2 comes from differentiating a square
         self.beta_bound = 2 * lr * delta_q_max
+        self.A,     self.b,     self.C,     self.d,     self.E,     self.f     = tuple([None] * 6)
+        self.A_hat, self.b_hat, self.C_hat, self.d_hat, self.E_hat, self.f_hat = tuple([None] * 6)
+    
+    def tensor_to_sympy(self, x: torch.tensor) -> sympy.Matrix:
+        return sympy.Matrix(x.detach().cpu().numpy())
+    
+    def _layer_to_sympy(self, x: torch.tensor) -> sympy.Matrix:
+        return self.tensor_to_sympy(x.weight), self.tensor_to_sympy(x.bias)
+    
+    def _layer_grad_to_sympy(self, x: torch.tensor) -> sympy.Matrix:
+        return self.tensor_to_sympy(x.weight.grad), self.tensor_to_sympy(x.bias.grad)
+    
+    def load_matrices(self):
+        self.A, self.b = self._layer_to_sympy(self.net.fc1)
+        self.C, self.d = self._layer_to_sympy(self.net.fc2)
+        self.E, self.f = self._layer_to_sympy(self.net.output)
+    
+    def load_grad_matrices(self):
+        self.A_hat, self.b_hat = self._layer_grad_to_sympy(self.net.fc1)
+        self.C_hat, self.d_hat = self._layer_grad_to_sympy(self.net.fc2)
+        self.E_hat, self.f_hat = self._layer_grad_to_sympy(self.net.output)
+    
+    def sympy_q(self, x: sympy.Expr) -> sympy.Expr:
+        result = relu((self.A + self.beta * self.A_hat) @ x      + self.b + self.beta * self.b_hat)
+        result = relu((self.C + self.beta * self.C_hat) @ result + self.d + self.beta * self.d_hat)
+        return        (self.E + self.beta * self.E_hat) @ result + self.f + self.beta * self.f_hat
     
     #@torch.no_grad()
     #def compute_reference_q(self, curent_embedding: torch.tensor, sink_embedding: torch.tensor,
@@ -37,7 +63,6 @@ class SymbolicAnalyzer:
     
     def compute_gradients(self, curent_embedding: torch.tensor, sink_embedding: torch.tensor,
                           neighbor_embedding: torch.tensor) -> torch.tensor:
-        Util.set_param_requires_grad(self.net, True)
         opt = torch.optim.SGD(self.g.q_network.parameters(), lr=self.lr)
         opt.zero_grad()
         predicted_q = self.g.q_forward(curent_embedding, sink_embedding, neighbor_embedding).flatten()
@@ -48,9 +73,10 @@ class SymbolicAnalyzer:
     def _gd_step(self, predicted_q: torch.tensor, actual_q: torch.tensor, reverse: bool):
         for param in self.g.q_network.parameters():
             if param.grad is not None:
-                mse_gradient = 2 * (predicted_q - actual_q) * param.grad 
+                mse_gradient = 2 * (predicted_q - actual_q) * param.grad
                 param -= (-1 if reverse else 1) * self.lr * mse_gradient
     
+    @torch.no_grad()
     def compute_ps(self, ma: MarkovAnalyzer, diverter, sink, sink_embeddings: torch.tensor,
                    predicted_q: torch.tensor, actual_q: torch.tensor):
         ps = []
@@ -60,7 +86,7 @@ class SymbolicAnalyzer:
             diverter_embeddings = diverter_embedding.repeat(2, 1)
             neighbor_embeddings = torch.cat(neighbor_embeddings, dim=0)
             q_values = self.g.q_forward(diverter_embeddings, sink_embeddings, neighbor_embeddings).flatten()
-            ps += [Util.q_values_to_first_probability(q_values, self.softmax_temperature, self.probability_smoothing)]
+            ps += [Util.q_values_to_first_probability(q_values, self.softmax_temperature, self.probability_smoothing).item()]
         self._gd_step(predicted_q, actual_q, True)
         return ps
     
@@ -76,6 +102,29 @@ class SymbolicAnalyzer:
     def get_subs_value(self, interval: Tuple[float, float]) -> float:
         return (interval[1] - interval[0]) / 2
     
+    def _dummy_solve_expression(self, expr: sympy.Expr) -> List[float]:
+        """ This looks stupid, but this is faster than sympy.solve for linear equations. """
+        try:
+            assert type(expr) == sympy.Add, type(expr)
+            assert len(expr.args) == 2, len(expr.args)
+            if type(expr.args[0]) == sympy.Mul:
+                product = expr.args[0]
+                bias = expr.args[1]
+            else:
+                product = expr.args[1]
+                bias = expr.args[0]
+            assert len(product.args) == 2, len(product.args)
+            assert type(product.args[1]) == sympy.Symbol, type(product.args[1])
+            coef = product.args[0]
+            assert coef != 0.0
+            result = [-bias / coef]
+            #print(result)
+            #print(sympy.solve(expr, self.beta))
+            return result
+        except AssertionError:
+            print(f"Warning: unusual expression {expr}, using sympy.solve instead.")
+            return sympy.solve(expr, self.beta)
+    
     def get_bottom_decision_points(self, expr: sympy.Expr) -> Tuple[set, bool]:
         result_set = set()
         all_args_plain = True
@@ -89,7 +138,8 @@ class SymbolicAnalyzer:
             #solutions = [0]
             #print(expr.args[index])
             # even though the expressions are simple, this works very slowly:
-            solutions = sympy.solve(expr.args[index], self.beta)
+            #solutions = sympy.solve(expr.args[index], self.beta)
+            solutions = self._dummy_solve_expression(expr.args[index])
             #assert len(solutions) == 1
             result_set.add(solutions[0])
             #print(expr, solutions[0])
@@ -110,7 +160,7 @@ class SymbolicAnalyzer:
         #print(type(expr), arg_expressions)
         return type(expr)(*arg_expressions), all_args_plain
     
-    def estimate_upper_bound(expr: sympy.Expr) -> float:
+    def estimate_upper_bound(self, expr: sympy.Expr) -> float:
         points = [p for p in self.get_bottom_decision_points(expr)[0] if np.abs(p) < self.beta_bound]
         points = sorted(points)
         points = [-self.beta_bound] + points + [self.beta_bound]
@@ -120,24 +170,24 @@ class SymbolicAnalyzer:
         
         for interval in intervals:
             print(f"      {interval}")
-            e = resolve_bottom_decisions(expr, param, get_subs_value(interval))[0].simplify()
+            e = self.resolve_bottom_decisions(expr, self.get_subs_value(interval))[0].simplify()
             final_decision_points = self.get_bottom_decision_points(e)[0]
             final_decision_points = [p for p in final_decision_points if interval[0] < p < interval[1]]
             final_decision_points = [interval[0]] + final_decision_points + [interval[1]]
             refined_intervals = self.to_intervals(final_decision_points)
             for refined_interval in refined_intervals:
                 refined_e = self.resolve_bottom_decisions(e, self.get_subs_value(refined_interval))[0].simplify()
-                derivative = refined_e.diff(param)
+                derivative = refined_e.diff(self.beta)
                 # find stationary points of the derivative
-                additional_points = [p for p in sympy.solve(derivative, param)
+                additional_points = [p for p in sympy.solve(derivative, self.beta)
                                      if refined_interval[0] < p < refined_interval[1]]
                 all_points = [refined_interval[0]] + additional_points + [refined_interval[1]]
                 all_values.update([np.abs(float(refined_e.subs(self.beta, p).simplify())) for p in all_points])
                 print(f"        {refined_interval}")
-                print(f"          {expr_to_string(refined_e)}; additional points: {additional_points}")
+                print(f"          {self.expr_to_string(refined_e)}; additional points: {additional_points}")
         return max(all_values)
     
-    def estimate_top_level_upper_bound(expr: sympy.Expr, ps_function_names: List[str],
+    def estimate_top_level_upper_bound(self, expr: sympy.Expr, ps_function_names: List[str],
                                        derivative_bounds: dict) -> float:
         if type(expr) == sympy.Add:
             return sum([self.estimate_top_level_upper_bound(x, ps_function_names, derivative_bounds)
@@ -147,14 +197,14 @@ class SymbolicAnalyzer:
                             for x in expr.args])
         if type(expr).__name__ in ps_function_names:
             # p(beta) = (1 - smoothing_alpha) sigmoid(logit(beta)) + smoothing_alpha/2
-            return 1 - args.probability_smoothing / 2
+            return 1 - self.probability_smoothing / 2
             #return plain_bounds[type(expr).__name__]
         if type(expr) == sympy.Derivative:
             assert type(expr.args[0]).__name__ in ps_function_names
             # p(beta) = (1 - smoothing_alpha) sigmoid(logit(beta)) + smoothing_alpha/2
             # p'(beta) = (1 - smoothing_alpha) sigmoid'(logit(beta)) logit'(beta)
             # the derivative of sigmoid is at most 1/4
-            return derivative_bounds[type(expr.args[0]).__name__] / 4 * (1 - args.probability_smoothing)
+            return derivative_bounds[type(expr.args[0]).__name__] / 4 * (1 - self.probability_smoothing)
         if type(expr) in [sympy.Float, sympy.Integer]:
             return np.abs(float(expr))
         if type(expr) == sympy.numbers.NegativeOne:
