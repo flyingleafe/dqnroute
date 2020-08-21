@@ -20,6 +20,7 @@ from dqnroute.verification.router_graph import RouterGraph
 from dqnroute.verification.adversarial import PGDAdversary
 from dqnroute.verification.ml_util import Util
 from dqnroute.verification.markov_analyzer import MarkovAnalyzer
+from dqnroute.verification.symbolic_analyzer import SymbolicAnalyzer
 os.chdir(current_dir)
 
 
@@ -261,14 +262,8 @@ def visualize(g: RouterGraph):
 
 if not args.skip_graphviz:
     visualize(g)
-
-def smooth(p):
-    # smoothing to get rid of 0 and 1 probabilities that lead to saturated gradients
-    return (1 - args.probability_smoothing) * p  + args.probability_smoothing / 2
-
-def q_values_to_first_probability(qs: torch.tensor) -> torch.tensor:
-    return smooth((qs / args.softmax_temperature).softmax(dim=0)[0])
-
+    
+sa = SymbolicAnalyzer(g, args.softmax_temperature, args.probability_smoothing, lr=0.001, delta_q_max=10.0)
 
 print(f"Running command {args.command}...")
 if args.command == "deterministic_test":
@@ -349,7 +344,9 @@ elif args.command == "embedding_adversarial":
                                                                for current_neighbor in current_neighbors])
                     q_values = g.q_forward(perturbed_diverter_embeddings, perturbed_sink_embeddings,
                                            perturbed_neighbor_embeddings).flatten()
-                    objective_inputs += [q_values_to_first_probability(q_values)]
+                    objective_inputs += [Util.q_values_to_first_probability(q_values,
+                                                                            args.softmax_temperature,
+                                                                            args.probability_smoothing)]
                 objective_value = objective(*objective_inputs)
                 #print(objective_value.detach().cpu().numpy())
                 objective_value.backward()
@@ -370,48 +367,23 @@ elif args.command == "q_adversarial":
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
             symbolic_objective, objective = ma.get_objective(source)
 
-            # stage 1: linear change of parameters
-            filename = "saved-net.bin"
-            torch.save(g.q_network.ff_net, filename)
-            Util.set_param_requires_grad(g.q_network.ff_net, True)
-
-            def get_objective():
-                objective_inputs = []
-                for diverter in ma.nontrivial_diverters:
-                    diverter_embedding, current_neighbors, neighbor_embeddings = g.node_to_embeddings(diverter, sink)
-                    diverter_embeddings = diverter_embedding.repeat(2, 1)
-                    neighbor_embeddings = torch.cat(neighbor_embeddings, dim=0)
-                    q_values = g.q_forward(diverter_embeddings, sink_embeddings, neighbor_embeddings).flatten()
-                    objective_inputs += [q_values_to_first_probability(q_values)]
-                return objective(*objective_inputs).item()
-
+            # linear change of parameters
+            
             for node_key in g.node_keys:
                 current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
 
                 for neighbor_key, neighbor_embedding in zip(neighbors, neighbor_embeddings):
-                    with torch.no_grad():
-                        reference_q = g.q_forward(current_embedding, sink_embedding, neighbor_embedding).flatten().item()
-                    actual_qs = reference_q + np.linspace(-50, 50, 351)
-
-                    opt = torch.optim.SGD(g.q_network.parameters(), lr=0.01)
-                    opt.zero_grad()
-                    predicted_q = g.q_forward(curent_embedding, sink_embedding, neighbor_embedding).flatten()
-                    predicted_q.backward()
-
-                    def gd_step(predicted_q, actual_q, lr: float):
-                        for p in g.q_network.parameters():
-                            if p.grad is not None:
-                                mse_gradient = 2 * (predicted_q - actual_q) * p.grad 
-                                p -= lr * mse_gradient
-                    #opt = torch.optim.RMSprop(g.q_network.ff_net.parameters(), lr=0.001)
-                    objective_values = []
-                    lr = 0.001
-                    with torch.no_grad():
-                        for actual_q in actual_qs:
-                            gd_step(predicted_q, actual_q, lr)
-                            objective_values += [get_objective()]
-                            gd_step(predicted_q, actual_q, -lr)
+                    # compute
+                    reference_q = sa.compute_gradients(current_embedding, sink_embedding,
+                                                       neighbor_embedding).flatten().item()
+                    actual_qs = reference_q + np.linspace(-sa.delta_q_max, sa.delta_q_max, 351)
+                    objective_values = [objective(*sa.compute_ps(ma, diverter, sink, sink_embeddings, reference_q,
+                                                                 actual_q)).item() for actual_q in actual_qs]
                     objective_values = torch.tensor(objective_values)
+                    
+                    # TODO also plot kappa
+                    
+                    # plot
                     label = f"Delivery cost from {source} to {sink} when making optimization step with current={node_key}, neighbor={neighbor_key}"
                     print(f"{label}...")
                     plt.figure(figsize=(14, 2))
@@ -426,150 +398,14 @@ elif args.command == "q_adversarial":
                     plt.close()
                     plot_index += 1
 elif args.command == "q_adversarial_lipschitz":
-    net = g.q_network.ff_net
-    print(net)
+    print(sa.net)
     to_sympy = lambda x: sympy.Matrix(x.detach().cpu().numpy())
-    A = to_sympy(net.fc1.weight)
-    b = to_sympy(net.fc1.bias)
-    C = to_sympy(net.fc2.weight)
-    d = to_sympy(net.fc2.bias)
-    E = to_sympy(net.output.weight)
-    f = to_sympy(net.output.bias)
-    
-    def round_expr(expr: sympy.Expr, num_digits: int) -> sympy.Expr:
-        return expr.xreplace({n : round(n, num_digits) for n in expr.atoms(sympy.Number)})
-
-    def expr_to_string(expr: sympy.Expr) -> str:
-        return str(round_expr(expr, 2)).replace("Max(0, ", "ReLU(")
-    
-    class relu(sympy.Function):
-        @classmethod
-        def eval(cls, x):
-            return x.applyfunc(lambda elem: sympy.Max(elem, 0))
-
-        def _eval_is_real(self):
-            return True
-    
-    def base_bound(expr) -> float:
-        if type(expr) in [sympy.Float, sympy.Integer]:
-            return np.abs(float(expr))
-        if type(expr) == sympy.numbers.NegativeOne:
-            return 1.0
-        raise RuntimeError(f"Unexpected type {type(expr)} of expression {expr}")
-    
-    def to_intervals(points):
-        return list(zip(points, points[1:]))
-    
-    def get_subs_value(interval: Tuple[float, float]) -> float:
-        return (interval[1] - interval[0]) / 2
-    
-    def get_bottom_decision_points(expr: sympy.Expr, param: sympy.Symbol) -> Tuple[set, bool]:
-        result_set = set()
-        all_args_plain = True
-        for arg in expr.args:
-            arg_set, arg_plain = get_bottom_decision_points(arg, param)
-            result_set.update(arg_set)
-            all_args_plain = all_args_plain and arg_plain
-        if all_args_plain and type(expr) in [sympy.Heaviside, sympy.Max]:
-            # new decision point
-            index = 1 if type(expr) == sympy.Max else 0
-            #solutions = [0]
-            #print(expr.args[index])
-            # even though the expressions are simple, this works very slowly:
-            solutions = sympy.solve(expr.args[index], param)
-            #assert len(solutions) == 1
-            result_set.add(solutions[0])
-            #print(expr, solutions[0])
-            all_args_plain = False
-        return result_set, all_args_plain
-    
-    def resolve_bottom_decisions(expr: sympy.Expr, param: sympy.Symbol, param_point: float) -> Tuple[sympy.Expr, bool]:
-        if type(expr) in [sympy.Float, sympy.Integer, sympy.numbers.NegativeOne, sympy.Symbol]:
-            return expr, True
-        if type(expr) in [sympy.Heaviside, sympy.Max]:
-            return expr.subs(param, param_point).simplify(), False
-        all_args_plain = True
-        arg_expressions = []
-        for arg in expr.args:
-            arg_expr, arg_plain = resolve_bottom_decisions(arg, param, param_point)
-            arg_expressions += [arg_expr]
-            all_args_plain = all_args_plain and arg_plain
-        #print(type(expr), arg_expressions)
-        return type(expr)(*arg_expressions), all_args_plain
-    
-    def estimate_upper_bound(expr: sympy.Expr, param: sympy.Symbol, abs_param_bound: float) -> float:
-        points = [p for p in get_bottom_decision_points(expr, param)[0] if np.abs(p) < abs_param_bound]
-        points = sorted(points)
-        points = [-abs_param_bound] + points + [abs_param_bound]
-        print(f"      {points}")
-        intervals = to_intervals(points)
-        print(f"      {intervals}")
-        all_values = set()
-        
-        for interval in intervals:
-            print(f"      {interval}")
-            e = resolve_bottom_decisions(expr, param, get_subs_value(interval))[0].simplify()
-            final_decision_points = get_bottom_decision_points(e, param)[0]
-            final_decision_points = [p for p in final_decision_points if interval[0] < p < interval[1]]
-            final_decision_points = [interval[0]] + final_decision_points + [interval[1]]
-            refined_intervals = to_intervals(final_decision_points)
-            for refined_interval in refined_intervals:
-                refined_e = resolve_bottom_decisions(e, param, get_subs_value(refined_interval))[0].simplify()
-                derivative = refined_e.diff(param)
-                # find stationary points of the derivative
-                additional_points = [p for p in sympy.solve(derivative, param)
-                                     if refined_interval[0] < p < refined_interval[1]]
-                all_points = [refined_interval[0]] + additional_points + [refined_interval[1]]
-                all_values.update([np.abs(float(refined_e.subs(param, p).simplify())) for p in all_points])
-                print(f"        {refined_interval}")
-                print(f"          {expr_to_string(refined_e)}; additional points: {additional_points}")
-        return max(all_values)
-        
-    
-    #def estimate_upper_bound(expr, param_name, abs_param_bound) -> float:
-    #    if type(expr) == sympy.Add:
-    #        return sum([estimate_upper_bound(x, param_name, abs_param_bound) for x in expr.args])
-    #    if type(expr) == sympy.Mul:
-    #        return np.prod([estimate_upper_bound(x, param_name, abs_param_bound) for x in expr.args])
-    #    if type(expr) == sympy.Symbol:
-    #        if str(expr) == param_name:
-    #            return abs_param_bound
-    #        raise RuntimeError(f"Unexpected symbol {expr}")
-    #    if type(expr) == sympy.Max:
-    #        if len(expr.args) == 2 and str(expr.args[0] == "0"):
-    #            return estimate_upper_bound(expr.args[1], param_name, abs_param_bound)
-    #        raise RuntimeError(f"Unexpected Max expression {expr}")
-    #    if type(expr) == sympy.Heaviside:
-    #        return 1.0
-    #    return base_bound(expr)
-    
-    def estimate_top_level_upper_bound(expr, ps_function_names: list, derivative_bounds: dict) -> float:
-        if type(expr) == sympy.Add:
-            return sum([estimate_top_level_upper_bound(x, ps_function_names, derivative_bounds)
-                        for x in expr.args])
-        if type(expr) == sympy.Mul:
-            return np.prod([estimate_top_level_upper_bound(x, ps_function_names, derivative_bounds)
-                            for x in expr.args])
-        if type(expr).__name__ in ps_function_names:
-            # p(beta) = (1 - smoothing_alpha) sigmoid(logit(beta)) + smoothing_alpha/2
-            return 1 - args.probability_smoothing / 2
-            #return plain_bounds[type(expr).__name__]
-        if type(expr) == sympy.Derivative:
-            assert type(expr.args[0]).__name__ in ps_function_names
-            # p(beta) = (1 - smoothing_alpha) sigmoid(logit(beta)) + smoothing_alpha/2
-            # p'(beta) = (1 - smoothing_alpha) sigmoid'(logit(beta)) logit'(beta)
-            # the derivative of sigmoid is at most 1/4
-            return derivative_bounds[type(expr.args[0]).__name__] / 4 * (1 - args.probability_smoothing)
-        return base_bound(expr)
-    
-    def to_scalar(x):
-        assert x.shape == (1, 1)
-        return x[0, 0]
-        
-    def round_expr(expr: sympy.Expr, num_digits) -> sympy.Expr:
-        return expr.xreplace({n : round(n, num_digits) for n in expr.atoms(sympy.Number)})
-        
-    beta = sympy.Symbol("β", real=True)
+    A = to_sympy(sa.net.fc1.weight)
+    b = to_sympy(sa.net.fc1.bias)
+    C = to_sympy(sa.net.fc2.weight)
+    d = to_sympy(sa.net.fc2.bias)
+    E = to_sympy(sa.net.output.weight)
+    f = to_sympy(sa.net.output.bias)
     
     for sink in g.sinks:
         print(f"Measuring robustness of delivery to {sink}...")
@@ -577,11 +413,6 @@ elif args.command == "q_adversarial_lipschitz":
         sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
         embedding_size = sink_embedding.flatten().shape[0]
         sink_embeddings = sink_embedding.repeat(2, 1)
-        
-        lr = 0.001
-        delta_q_max = 10.0
-        # 2 comes from differentiating a square
-        beta_bound = 2 * lr * delta_q_max
         
         ps_function_names = [f"p{i}" for i in range(len(ma.params))]
         function_ps = [sympy.Function(name) for name in ps_function_names]
@@ -602,22 +433,22 @@ elif args.command == "q_adversarial_lipschitz":
                     predicted_q.backward()
                     print(f"      Reference Q value = {predicted_q.item()}")
 
-                    A_hat = to_sympy(net.fc1.weight.grad)
-                    b_hat = to_sympy(net.fc1.bias.grad)
-                    C_hat = to_sympy(net.fc2.weight.grad)
-                    d_hat = to_sympy(net.fc2.bias.grad)
-                    E_hat = to_sympy(net.output.weight.grad)
-                    f_hat = to_sympy(net.output.bias.grad)
+                    A_hat = to_sympy(sa.net.fc1.weight.grad)
+                    b_hat = to_sympy(sa.net.fc1.bias.grad)
+                    C_hat = to_sympy(sa.net.fc2.weight.grad)
+                    d_hat = to_sympy(sa.net.fc2.bias.grad)
+                    E_hat = to_sympy(sa.net.output.weight.grad)
+                    f_hat = to_sympy(sa.net.output.bias.grad)
                     
                     MOCK = True
                     if MOCK:
                         dim = 6
                         #print(A.shape, b.shape, C.shape, d.shape, E.shape, f.shape)
-                        A = A[:dim, :]; A_hat = A_hat[:dim, :]
-                        b = b[:dim, :]; b_hat = b_hat[:dim, :]
+                        A = A[:dim, :];    A_hat = A_hat[:dim, :]
+                        b = b[:dim, :];    b_hat = b_hat[:dim, :]
                         C = C[:dim, :dim]; C_hat = C_hat[:dim, :dim]
-                        d = b[:dim, :]; d_hat = d_hat[:dim, :]
-                        E = E[:, :dim]; E_hat = E_hat[:, :dim]
+                        d = b[:dim, :];    d_hat = d_hat[:dim, :]
+                        E = E[:,    :dim]; E_hat = E_hat[:,    :dim]
 
                     def sympy_q(beta, x):
                         result = relu((A + beta * A_hat) @ x      + b + beta * b_hat)
@@ -647,7 +478,7 @@ elif args.command == "q_adversarial_lipschitz":
                     # the values to subsitute are arbitrary within (0, 1)
                     denominator_value = denominator.subs([(param, 0.5) for param in ma.params]).simplify()
                     print(f"      denominator(0.5) = {denominator_value:.4f}")
-                    if float(str(denominator_value)) < 0:
+                    if denominator_value < 0:
                         nominator *= -1
                         denominator *= -1
                     kappa = nominator - args.cost_bound * denominator
@@ -666,13 +497,11 @@ elif args.command == "q_adversarial_lipschitz":
                         print(f"      Computing logits for {param} = P{diverter_key} -> {current_neighbors[0]})....")
                         #print(param, diverter_key)
 
-                        delta_e = lambda nbr: to_sympy(torch.cat((diverter_embedding - sink_embedding,
-                                                                  nbr - sink_embedding), dim=1).T)
-                        delta_e1 = delta_e(neighbor_embeddings[0])
-                        delta_e2 = delta_e(neighbor_embeddings[1])
-                        #print(delta_e1, delta_e2)
+                        delta_e = [to_sympy(torch.cat((sink_embedding - diverter_embedding,
+                                                       neighbor_embeddings[i] - diverter_embedding), dim=1).T) for i in range(2)]
+                        #print(delta_e)
                         
-                        logit = to_scalar(sympy_q(beta, delta_e1) - sympy_q(beta, delta_e2))
+                        logit = to_scalar(sympy_q(beta, delta_e[0]) - sympy_q(beta, delta_e[1])) / args.softmax_temperature
                         print(f"      logit = {str(round_expr(logit, 3))[:500]} ...")
                         dlogit_dbeta = logit.diff(beta)
                         print(f"      dlogit_dbeta = {str(round_expr(dlogit_dbeta, 3))[:500]} ...")
@@ -682,6 +511,23 @@ elif args.command == "q_adversarial_lipschitz":
                     print(f"      Computing the final upper bound on dκ(β)/dβ...")
                     top_level_bound = estimate_top_level_upper_bound(dkappa_dbeta, ps_function_names, derivative_bounds)
                     print(f"      Final upper bound on the Lipschitz constant = {top_level_bound}")
+                    
+                    grid_size = 2
+                    computed_values = None
+                    while True:
+                        print(f"      Using the grid of size {grid_size}...")
+                        beta_values = np.linspace(-beta_bound, beta_bound, grid_size)
+                        if computed_values is None:
+                            computed_values = np.empty(grid_size)
+                            for i, beta_value in enumerate(beta_values):
+                                pass
+                                # TODO evaluate ps
+                                # then substitute to kappa
+                        else:
+                            pass
+                        # TODO reuse previous computations
+                        grid_size = (grid_size - 1) * 2 + 1
+                    
                     
                     # TODO prove an upper bound on the function for each interval
     

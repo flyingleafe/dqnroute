@@ -11,8 +11,8 @@ config = ("conveyor_cyclic2_energy_test.yaml", 1.5)   # A complication of the pr
 
 #command = "deterministic_test"
 #command = "embedding_adversarial"
-#command = "q_adversarial"
-command = "q_adversarial_lipschitz"
+command = "q_adversarial"
+#command = "q_adversarial_lipschitz"
 #command = "compare"
 
 run(command, config[0], config[1],
