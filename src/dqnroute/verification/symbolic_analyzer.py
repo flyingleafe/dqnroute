@@ -164,3 +164,30 @@ class SymbolicAnalyzer:
     def to_scalar(self, x):
         assert x.shape == (1, 1)
         return x[0, 0]
+    
+    def get_transformed_cost(self, ma: MarkovAnalyzer, cost: sympy.Expr, cost_bound: float) -> sympy.Expr:
+        assert type(cost) == sympy.Mul
+        # walk through the product
+        # if this is pow(something, -1), something is the denominator
+        # the rest goes to the numerator
+        nominator = 1
+        for arg in cost.args:
+            if type(arg) == sympy.Pow:
+                assert type(arg.args[1]) == sympy.numbers.NegativeOne, type(arg.args[1])
+                denominator = arg.args[0]
+            else:
+                nominator *= arg            
+        print(f"      nominator(p) = {nominator}")
+        print(f"      denominator(p) = {denominator}")
+        
+        # compute the sign of v, then ensure that it is "+"
+        # the values to subsitute are arbitrary within (0, 1)
+        denominator_value = denominator.subs([(param, 0.5) for param in ma.params]).simplify()
+        print(f"      denominator(0.5) = {denominator_value:.4f}")
+        if denominator_value < 0:
+            nominator *= -1
+            denominator *= -1
+        kappa = nominator - cost_bound * denominator
+        return kappa
+                    
+        

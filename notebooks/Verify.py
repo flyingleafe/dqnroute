@@ -325,7 +325,7 @@ elif args.command == "embedding_adversarial":
 
         for source in ma.reachable_sources:
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
-            symbolic_objective, objective = ma.get_objective(source)
+            objective, lambdified_objective = ma.get_objective(source)
 
             def get_gradient(x: torch.tensor) -> Tuple[torch.tensor, float, str]:
                 """
@@ -347,7 +347,7 @@ elif args.command == "embedding_adversarial":
                     objective_inputs += [Util.q_values_to_first_probability(q_values,
                                                                             args.softmax_temperature,
                                                                             args.probability_smoothing)]
-                objective_value = objective(*objective_inputs)
+                objective_value = lambdified_objective(*objective_inputs)
                 #print(objective_value.detach().cpu().numpy())
                 objective_value.backward()
                 aux_info = ", ".join([f"{param}={value.detach().cpu().item():.4f}"
@@ -365,35 +365,44 @@ elif args.command == "q_adversarial":
 
         for source in ma.reachable_sources:
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
-            symbolic_objective, objective = ma.get_objective(source)
+            objective, lambdified_objective = ma.get_objective(source)
 
-            # linear change of parameters
-            
             for node_key in g.node_keys:
                 current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
 
                 for neighbor_key, neighbor_embedding in zip(neighbors, neighbor_embeddings):
                     # compute
+                    # we assume a linear change of parameters
                     reference_q = sa.compute_gradients(current_embedding, sink_embedding,
                                                        neighbor_embedding).flatten().item()
                     actual_qs = reference_q + np.linspace(-sa.delta_q_max, sa.delta_q_max, 351)
-                    objective_values = [objective(*sa.compute_ps(ma, diverter, sink, sink_embeddings, reference_q,
-                                                                 actual_q)).item() for actual_q in actual_qs]
-                    objective_values = torch.tensor(objective_values)
-                    
-                    # TODO also plot kappa
-                    
+                    kappa = sa.get_transformed_cost(ma, objective, args.cost_bound)
+                    lambdified_kappa = sympy.lambdify(ma.params, kappa)
+                    objective_values = torch.empty(len(actual_qs))
+                    kappa_values = torch.empty(len(actual_qs))
+                    for i, actual_q in enumerate(actual_qs):
+                        ps = sa.compute_ps(ma, diverter, sink, sink_embeddings, reference_q, actual_q)
+                        objective_values[i] = lambdified_objective(*ps).item()
+                        kappa_values[i] = lambdified_kappa(*ps).item()
+
                     # plot
-                    label = f"Delivery cost from {source} to {sink} when making optimization step with current={node_key}, neighbor={neighbor_key}"
-                    print(f"{label}...")
-                    plt.figure(figsize=(14, 2))
-                    plt.yscale("log")
-                    plt.title(label)
-                    plt.plot(actual_qs, objective_values)
-                    gap = max(objective_values) - min(objective_values)
-                    y_delta = 0 if gap > 0 else 5
-                    plt.vlines(reference_q, min(objective_values) - y_delta, max(objective_values) + y_delta)
-                    plt.hlines(objective_values[len(objective_values) // 2], min(actual_qs), max(actual_qs))
+                    fig, axes = plt.subplots(2, 1, figsize=(13, 6))
+                    plt.subplots_adjust(hspace=0.3)
+                    caption_starts = ("Delivery cost (τ)", "Transformed delivery cost (κ)")
+                    axes[0].set_yscale("log")
+                    for ax, caption_start, values in zip(axes, caption_starts, (objective_values, kappa_values)):
+                        label = f"{caption_start} from {source} to {sink} when making optimization step with current={node_key}, neighbor={neighbor_key}"
+                        print(f"{label}...")
+                        ax.set_title(label)
+                        ax.plot(actual_qs, values)
+                        gap = values.max() - values.min()
+                        y_delta = 0 if gap > 0 else 5
+                        # show the zero step value:
+                        ax.vlines(reference_q, min(values) - y_delta, max(values) + y_delta)
+                        ax.hlines(values[len(values) // 2], min(actual_qs), max(actual_qs))
+                    # show the verification bound:
+                    axes[0].hlines(args.cost_bound, min(actual_qs), max(actual_qs))
+                    axes[1].hlines(0, min(actual_qs), max(actual_qs))
                     plt.savefig(f"../img/{filename_suffix}_{plot_index}.pdf")
                     plt.close()
                     plot_index += 1
@@ -420,7 +429,7 @@ elif args.command == "q_adversarial_lipschitz":
         
         for source in ma.reachable_sources:
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
-            symbolic_objective, objective = ma.get_objective(source)
+            objective, lambdified_objective = ma.get_objective(source)
         
             for node_key in g.node_keys:
                 current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
@@ -450,40 +459,14 @@ elif args.command == "q_adversarial_lipschitz":
                         d = b[:dim, :];    d_hat = d_hat[:dim, :]
                         E = E[:,    :dim]; E_hat = E_hat[:,    :dim]
 
-                    def sympy_q(beta, x):
+                    def sympy_q(beta: sympy.Symbol, x: sympy.Expr) -> sympy.Expr:
                         result = relu((A + beta * A_hat) @ x      + b + beta * b_hat)
                         result = relu((C + beta * C_hat) @ result + d + beta * d_hat)
                         return        (E + beta * E_hat) @ result + f + beta * f_hat
                     
-                    print(f"      cost(p) = {symbolic_objective}")
-                    assert type(symbolic_objective) == sympy.Mul
-                    
-                    # walk through the product
-                    # if this is pow(something, -1), something is the denominator
-                    # the rest goes to the numerator
-                    
-                    nominator = 1
-                    
-                    for arg in symbolic_objective.args:
-                        if type(arg) == sympy.Pow:
-                            assert type(arg.args[1]) == sympy.numbers.NegativeOne, type(arg.args[1])
-                            denominator = arg.args[0]
-                        else:
-                            nominator *= arg 
-                    
-                    print(f"      nominator(p) = {nominator}")
-                    print(f"      denominator(p) = {denominator}")
-                    
-                    # compute the sign of v, then ensure that it is "+"
-                    # the values to subsitute are arbitrary within (0, 1)
-                    denominator_value = denominator.subs([(param, 0.5) for param in ma.params]).simplify()
-                    print(f"      denominator(0.5) = {denominator_value:.4f}")
-                    if denominator_value < 0:
-                        nominator *= -1
-                        denominator *= -1
-                    kappa = nominator - args.cost_bound * denominator
+                    print(f"      cost(p) = {objective}")
+                    kappa = sa.get_transformed_cost(ma, objective, args.cost_bound)
                     print(f"      κ(p) = {kappa}, κ(p) < 0?")
-                    
                     kappa = kappa.subs(list(zip(ma.params, evaluated_function_ps)))
                     print(f"      κ(β) = {kappa}, κ(β) < 0?")
                     dkappa_dbeta = kappa.diff(beta)
