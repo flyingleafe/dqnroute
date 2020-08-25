@@ -4,6 +4,8 @@ from typing import *
 import sympy
 import torch
 
+from ..utils import AgentId
+
 from .ml_util import Util
 from .router_graph import RouterGraph
 from .markov_analyzer import MarkovAnalyzer
@@ -77,7 +79,7 @@ class SymbolicAnalyzer:
                 param -= (-1 if reverse else 1) * self.lr * mse_gradient
     
     @torch.no_grad()
-    def compute_ps(self, ma: MarkovAnalyzer, diverter, sink, sink_embeddings: torch.tensor,
+    def compute_ps(self, ma: MarkovAnalyzer, diverter: AgentId, sink: AgentId, sink_embeddings: torch.tensor,
                    predicted_q: torch.tensor, actual_q: torch.tensor):
         ps = []
         self._gd_step(predicted_q, actual_q, False)
@@ -189,8 +191,7 @@ class SymbolicAnalyzer:
                                      if refined_interval[0] < p < refined_interval[1]]
                 all_points = [refined_interval[0]] + additional_points + [refined_interval[1]]
                 all_values.update([np.abs(float(refined_e.subs(self.beta, p).simplify())) for p in all_points])
-                print(f"        {self.interval_to_string(refined_interval)}")
-                print(f"          κ'(β) = {self.expr_to_string(refined_e)}; stationary points: {additional_points}")
+                print(f"        {self.interval_to_string(refined_interval)}: κ'(β) = {self.expr_to_string(refined_e)}; stationary points: {additional_points}")
         return max(all_values)
     
     def estimate_top_level_upper_bound(self, expr: sympy.Expr, ps_function_names: List[str],

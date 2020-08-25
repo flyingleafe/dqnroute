@@ -389,7 +389,7 @@ elif args.command == "q_adversarial":
                     kappa_values = torch.empty(len(actual_qs))
                     for i, actual_q in enumerate(actual_qs):
                         ps = sa.compute_ps(ma, diverter, sink, sink_embeddings, reference_q, actual_q)
-                        objective_values[i] = lambdified_objective(*ps).item()
+                        objective_values[i] = lambdified_objective(*ps)
                         kappa_values[i] = lambdified_kappa(*ps)
 
                     # plot
@@ -412,6 +412,8 @@ elif args.command == "q_adversarial":
                     axes[1].hlines(0, min(actual_qs), max(actual_qs))
                     plt.savefig(f"../img/{filename_suffix}_{plot_index}.pdf")
                     plt.close()
+                    print(f"Empirically found maximum of τ: {objective_values.max():.6f}")
+                    print(f"Empirically found maximum of κ: {kappa_values.max():.6f}")
                     plot_index += 1
 elif args.command == "q_adversarial_lipschitz":
     print(sa.net)

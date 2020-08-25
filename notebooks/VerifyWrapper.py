@@ -5,7 +5,7 @@ def run(command: str, config_file: str, temperature: float, cost_bound: float, m
 
 #config = ("acyclic_conveyor_energy_test.yaml", 1.5, 100000)   # Mukhutdinov
 #config = ("conveyor_cyclic_energy_test.yaml", 1.5, 100000)    # Very simple fictitious graph with cycle
-config = ("conveyor_cyclic2_energy_test.yaml", 1.5, 111.0)   # A complication of the previous example
+config = ("conveyor_cyclic2_energy_test.yaml", 1.5, 12030.0)   # A complication of the previous example
 #config = ("tarau2010.yaml", 4.5, 100000)                       # Fictitious graph from the literature
 #config = ("johnstone2010.yaml", 3.0, 100000)                  # Almost real graph from the literature
 
@@ -17,7 +17,7 @@ command = "q_adversarial_lipschitz"
 
 run(command, config[0], config[1], config[2],
     #more_args=""
-    more_args="--skip_graphviz --verification_lr 0.0001"
+    more_args="--skip_graphviz --verification_lr 0.001"
     #more_args="--force_train"
     #more_args="--skip_graphviz --force_pretrain --force_train"
     )
