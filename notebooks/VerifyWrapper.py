@@ -1,13 +1,13 @@
 import os
 
-def run(command: str, config_file: str, temperature: float, more_args: str = ""):
-    os.system(f"ipython Verify.py -- --command {command} --config_file ../launches/igor/{config_file} --softmax_temperature {temperature} --cost_bound 123.5 {more_args}")
+def run(command: str, config_file: str, temperature: float, cost_bound: float, more_args: str = ""):
+    os.system(f"ipython Verify.py -- --command {command} --config_file ../launches/igor/{config_file} --softmax_temperature {temperature} --cost_bound {cost_bound} {more_args}")
 
-#config = ("acyclic_conveyor_energy_test.yaml", 1.5)   # Mukhutdinov
-#config = ("conveyor_cyclic_energy_test.yaml", 1.5)    # Very simple fictitious graph with cycle
-config = ("conveyor_cyclic2_energy_test.yaml", 1.5)   # A complication of the previous example
-#config = ("tarau2010.yaml", 4.5)                       # Fictitious graph from the literature
-#config = ("johnstone2010.yaml", 3.0)                  # Almost real graph from the literature
+#config = ("acyclic_conveyor_energy_test.yaml", 1.5, 100000)   # Mukhutdinov
+#config = ("conveyor_cyclic_energy_test.yaml", 1.5, 100000)    # Very simple fictitious graph with cycle
+config = ("conveyor_cyclic2_energy_test.yaml", 1.5, 111.0)   # A complication of the previous example
+#config = ("tarau2010.yaml", 4.5, 100000)                       # Fictitious graph from the literature
+#config = ("johnstone2010.yaml", 3.0, 100000)                  # Almost real graph from the literature
 
 #command = "deterministic_test"
 #command = "embedding_adversarial"
@@ -15,7 +15,7 @@ config = ("conveyor_cyclic2_energy_test.yaml", 1.5)   # A complication of the pr
 command = "q_adversarial_lipschitz"
 #command = "compare"
 
-run(command, config[0], config[1],
+run(command, config[0], config[1], config[2],
     #more_args=""
     more_args="--skip_graphviz --verification_lr 0.0001"
     #more_args="--force_train"

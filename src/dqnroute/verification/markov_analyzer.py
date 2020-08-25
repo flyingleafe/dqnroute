@@ -49,8 +49,8 @@ class MarkovAnalyzer:
                     # two possible destinations
                     k1, k2 = next_node_keys[0], next_node_keys[1]
                     p = self.params[nontrivial_diverters_to_indices[node_key]]
-                    print(f"      {p} = P({node_key} -> {k1})" )
-                    print(f"  1 - {p} = P({node_key} -> {k2})" )
+                    print(f"      {p} = P({node_key} -> {k1} | sink = {sink})" )
+                    print(f"  1 - {p} = P({node_key} -> {k2} | sink = {sink})" )
                     if k1 != sink:
                         matrix[i][reachable_nodes_to_indices[k1]] = -p
                     if k2 != sink:

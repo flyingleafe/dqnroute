@@ -21,6 +21,8 @@ from dqnroute.verification.adversarial import PGDAdversary
 from dqnroute.verification.ml_util import Util
 from dqnroute.verification.markov_analyzer import MarkovAnalyzer
 from dqnroute.verification.symbolic_analyzer import SymbolicAnalyzer
+from dqnroute.utils import memoize
+
 os.chdir(current_dir)
 
 
@@ -298,7 +300,7 @@ if args.command == "deterministic_test":
                     for neighbor, neighbor_embedding in zip(neighbors, neighbor_embeddings):
                         with torch.no_grad():
                             q = g.q_forward(current_embedding, sink_embedding, neighbor_embedding).item()
-                        print(f"        Q({current_node} -> {neighbor} | {sink}) = {q:.4f}")
+                        print(f"        Q({current_node} -> {neighbor} | sink = {sink}) = {q:.4f}")
                         q_values += [q]
                     best_neighbor_index = np.argmax(np.array(q_values))
                     current_node = neighbors[best_neighbor_index]
@@ -426,6 +428,21 @@ elif args.command == "q_adversarial_lipschitz":
         function_ps = [sympy.Function(name) for name in ps_function_names]
         evaluated_function_ps = [f(sa.beta) for f in function_ps]
         
+        # cached values
+        computed_logits_and_derivatives: Dict[AgentId, Tuple[sympy.Expr, sympy.Expr]] = {}
+        
+        def compute_logit_and_derivative(sa: SymbolicAnalyzer, diverter_key: AgentId) -> Tuple[sympy.Expr, sympy.Expr]:
+            if diverter_key not in computed_logits_and_derivatives:
+                diverter_embedding, _, neighbor_embeddings = g.node_to_embeddings(diverter_key, sink)
+                delta_e = [sa.tensor_to_sympy(torch.cat((sink_embedding - diverter_embedding,
+                                                         neighbor_embeddings[i] - diverter_embedding), dim=1).T) for i in range(2)]
+                logit = sa.to_scalar(sa.sympy_q(delta_e[0]) - sa.sympy_q(delta_e[1])) / args.softmax_temperature
+                dlogit_dbeta = logit.diff(sa.beta)
+                computed_logits_and_derivatives[diverter_key] = logit, dlogit_dbeta
+            else:
+                print("      (using cached value)")
+            return computed_logits_and_derivatives[diverter_key]
+        
         for source in ma.reachable_sources:
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
             objective, lambdified_objective = ma.get_objective(source)
@@ -437,7 +454,7 @@ elif args.command == "q_adversarial_lipschitz":
                     print(f"    Considering learning step {node_key} -> {neighbor_key}...")
                     reference_q = sa.compute_gradients(current_embedding, sink_embedding,
                                                        neighbor_embedding).flatten().item()
-                    print(f"      Reference Q value = {reference_q}")
+                    print(f"      Reference Q value = {reference_q:.4f}")
                     sa.load_grad_matrices()
                     
                     MOCK = False
@@ -462,20 +479,16 @@ elif args.command == "q_adversarial_lipschitz":
                     #  compute a pool of bounds
                     derivative_bounds = {}
                     for param, diverter_key in zip(ma.params, ma.nontrivial_diverters):
-                        diverter_embedding, current_neighbors, neighbor_embeddings = g.node_to_embeddings(diverter_key, sink)
-                        print(f"      Computing logits for {param} = P({diverter_key} -> {current_neighbors[0]})....")
-                        #print(param, diverter_key)
-
-                        delta_e = [sa.tensor_to_sympy(torch.cat((sink_embedding - diverter_embedding,
-                                                                 neighbor_embeddings[i] - diverter_embedding), dim=1).T)
-                                   for i in range(2)]
-                        #print(delta_e)
+                        _, current_neighbors, _ = g.node_to_embeddings(diverter_key, sink)
+                        print(f"      Computing the logit and its derivative for {param} = P({diverter_key} -> {current_neighbors[0]} | sink = {sink})....")
+                        logit, dlogit_dbeta = compute_logit_and_derivative(sa, diverter_key)
                         
-                        logit = sa.to_scalar(sa.sympy_q(delta_e[0]) - sa.sympy_q(delta_e[1])) / args.softmax_temperature
-                        print(f"      logit = {sa.expr_to_string(logit)[:500]} ...")
-                        dlogit_dbeta = logit.diff(sa.beta)
-                        print(f"      dlogit/dβ = {sa.expr_to_string(dlogit_dbeta)[:500]} ...")
-                        print(f"      Computing logit bounds for {param} = P({diverter_key} -> {current_neighbors[0]})...")
+                        # surprisingly, the strings are very slow to obtain
+                        if False:
+                            print(f"      logit = {sa.expr_to_string(logit)[:500]} ...")
+                            print(f"      dlogit/dβ = {sa.expr_to_string(dlogit_dbeta)[:500]} ...")
+                            
+                        print(f"      Computing logit bounds...")
                         derivative_bounds[param.name] = sa.estimate_upper_bound(dlogit_dbeta)
 
                     print(f"      Computing the final upper bound on dκ(β)/dβ...")
@@ -492,9 +505,6 @@ elif args.command == "q_adversarial_lipschitz":
                         result = np.empty(len(outer) + len(inner))
                         result[range(0, len(result), 2)] = outer
                         result[1:][range(0, len(result) - 1, 2)] = inner
-                        #print(outer)
-                        #print(inner)
-                        #print("->", result)
                         return result
                     
                     while True:
@@ -561,9 +571,9 @@ elif args.command == "compare":
     def print_sums(df):
         types = set(df['router_type'])
         for tp in types:
-            x = df.loc[df['router_type']==tp, 'count'].sum()
+            x = df.loc[df['router_type'] == tp, 'count'].sum()
             txt = _legend_txt_replace.get(tp, tp)
-            print('  {}: {}'.format(txt, x))
+            print(f'  {txt}: {x}')
     
     def plot_data(data, meaning='time', figsize=(15,5), xlim=None, ylim=None,
               xlabel='Simulation time', ylabel=None, font_size=14, title=None, save_path=None,

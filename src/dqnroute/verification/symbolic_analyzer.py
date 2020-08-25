@@ -160,16 +160,22 @@ class SymbolicAnalyzer:
         #print(type(expr), arg_expressions)
         return type(expr)(*arg_expressions), all_args_plain
     
+    def interval_to_string(self, interval: Tuple[float, float]) -> str:
+        return f"[{interval[0]:.6f}, {interval[1]:.6f}]"
+    
+    def interval_list_to_string(self, interval_list: List[Tuple[float, float]]) -> str:
+        return ", ".join([self.interval_to_string(interval) for interval in interval_list])
+    
     def estimate_upper_bound(self, expr: sympy.Expr) -> float:
         points = [p for p in self.get_bottom_decision_points(expr)[0] if np.abs(p) < self.beta_bound]
         points = sorted(points)
         points = [-self.beta_bound] + points + [self.beta_bound]
         intervals = self.to_intervals(points)
-        print(f"      intervals: {intervals}")
+        print(f"      intervals: {self.interval_list_to_string(intervals)}")
         all_values = set()
         
         for interval in intervals:
-            print(f"      {interval}")
+            print(f"      {self.interval_to_string(interval)}")
             e = self.resolve_bottom_decisions(expr, self.get_subs_value(interval))[0].simplify()
             final_decision_points = self.get_bottom_decision_points(e)[0]
             final_decision_points = [p for p in final_decision_points if interval[0] < p < interval[1]]
@@ -183,8 +189,8 @@ class SymbolicAnalyzer:
                                      if refined_interval[0] < p < refined_interval[1]]
                 all_points = [refined_interval[0]] + additional_points + [refined_interval[1]]
                 all_values.update([np.abs(float(refined_e.subs(self.beta, p).simplify())) for p in all_points])
-                print(f"        {refined_interval}")
-                print(f"          {self.expr_to_string(refined_e)}; additional points: {additional_points}")
+                print(f"        {self.interval_to_string(refined_interval)}")
+                print(f"          κ'(β) = {self.expr_to_string(refined_e)}; stationary points: {additional_points}")
         return max(all_values)
     
     def estimate_top_level_upper_bound(self, expr: sympy.Expr, ps_function_names: List[str],
