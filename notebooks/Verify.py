@@ -497,49 +497,60 @@ elif args.command == "q_adversarial_lipschitz":
                     top_level_bound = sa.estimate_top_level_upper_bound(dkappa_dbeta, ps_function_names, derivative_bounds)
                     print(f"      Final upper bound on the Lipschitz constant of κ(β): {top_level_bound}")
                     
-                    grid_size = 3
-                    old_kappa_values = None
+                    def q_to_kappa(actual_q: float) -> float:
+                        ps = sa.compute_ps(ma, diverter, sink, sink_embeddings, reference_q, actual_q)
+                        return lambdified_kappa(*ps)
                     
-                    def intermediate(x):
-                        return x[1:][range(0, len(x) - 1, 2)]
+                    def q_to_beta(actual_q: float) -> float:
+                        return (actual_q - reference_q) * sa.lr
                     
-                    def merge_arrays(outer: np.ndarray, inner: np.ndarray) -> np.ndarray:
-                        result = np.empty(len(outer) + len(inner))
-                        result[range(0, len(result), 2)] = outer
-                        result[1:][range(0, len(result) - 1, 2)] = inner
-                        return result
+                    empirical_bound = -np.infty
+                    max_depth = 0
+                    no_evaluations = 2
+                    checked_delta_q = -sa.delta_q_max
                     
-                    while True:
-                        print(f"      Grid size = {grid_size}...")
-                        beta_values = np.linspace(-sa.beta_bound, sa.beta_bound, grid_size)
-                        remaining_beta_values = beta_values if old_kappa_values is None else intermediate(beta_values)
-                        actual_qs = reference_q + remaining_beta_values / sa.lr / 2
-                        #print(actual_qs)
-                        kappa_values = np.empty(len(actual_qs))
-                        for i, actual_q in enumerate(actual_qs):
-                            ps = sa.compute_ps(ma, diverter, sink, sink_embeddings, reference_q, actual_q)
-                            #print(ps)
-                            kappa_values[i] = lambdified_kappa(*ps)
-                        # 1. try to find counterexample 
+                    def prove_bound(left_q: float, right_q: float, left_kappa: float, right_kappa: float, depth: int) -> bool:
+                        global empirical_bound, no_evaluations, max_depth, checked_delta_q
+                        mid_q = (left_q + right_q) / 2
+                        mid_kappa = q_to_kappa(mid_q)
+                        actual_qs = np.array([left_q, mid_q, right_q])
+                        kappa_values = np.array([left_kappa, mid_kappa, right_kappa])
                         worst_index = kappa_values.argmax()
-                        worst_value = kappa_values[worst_index]
-                        if worst_value >= 0:
-                            print(f"        Counterexample found: q = {actual_qs[worst_index]}, Δq = {actual_qs[worst_index] - reference_q}, β = {beta_values[worst_index]}, κ = {worst_value}")
-                            break
-                        # 2. try to find proof
-                        if old_kappa_values is not None:
-                            kappa_values = merge_arrays(old_kappa_values, kappa_values)
+                        max_kappa = kappa_values[worst_index]
+                        # 1. try to find counterexample
+                        if max_kappa > 0:
+                            worst_q = actual_qs[worst_index]
+                            worst_dq = worst_q - reference_q
+                            print(f"        Counterexample found: q = {worst_q:.6f}, Δq = {worst_dq:.6f}, β = {q_to_beta(worst_q):.6f}, κ = {max_kappa:.6f}")
+                            return False
+                            
+                        # 2. try to find proof on [left, right]
                         kappa_upper_bound = -np.infty
-                        for beta_interval, kappa_interval in zip(sa.to_intervals(beta_values), sa.to_intervals(kappa_values)):
-                            max_on_interval = (top_level_bound * (beta_interval[1] - beta_interval[0]) + sum(kappa_interval)) / 2
+                        for q_interval, kappa_interval in zip(sa.to_intervals(actual_qs), sa.to_intervals(kappa_values)):
+                            left_beta = q_to_beta(q_interval[0])
+                            right_beta = q_to_beta(q_interval[1])
+                            max_on_interval = (top_level_bound * (right_beta - left_beta) + sum(kappa_interval)) / 2
+                            #print(left_beta, right_beta, max_on_interval)
                             kappa_upper_bound = max(kappa_upper_bound, max_on_interval)
-                        print(f"        Computed upper bound on κ(β): {kappa_upper_bound}")
                         if kappa_upper_bound < 0:
-                            print("        Proof found!")
-                            break
-                        # 3. otherwise, increase the size of the grid
-                        grid_size = (grid_size - 1) * 2 + 1
-                        old_kappa_values = kappa_values
+                            checked_delta_q = right_q - reference_q
+                            return True
+                        
+                        # logging
+                        no_evaluations += 1
+                        max_depth = max(max_depth, depth)
+                        empirical_bound = max(empirical_bound, max_kappa)
+                        if no_evaluations % 100 == 0:
+                            print(f"      Status: {no_evaluations} evaluations, empirical bound is {empirical_bound:.6f}, maximum depth is {max_depth}, checked Δq up to {checked_delta_q:.6f}")
+                        
+                        # 3. otherwise, try recursively
+                        return prove_bound(left_q, mid_q, left_kappa, mid_kappa, depth + 1) \
+                            and prove_bound(mid_q, right_q, mid_kappa, right_kappa, depth + 1)
+                    
+                    left_q = -sa.delta_q_max + reference_q
+                    right_q = sa.delta_q_max + reference_q
+                    if prove_bound(left_q, right_q, q_to_kappa(left_q), q_to_kappa(right_q), 0):
+                        print("      Proof found!")
 elif args.command == "compare":
     _legend_txt_replace = {
         'networks': {
