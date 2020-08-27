@@ -507,10 +507,10 @@ elif args.command == "q_adversarial_lipschitz":
                     empirical_bound = -np.infty
                     max_depth = 0
                     no_evaluations = 2
-                    checked_delta_q = -sa.delta_q_max
+                    checked_q_measure = 0.0
                     
                     def prove_bound(left_q: float, right_q: float, left_kappa: float, right_kappa: float, depth: int) -> bool:
-                        global empirical_bound, no_evaluations, max_depth, checked_delta_q
+                        global empirical_bound, no_evaluations, max_depth, checked_q_measure
                         mid_q = (left_q + right_q) / 2
                         mid_kappa = q_to_kappa(mid_q)
                         actual_qs = np.array([left_q, mid_q, right_q])
@@ -526,14 +526,12 @@ elif args.command == "q_adversarial_lipschitz":
                             
                         # 2. try to find proof on [left, right]
                         kappa_upper_bound = -np.infty
-                        for q_interval, kappa_interval in zip(sa.to_intervals(actual_qs), sa.to_intervals(kappa_values)):
-                            left_beta = q_to_beta(q_interval[0])
-                            right_beta = q_to_beta(q_interval[1])
-                            max_on_interval = (top_level_bound * (right_beta - left_beta) + sum(kappa_interval)) / 2
-                            #print(left_beta, right_beta, max_on_interval)
-                            kappa_upper_bound = max(kappa_upper_bound, max_on_interval)
-                        if kappa_upper_bound < 0:
-                            checked_delta_q = right_q - reference_q
+                        max_on_interval = np.empty(2)
+                        for i, (q_interval, kappa_interval) in enumerate(zip(sa.to_intervals(actual_qs), sa.to_intervals(kappa_values))):
+                            left_beta, right_beta = q_to_beta(q_interval[0]), q_to_beta(q_interval[1])
+                            max_on_interval[i] = (top_level_bound * (right_beta - left_beta) + sum(kappa_interval)) / 2
+                        if max_on_interval.max() < 0:
+                            checked_q_measure += right_q - left_q
                             return True
                         
                         # logging
@@ -541,11 +539,16 @@ elif args.command == "q_adversarial_lipschitz":
                         max_depth = max(max_depth, depth)
                         empirical_bound = max(empirical_bound, max_kappa)
                         if no_evaluations % 100 == 0:
-                            print(f"      Status: {no_evaluations} evaluations, empirical bound is {empirical_bound:.6f}, maximum depth is {max_depth}, checked Δq up to {checked_delta_q:.6f}")
+                            percentage = checked_q_measure / sa.delta_q_max / 2 * 100
+                            print(f"      Status: {no_evaluations} evaluations, empirical bound is {empirical_bound:.6f}, maximum depth is {max_depth}, checked Δq percentage: {percentage:.2f}")
                         
                         # 3. otherwise, try recursively
-                        return prove_bound(left_q, mid_q, left_kappa, mid_kappa, depth + 1) \
-                            and prove_bound(mid_q, right_q, mid_kappa, right_kappa, depth + 1)
+                        calls = [(lambda: prove_bound(left_q, mid_q,  left_kappa, mid_kappa,   depth + 1)),
+                                 (lambda: prove_bound(mid_q,  right_q, mid_kappa, right_kappa, depth + 1))]
+                        # to produce counetrexamples faster, start from the most empirically dangerous subinterval
+                        if max_on_interval.argmax() == 1:
+                            calls = calls[::-1]
+                        return calls[0]() and calls[1]()
                     
                     left_q = -sa.delta_q_max + reference_q
                     right_q = sa.delta_q_max + reference_q
