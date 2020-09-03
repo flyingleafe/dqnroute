@@ -170,7 +170,7 @@ class MultiAgentEnv(HasLog):
     def handleConnGraphChange(self, event: LinkUpdateEvent) -> Event:
         """
         Adds or removes the connection link and notifies the agents that
-        the corresponding intefaces changed availability.
+        the corresponding interfaces changed availability.
         Connection graph itself does not change to preserve interfaces numbering.
         """
         u = event.u

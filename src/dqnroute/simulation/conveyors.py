@@ -337,6 +337,15 @@ class ConveyorsEnvironment(MultiAgentEnv):
 
         bag.last_conveyor = conv_idx
         conv_aid = ('conveyor', conv_idx)
+        
+        # added by Igor
+        # to patch the situation of a bag passing more than one time through the same conveyor
+        # remove all the nodes of this conveyor
+        #print(node)
+        #print(dir(self))
+        #assert False
+        self.current_bags[bag.id] = set()
+        
         self.current_bags[bag.id].add(node)
         self.passToAgent(conv_aid, IncomingBagEvent(sender, bag, node))
 
@@ -367,15 +376,18 @@ class ConveyorsEnvironment(MultiAgentEnv):
             if self.conveyor_broken[conv_idx]:
                 continue
 
+            #print(f"BEFORE ~ event {(bag, node, delay)} on conv {conv_idx}; {bag.id in left_to_sinks}; {node in self.current_bags[bag.id]}")
             if bag.id in left_to_sinks or node in self.current_bags[bag.id]:
                 continue
 
+            #print(f"AFTER ~ event {(bag, node, delay)} on conv {conv_idx}")
+                
             self.log('conv {}: handling {} on {}'.format(conv_idx, bag, node))
 
             model = self.conveyor_models[conv_idx]
             atype = agent_type(node)
             left_to_sink = False
-
+            
             if atype == 'junction':
                 self.passToAgent(('conveyor', conv_idx), PassedBagEvent(bag, node))
             elif atype == 'conv_end':

@@ -151,7 +151,7 @@ class BaseConveyor(Conveyor, ConveyorStateHandler):
                                      self.model.object_positions, self.model._resolved_events))
                     raise Exception('okay what the fuck?')
 
-                self.log('handling eveng: {} {} {}'.format(bag, node, delay))
+                self.log('handling event: {} {} {}'.format(bag, node, delay))
 
                 if node not in self.bag_checkpoints[bag.id]:
                     if agent_type(node) == 'conv_end':
@@ -323,6 +323,7 @@ class SimpleRouterConveyor(StopDelayConveyor, RouterContainer):
 
             self.dv_kick_estimate[(sender, msg.bag.id)] = msg.kick
             evs += self._cascadeUpdate() if self._oracle else self._resolveAndResume()
+            #self.log(f"conveyor handling message from {sender}: {msg}; evs = {evs}")
             return evs
         else:
             return super().handleMsgFrom(sender, msg)
@@ -378,6 +379,7 @@ class SimpleRouterConveyor(StopDelayConveyor, RouterContainer):
 
     def _notifyNextDiverter(self, node: AgentId, bag: Bag) -> List[WorldEvent]:
         nxt = self.next_node[node]
+        #self.log(f"bag #{bag.id}: notifying {nxt} from {node}")
         if agent_type(nxt) == 'diverter':
             pos = node_conv_pos(self.topology, self.id[1], node)
             return [OutMessage(self.id, nxt, DiverterNotification(bag, pos))]

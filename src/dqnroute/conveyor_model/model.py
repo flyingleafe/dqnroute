@@ -401,6 +401,7 @@ def all_unresolved_events(models: Dict[int, ConveyorModel]):
             if model.resolving():
                 ev = model.pickUnresolvedEvent()
                 if ev is not None:
+                    #print(f"all_unresolved_events: yielding {ev} at conveyor {conv_idx}")
                     yield (conv_idx, ev)
                     had_some = True
         if not had_some:

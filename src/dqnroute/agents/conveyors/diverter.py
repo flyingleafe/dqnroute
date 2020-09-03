@@ -27,6 +27,8 @@ class RouterDiverter(RouterContainer, Diverter, ConveyorStateHandler):
             from_router = self.node_mapping[self.predecessor]
             router_id = self.routerId()
             msgs = self.handleViaRouter(router_id, PkgEnqueuedEvent(from_router, router_id, pkg))
+            
+            #self.log('notification request from {} '.format(sender) + str(msgs))
             return [OutMessage(self.id, sender, msg)
                     if isinstance(msg, DiverterPrediction) else msg
                     for msg in msgs]
@@ -40,9 +42,11 @@ class RouterDiverter(RouterContainer, Diverter, ConveyorStateHandler):
         """
         sender = self.node_mapping[self.predecessor]
         router_id = self.routerId()
+        #self.log(f"bagDetection (bag {bag}) called")
         return self.handleBagViaRouter(sender, router_id, bag)
 
     def fromRouterAction(self, router_id: AgentId, action: Action) -> List[WorldEvent]:
+        #self.log(f"{router_id} called fromRouterAction {action}")
         if isinstance(action, (PkgRouteAction, PkgRoutePredictionAction)):
             bag = self.pkgToBag(action.pkg)
             to_node = self.node_mapping_inv[action.to]

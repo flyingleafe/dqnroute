@@ -269,7 +269,7 @@ class DQNRouterEmbNetwork(NetworkRewardAgent, DQNRouterEmb):
 
 class ConveyorAddInputMixin:
     """
-    Mixing which adds conveyor-specific additional NN inputs support
+    Mixin which adds conveyor-specific additional NN inputs support
     """
     def _getAddInput(self, tag, nbr=None):
         if tag == 'work_status':

@@ -271,6 +271,7 @@ class Router(MessageHandler):
             if pkg.dst == self.id:
                 return [PkgReceiveAction(pkg)]
             else:
+                #self.log('Processing pkg #{} on router {}'.format(pkg.id, self.id[1]))
                 sender = event.sender
                 allowed_nbrs = event.allowed_nbrs
                 if allowed_nbrs is None:
@@ -281,6 +282,7 @@ class Router(MessageHandler):
                 pkg.node_path.append(self.id)
 
                 logger.debug('Routing pkg #{} on router {} to router {}'.format(pkg.id, self.id[1], to_nbr[1]))
+                #self.log('Routing pkg #{} on router {} to router {}'.format(pkg.id, self.id[1], to_nbr[1]))
                 return [PkgRouteAction(to_nbr, pkg)] + additional_msgs
 
         else:
@@ -309,6 +311,7 @@ class BagDetector(MessageHandler):
 
     def handleEvent(self, event: WorldEvent) -> List[WorldEvent]:
         if isinstance(event, BagDetectionEvent):
+            #self.log(f"bag detection {event}")
             return self.bagDetection(event.bag)
         elif isinstance(event, (ConveyorBreakEvent, ConveyorRestoreEvent)):
             return []
@@ -392,13 +395,8 @@ class RewardAgent(object):
         try:
             action, old_reward_data, saved_data = self._pending_pkgs.pop(msg.pkg.id)
         except KeyError:
-            #self.log(f'not our package: {msg.pkg}, path:\n  {msg.pkg.node_path}\n', force=True)
-            #raise
-            
-            # Igor Buzhinsky's hack to suppress this exception:
-            action, old_reward_data, saved_data = self._last_tuple
-            self.log(f'Exception suppressed with Igor Buzhinsky\'s hack: not our package: {msg.pkg}, path:\n  {msg.pkg.node_path}\n', force=True)
-
+            self.log(f'not our package: {msg.pkg}, path:\n  {msg.pkg.node_path}\n', force=True)
+            raise
         reward = self._computeReward(msg, old_reward_data)
         return action, reward, saved_data
 

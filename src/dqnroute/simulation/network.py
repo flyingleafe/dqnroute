@@ -53,7 +53,7 @@ class RouterFactory(HandlerFactory):
     def useDynEnv(self, env):
         self._dyn_env = env
 
-    def makeMasterHanlder(self) -> MasterHandler:
+    def makeMasterHandler(self) -> MasterHandler:
         dyn_env = self.dynEnv()
         return self.RouterClass(
             env=dyn_env, network=self.topology_graph,

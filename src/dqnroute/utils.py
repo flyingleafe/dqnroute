@@ -611,6 +611,7 @@ class HasTime:
 
 class HasLog(HasTime):
     def log(self, msg, force=False):
+        #if force or True:
         if force:
             print('[ {} : {} ] {}'.format(self.logName().ljust(10),
                                           '{}s'.format(self.time()).ljust(8), msg))

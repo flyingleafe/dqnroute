@@ -217,6 +217,7 @@ class RouterContainer(MessageHandler):
         Passes an event to a given router and transforms events spawned by router
         """
         router_evs = self.routers[router_id].handle(event)
+        #print(router_evs)
         return flatten([self.fromRouterEvent(router_id, rev) for rev in router_evs])
 
     def handleBagViaRouter(self, from_router: AgentId, router_id: AgentId, bag: Bag) -> List[WorldEvent]:
@@ -229,7 +230,7 @@ class RouterContainer(MessageHandler):
         allowed_routers = [self.node_mapping[v] for v in allowed_nbrs]
 
         self.log('bag handle: {}, allowed nbrs: {}'.format(bag, allowed_nbrs))
-
+        
         pkg = self.bagToPkg(bag)
         return self.handleViaRouter(
             router_id, PkgProcessingEvent(from_router, router_id, pkg, allowed_routers))
