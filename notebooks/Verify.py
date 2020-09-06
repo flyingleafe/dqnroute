@@ -200,6 +200,8 @@ else:
 
 # 3. train
 
+# FIXME?? random seed does not work in tranining!
+
 def run_single(file: str, router_type: str, random_seed: int, **kwargs):
     job_id = mk_job_id(router_type, random_seed)
     with tqdm(desc=job_id) as bar:
@@ -247,7 +249,8 @@ if retrain:
     print(f"Training {train_path}...")
 else:
     print(f"Using the already trained model {train_path}...")
-_, world = train(args, dir_with_models, pretrain_filename, train_filename, "dqn_emb", retrain, True)
+    
+dqn_log, world = train(args, dir_with_models, pretrain_filename, train_filename, "dqn_emb", retrain, True)
 
 
 # 4. load the router graph
@@ -572,8 +575,9 @@ elif args.command == "compare":
     }
     
     router_types = ["dqn_emb", "link_state", "simple_q"]
-    series = []
-    for router_type in router_types:
+    # reuse the log for dqn_emb
+    series = [dqn_log.getSeries(add_avg=True)]
+    for router_type in router_types[1:]:
         s, _ = train(args, dir_with_models, pretrain_filename, train_filename, router_type, True, False)
         series += [s.getSeries(add_avg=True)]
     
@@ -585,8 +589,7 @@ elif args.command == "compare":
     dfs = pd.concat(dfs, axis=0)
     
     def print_sums(df):
-        types = set(df['router_type'])
-        for tp in types:
+        for tp in router_types:
             x = df.loc[df['router_type'] == tp, 'count'].sum()
             txt = _legend_txt_replace.get(tp, tp)
             print(f'  {txt}: {x}')
@@ -608,7 +611,7 @@ elif args.command == "compare":
                 plot_data(df, meaning=tag, figsize=figsize, xlim=xlim, ylim=ylim,
                           xlabel=xlabel, ylabel=ylabel, font_size=font_size,
                           title=title, save_path=save_path, context='conveyors')
-            return 
+            return
 
         target = _targets[meaning]
         if ylabel is None:
