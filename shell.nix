@@ -24,7 +24,7 @@ mkShell {
     if [ ! -d "${virtualenvDir}" ]; then
       virtualenv --system-site-packages ${virtualenvDir}
     fi
-    echo "manylinux1_compatible = True" > ${virtualenvDir}/lib/python3.6/_manylinux.py
+    echo "manylinux1_compatible = True" > ${virtualenvDir}/lib/python3.7/_manylinux.py
     source ${virtualenvDir}/bin/activate
     export LD_LIBRARY_PATH=${manylinuxLibPath}
     export TMPDIR=/tmp
