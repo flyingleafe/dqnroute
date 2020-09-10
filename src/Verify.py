@@ -12,8 +12,6 @@ import torch
 import sympy
 
 import os
-current_dir = os.getcwd()
-os.chdir("../src")
 from dqnroute import *
 from dqnroute.networks import *
 from dqnroute.verification.router_graph import RouterGraph
@@ -22,8 +20,6 @@ from dqnroute.verification.ml_util import Util
 from dqnroute.verification.markov_analyzer import MarkovAnalyzer
 from dqnroute.verification.symbolic_analyzer import SymbolicAnalyzer
 from dqnroute.utils import memoize
-
-os.chdir(current_dir)
 
 
 parser = argparse.ArgumentParser(description="Verifier of baggage routing neural networks.")
@@ -244,7 +240,7 @@ def train(args, dir_with_models: str, pretrain_filename: str, train_filename: st
 
 train_filename = f"igor_trained{filename_suffix}"
 train_path = Path(TORCH_MODELS_DIR) / dir_with_models / train_filename
-retrain = args.force_train or not train_path.exists()
+retrain = args.force_train or not train_path.exists() or args.command == "compare"
 if retrain:
     print(f"Training {train_path}...")
 else:
@@ -575,7 +571,7 @@ elif args.command == "compare":
     }
     
     router_types = ["dqn_emb", "link_state", "simple_q"]
-    # reuse the log for dqn_emb
+    # reuse the log for dqn_emb:
     series = [dqn_log.getSeries(add_avg=True)]
     for router_type in router_types[1:]:
         s, _ = train(args, dir_with_models, pretrain_filename, train_filename, router_type, True, False)

@@ -396,7 +396,9 @@ class RewardAgent(object):
             action, old_reward_data, saved_data = self._pending_pkgs.pop(msg.pkg.id)
         except KeyError:
             self.log(f'not our package: {msg.pkg}, path:\n  {msg.pkg.node_path}\n', force=True)
-            raise
+            #raise
+            # Igor Buzhinsky's hack to suppress a no-key exception in receiveReward
+            action, old_reward_data, saved_data = self._last_tuple
         reward = self._computeReward(msg, old_reward_data)
         return action, reward, saved_data
 
