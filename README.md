@@ -3,13 +3,13 @@
 This project enhances [dqnroute](https://github.com/flyingleafe/dqnroute) in several ways.
 The modifications concern only the baggage handling capabilities of the original project.
 
-Original citation: [Mukhutdinov, D., Filchenkov, A., Shalyto, A., & Vyatkin, V. (2019). Multi-agent deep learning for simultaneous optimization for time and energy in distributed routing system. Future Generation Computer Systems, 94, 587-600](https://www.sciencedirect.com/science/article/pii/S0167739X18309087?casa_token=3O7gKwF4KRAAAAAA:Ia9qKHkdtgvekRjrCL_M7U5jBFpIYCVPMUagJTf88lWfjJrv6D7zNkaJyYIPj9mculdSsbLXYhI).
+Original citation: [Mukhutdinov, D., Filchenkov, A., Shalyto, A., & Vyatkin, V. (2019). Multi-agent deep learning for simultaneous optimization for time and energy in distributed routing system. Future Generation Computer Systems, 94, 587-600](https://www.sciencedirect.com/science/article/pii/S0167739X18309087?casa_token=3O7gKwF4KRAAAAAA:Ia9qKHkdtgvekRjrCL_M7U5jBFpIYCVPMUagJTf88lWfjJrv6D7zNkaJyYIPj9mculdSsbLXYhI). Note that the use of graph embeddings is not yet reported there.
 
 ## Changes w.r.t. the original dqnroute
 
 * Neural network verification methods (work in progress).
 * The decisions of the neural network are altered to exclude routing probabilities that are very close to 0 and 1. This is done similarly to label smoothing.
-* A [script](/src/Verify.py) that offers an easier access to the original project by performing both pretraining and training.
+* A [script](/src/Verify.py) that offers an easier access to the original project by performing both pretraining and training. It also visualizes topology graphs.
 * [Examples](/launches/igor) of baggage handling topology graphs, in particular with cycles.
 * A fix (?) for the bug: a bag was processed incorrectly if it passed twice along the same conveyor. This is possible only in topology graphs with cycles.
 
