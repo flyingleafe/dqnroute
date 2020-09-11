@@ -10,7 +10,7 @@ Original citation: [Mukhutdinov, D., Filchenkov, A., Shalyto, A., & Vyatkin, V. 
 * Neural network verification methods (work in progress).
 * The decisions of the neural network are altered to exclude routing probabilities that are very close to 0 and 1. This is done similarly to label smoothing.
 * A [script](/src/Verify.py) that offers an easier access to the original project by performing both pretraining and training.
-* [Examples](igor_dqn_pretrain.ipynb) of baggage handling topology graphs, in particular with cycles.
+* [Examples](/launches/igor) of baggage handling topology graphs, in particular with cycles.
 * A fix (?) for the bug: a bag was processed incorrectly if it passed twice along the same conveyor. This is possible only in topology graphs with cycles.
 
 Unfortunately, some features are currently implemented with global variables due to Igor's lack of good understanding of the simulation model.
