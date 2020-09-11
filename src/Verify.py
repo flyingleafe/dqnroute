@@ -19,7 +19,6 @@ from dqnroute.verification.adversarial import PGDAdversary
 from dqnroute.verification.ml_util import Util
 from dqnroute.verification.markov_analyzer import MarkovAnalyzer
 from dqnroute.verification.symbolic_analyzer import SymbolicAnalyzer
-from dqnroute.utils import memoize
 
 
 parser = argparse.ArgumentParser(description="Verifier of baggage routing neural networks.")
