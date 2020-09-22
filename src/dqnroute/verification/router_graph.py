@@ -25,7 +25,6 @@ class RouterGraph:
                 nw = router.network
         self.q_network.ff_net = Util.conditional_to_cuda(self.q_network.ff_net)
         
-        
         # add junction -> router mapping
         for conveyor_index, m in world.conveyor_models.items():
             router_keeper = self.routers[("conveyor", conveyor_index)].routers

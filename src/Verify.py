@@ -1,5 +1,8 @@
+import os
+import re
 import argparse
 import yaml
+
 from pathlib import Path
 from tqdm import tqdm
 from typing import *
@@ -11,7 +14,6 @@ import seaborn as sns
 import torch
 import sympy
 
-import os
 from dqnroute import *
 from dqnroute.networks import *
 from dqnroute.verification.router_graph import RouterGraph
@@ -277,6 +279,11 @@ if not args.skip_graphviz:
 sa = SymbolicAnalyzer(g, args.softmax_temperature, args.probability_smoothing,
                       args.verification_lr, delta_q_max=args.verification_max_delta_q)
 
+def transform_embeddings(sink_embedding: torch.tensor, current_embedding: torch.tensor,
+                         neighbor_embedding: torch.tensor) -> torch.tensor:
+    return torch.cat((sink_embedding - current_embedding,
+                      neighbor_embedding - current_embedding), dim=1)
+
 print(f"Running command {args.command}...")
 if args.command == "deterministic_test":
     for source in g.sources:
@@ -318,7 +325,6 @@ elif args.command == "embedding_adversarial_search":
         print(f"Measuring robustness of delivery to {sink}...")
         ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
         sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
-        embedding_size = sink_embedding.flatten().shape[0]
         # gather all embeddings that we need to compute the objective
         stored_embeddings = OrderedDict({sink: sink_embedding})
         for node_key in ma.reachable_nodes:
@@ -330,7 +336,7 @@ elif args.command == "embedding_adversarial_search":
         def unpack_embeddings(embedding_vector: torch.tensor) -> OrderedDict:
             embedding_dict = OrderedDict()
             for i, (key, value) in enumerate(stored_embeddings.items()):
-                embedding_dict[key] = embedding_vector[i*embedding_size:(i + 1)*embedding_size].reshape(1, embedding_size)
+                embedding_dict[key] = embedding_vector[i*emb_dim:(i + 1)*emb_dim].reshape(1, emb_dim)
             return embedding_dict
 
         initial_vector = pack_embeddings(stored_embeddings)
@@ -367,18 +373,21 @@ elif args.command == "embedding_adversarial_search":
                 return x.grad, objective_value.item(), f"[{aux_info}]"
             adv.perturb(initial_vector, get_gradient)
 elif args.command == "embedding_adversarial_verification":
-    assert args.marabou_path is not None, "It is mandatory to specify --verification_marabou_path for command embedding_adversarial_verification."
-    
+    import subprocess
     os.chdir("../NNet")
     from utils.writeNNet import writeNNet
     os.chdir("../src")
     
+    assert args.marabou_path is not None, "It is mandatory to specify --verification_marabou_path for command embedding_adversarial_verification."
+    
     to_numpy = lambda x: x.detach().cpu().numpy()
+    list_round = lambda x, digits: [round(y, digits) for y in x]
     network_filename = "../network.nnet"
     property_filename = "../property.txt"
     
-    def write_verification_problem(weights: List[torch.tensor], biases: List[torch.tensor],
-                                   input_center: torch.tensor, input_eps: float, output_constraints: List[str]):
+    def verify_adv_robustness(weights: List[torch.tensor], biases: List[torch.tensor],
+                              input_center: torch.tensor, input_eps: float,
+                              output_constraints: List[str]):
         # write the NN
         input_dim = weights[0].shape[1]
         input_mins = list(np.zeros(input_dim) - 10e6)
@@ -391,60 +400,85 @@ elif args.command == "embedding_adversarial_verification":
         # write the property
         with open(property_filename, "w") as f:
             for i in range(input_dim):
-                f.write(f"x{i} >= {input_center[i] - eps}{os.linesep}")
-                f.write(f"x{i} <= {input_center[i] + eps}{os.linesep}")
+                f.write(f"x{i} >= {input_center[i] - input_eps}{os.linesep}")
+                f.write(f"x{i} <= {input_center[i] + input_eps}{os.linesep}")
             for constraint in output_constraints:
                 f.write(constraint + os.linesep)
-        
+    
+        # call Marabou
+        command = [args.marabou_path, network_filename, property_filename]
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        lines = []
+        while process.poll() is None:
+            line = process.stdout.readline().decode("utf-8")
+            #print(line, end="")
+            lines += [line.strip()]
+        final_lines = process.stdout.read().decode("utf-8").splitlines()
+        process.stdout.close()
+        for line in final_lines:
+            #print(line)
+            lines += [line.strip()]
+
+        # construct counterexample
+        xs = np.zeros(input_dim) + np.nan
+        y = None
+        for line in lines:
+            tokens = re.split(" *= *", line)
+            if len(tokens) == 2:
+                #print(tokens)
+                value = float(tokens[1])
+                if tokens[0].startswith("x"):
+                    xs[int(tokens[0][1:])] = value
+                elif tokens[0].strip() == "y0":
+                    y = value
+        assert (y is None) == np.isnan(xs).any(), f"Problems with reading a counterexample (xs={xs}, y={y}, lines={lines})!"
+        if y is not None:
+            with torch.no_grad():
+                actual_output = net(Util.conditional_to_cuda(torch.tensor(xs)))
+            print(f"  counterexample: NN({list(xs)}) = {y} [cross-check: {actual_output.item()}]")
+            return False
+        else:
+            return True
+    
     net = g.q_network.ff_net
     layers = [layer for layer in net]
     print(layers)
     
-    input_dim = emb_dim * 2
-    q_min = -1.123
-    q_max = 1.123
-    eps = 1.989
-    center = 0.0
-    write_verification_problem([layers[0].weight, layers[2].weight, layers[4].weight],
-                               [layers[0].bias,   layers[2].bias,   layers[4].bias  ],
-                               torch.zeros(input_dim) + center, eps,
-                               [f"y0 >= {q_min}", f"y0 <= {q_max}"])
+    input_eps = 0.1
+    delta_q = 3.6
     
-    # call Marabou
-    import subprocess
-    #os.system(f"../../Marabou/build/Marabou {network_filename} {property_filename}")
-    command = [args.marabou_path, network_filename, property_filename]
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    lines = []
-    while process.poll() is None:
-        line = process.stdout.readline().decode("utf-8")
-        lines += [line]
-        print(line, end="")
-    line = process.stdout.read().decode("utf-8")
-    lines += [line]
-    print(line)
-    process.stdout.close()
+    for sink in g.sinks:
+        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
+        for node in g.node_keys:
+            if node[0] == "sink":
+                # sinks do not have any neighbors
+                continue
+            print(f"Verifying Q value stability for node={node} and sink={sink}...")
+            current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node, sink)
+            # for each neighbor
+            for neighbor, neighbor_embedding in zip(neighbors, neighbor_embeddings):
+                emb_center = transform_embeddings(sink_embedding, current_embedding, neighbor_embedding)
+                with torch.no_grad():
+                    actual_output = net(emb_center).item()
+                print(f"  computation on real embedding: NN({list_round(to_numpy(emb_center.flatten()), 3)}) = {actual_output}")
     
-    # construct counterexample
-    xs = np.zeros(input_dim) + np.nan
-    y = None
-    for line in lines:
-        tokens = line.strip().split(" = ")
-        if len(tokens) == 2:
-            #print(tokens)
-            value = float(tokens[1])
-            if tokens[0].startswith("x"):
-                xs[int(tokens[0][1:])] = value
-            elif tokens[0] == "y0":
-                y = value
-    assert (y is None) == np.isnan(xs).any(), f"Problems with reading a counterexample (xs={xs}, y={y})!"
-    if y is not None:
-        with torch.no_grad():
-            actual_output = net(Util.conditional_to_cuda(torch.tensor(xs)))
-        print(f"counterexample: NN({list(xs)}) = {y} [cross-check: {actual_output.item()}]")
-    else:
-        print("no counterexample")
-    
+                # two verification queries: check whether the output can be less than the bound
+                # then check whether it can be greater
+                falsified = False
+                for constraint in [f"y0 <= {actual_output - delta_q}",
+                                   f"y0 >= {actual_output + delta_q}"]:
+                    result = verify_adv_robustness(
+                        [layers[0].weight, layers[2].weight, layers[4].weight],
+                        [layers[0].bias,   layers[2].bias,   layers[4].bias  ],
+                        emb_center.flatten(), input_eps, [constraint]
+                    )
+                    falsified = falsified or not result
+                    if falsified:
+                        break
+                if not falsified:
+                    print("  no counterexample")
+        
+        # TODO verify probabilities of diverters (accounting for probability smoothing)
 
 elif args.command == "q_adversarial":
     plot_index = 0
@@ -452,7 +486,6 @@ elif args.command == "q_adversarial":
         print(f"Measuring robustness of delivery to {sink}...")
         ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
         sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
-        embedding_size = sink_embedding.flatten().shape[0]
         sink_embeddings = sink_embedding.repeat(2, 1)
 
         for source in ma.reachable_sources:
@@ -508,7 +541,6 @@ elif args.command == "q_adversarial_lipschitz":
         print(f"Measuring robustness of delivery to {sink}...")
         ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
         sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
-        embedding_size = sink_embedding.flatten().shape[0]
         sink_embeddings = sink_embedding.repeat(2, 1)
         
         ps_function_names = [f"p{i}" for i in range(len(ma.params))]
@@ -521,8 +553,10 @@ elif args.command == "q_adversarial_lipschitz":
         def compute_logit_and_derivative(sa: SymbolicAnalyzer, diverter_key: AgentId) -> Tuple[sympy.Expr, sympy.Expr]:
             if diverter_key not in computed_logits_and_derivatives:
                 diverter_embedding, _, neighbor_embeddings = g.node_to_embeddings(diverter_key, sink)
-                delta_e = [sa.tensor_to_sympy(torch.cat((sink_embedding - diverter_embedding,
-                                                         neighbor_embeddings[i] - diverter_embedding), dim=1).T) for i in range(2)]
+                delta_e = [sa.tensor_to_sympy(transform_embeddings(sink_embedding,
+                                                                   diverter_embedding,
+                                                                   neighbor_embeddings[i]).T)
+                           for i in range(2)]
                 logit = sa.to_scalar(sa.sympy_q(delta_e[0]) - sa.sympy_q(delta_e[1])) / args.softmax_temperature
                 dlogit_dbeta = logit.diff(sa.beta)
                 computed_logits_and_derivatives[diverter_key] = logit, dlogit_dbeta
