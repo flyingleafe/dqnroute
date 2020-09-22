@@ -23,7 +23,7 @@ from dqnroute.verification.symbolic_analyzer import SymbolicAnalyzer
 
 parser = argparse.ArgumentParser(description="Verifier of baggage routing neural networks.")
 parser.add_argument("--command", type=str, required=True,
-                    help="one of deterministic_test, embedding_adversarial, q_adversarial, q_adversarial_lipschitz, compare")
+                    help="one of deterministic_test, embedding_adversarial, embedding_adversarial_verification, q_adversarial, q_adversarial_lipschitz, compare")
 parser.add_argument("--config_file", type=str, required=True,
                     help="YAML config file with the topology graph and other configuration info")
 parser.add_argument("--probability_smoothing", type=float, default=0.01,
@@ -52,6 +52,11 @@ parser.add_argument("--pretrain_num_episodes", type=int, default=10000,
 
 args = parser.parse_args()
 
+for dirname in ["../logs", "../img"]:
+    try:
+        os.mkdir(dirname)
+    except FileExistsError:
+        pass
 
 os.environ["IGOR_OVERRDIDDED_SOFTMAX_TEMPERATURE"] = str(args.softmax_temperature)
 
@@ -359,6 +364,8 @@ elif args.command == "embedding_adversarial":
                                       for param, value in zip(ma.params, objective_inputs)])
                 return x.grad, objective_value.item(), f"[{aux_info}]"
             adv.perturb(initial_vector, get_gradient)
+elif args.command == "embedding_adversarial_verification":
+    pass
 elif args.command == "q_adversarial":
     plot_index = 0
     for sink in g.sinks:
