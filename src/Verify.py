@@ -373,36 +373,42 @@ elif args.command == "embedding_adversarial_verification":
     from utils.writeNNet import writeNNet
     os.chdir("../src")
     
-    # write neural network
+    to_numpy = lambda x: x.detach().cpu().numpy()
     network_filename = "../network.nnet"
+    property_filename = "../property.txt"
+    
+    def write_verification_problem(weights: List[torch.tensor], biases: List[torch.tensor],
+                                   input_center: torch.tensor, input_eps: float, output_constraints: List[str]):
+        # write the NN
+        input_dim = weights[0].shape[1]
+        input_mins = list(np.zeros(input_dim) - 10e6)
+        input_maxes = list(np.zeros(input_dim) + 10e6)
+        means = list(np.zeros(input_dim)) + [0.]
+        ranges = list(np.zeros(input_dim)) + [1.]
+        writeNNet([to_numpy(x) for x in weights],
+                  [to_numpy(x) for x in biases],
+                  input_mins, input_maxes, means, ranges, network_filename)
+        # write the property
+        with open(property_filename, "w") as f:
+            for i in range(input_dim):
+                f.write(f"x{i} >= {input_center[i] - eps}{os.linesep}")
+                f.write(f"x{i} <= {input_center[i] + eps}{os.linesep}")
+            for constraint in output_constraints:
+                f.write(constraint + os.linesep)
+        
     net = g.q_network.ff_net
     layers = [layer for layer in net]
     print(layers)
-    to_numpy = lambda x: x.detach().cpu().numpy()
-    input_dim = emb_dim * 2
-    input_mins = list(np.zeros(input_dim) - 10e6)
-    input_maxes = list(np.zeros(input_dim) + 10e6)
-    means = list(np.zeros(input_dim)) + [0.]
-    ranges = list(np.zeros(input_dim)) + [1.]
-    writeNNet([to_numpy(layers[0].weight), to_numpy(layers[2].weight), to_numpy(layers[4].weight)],
-              [to_numpy(layers[0].bias), to_numpy(layers[2].bias), to_numpy(layers[4].bias)],
-              input_mins, input_maxes, means, ranges, "../network.nnet")
     
-    # write the property to be verified
-    # so far, just dummy constraints on the input and the outputs
-    property_filename = "../property.txt"
+    input_dim = emb_dim * 2
+    q_min = -1.123
+    q_max = 1.123
     eps = 1.989
     center = 0.0
-    logit_min = -1.123
-    logit_max = 1.123
-    with open(property_filename, "w") as f:
-        for i in range(input_dim):
-            f.write(f"x{i} >= {center - eps}{os.linesep}")
-            f.write(f"x{i} <= {center + eps}{os.linesep}")
-        f.write(f"y0 >= {logit_min}{os.linesep}")
-        f.write(f"y0 <= {logit_max}{os.linesep}")
-    
-    # TODO for a counetrexample, compare the output of the tool with the output of the NN
+    write_verification_problem([layers[0].weight, layers[2].weight, layers[4].weight],
+                               [layers[0].bias,   layers[2].bias,   layers[4].bias  ],
+                               torch.zeros(input_dim) + center, eps,
+                               [f"y0 >= {q_min}", f"y0 <= {q_max}"])
     
     # call Marabou
     import subprocess
