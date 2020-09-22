@@ -373,7 +373,7 @@ elif args.command == "embedding_adversarial_search":
                                                                             args.softmax_temperature,
                                                                             args.probability_smoothing)]
                 objective_value = lambdified_objective(*objective_inputs)
-                #print(objective_value.detach().cpu().numpy())
+                #print(Util.to_numpy(objective_value))
                 objective_value.backward()
                 aux_info = ", ".join([f"{param}={value.detach().cpu().item():.4f}"
                                       for param, value in zip(ma.params, objective_inputs)])
@@ -382,7 +382,6 @@ elif args.command == "embedding_adversarial_search":
 elif args.command == "embedding_adversarial_verification":
     assert args.marabou_path is not None, "It is mandatory to specify --verification_marabou_path for command embedding_adversarial_verification."
     
-    to_numpy = lambda x: x.detach().cpu().numpy()
     list_round = lambda x, digits: [round(y, digits) for y in x]
     network_filename = "../network.nnet"
     property_filename = "../property.txt"
@@ -407,7 +406,7 @@ elif args.command == "embedding_adversarial_verification":
                 emb_center = transform_embeddings(sink_embedding, current_embedding, neighbor_embedding)
                 with torch.no_grad():
                     actual_output = net(emb_center).item()
-                print(f"  computation on real embedding: NN({list_round(to_numpy(emb_center.flatten()), 3)}) = {actual_output}")
+                print(f"  computation on real embedding: NN({list_round(Util.to_numpy(emb_center.flatten()), 3)}) = {actual_output}")
     
                 # two verification queries: check whether the output can be less than the bound
                 # then check whether it can be greater
@@ -429,6 +428,7 @@ elif args.command == "embedding_adversarial_verification":
         for diverter in ma.nontrivial_diverters:
             print(f"Verifying probability stability for node={diverter} and sink={sink}...")
             # TODO get current probability
+            #Util.q_values_to_first_probability
             
             # TODO verify accounting for probability smoothing
 

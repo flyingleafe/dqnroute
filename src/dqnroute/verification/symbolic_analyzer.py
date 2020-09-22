@@ -35,7 +35,7 @@ class SymbolicAnalyzer:
         self.A_hat, self.b_hat, self.C_hat, self.d_hat, self.E_hat, self.f_hat = tuple([None] * 6)
     
     def tensor_to_sympy(self, x: torch.tensor) -> sympy.Matrix:
-        return sympy.Matrix(x.detach().cpu().numpy())
+        return sympy.Matrix(Util.to_numpy(x))
     
     def _layer_to_sympy(self, x: torch.tensor) -> sympy.Matrix:
         return self.tensor_to_sympy(x.weight), self.tensor_to_sympy(x.bias)

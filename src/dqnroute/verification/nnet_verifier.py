@@ -7,7 +7,7 @@ from typing import *
 import numpy as np
 import torch
 
-from dqnroute.verification.ml_util import Util
+from .ml_util import Util
 
 os.chdir("../NNet")
 from utils.writeNNet import writeNNet
@@ -24,16 +24,14 @@ class NNetVerifier:
     def verify_adv_robustness(self, weights: List[torch.tensor], biases: List[torch.tensor],
                               input_center: torch.tensor, input_eps: float,
                               output_constraints: List[str]) -> bool:
-        to_numpy = lambda x: x.detach().cpu().numpy()
-        
         # write the NN
         input_dim = weights[0].shape[1]
         input_mins = list(np.zeros(input_dim) - 10e6)
         input_maxes = list(np.zeros(input_dim) + 10e6)
         means = list(np.zeros(input_dim)) + [0.]
         ranges = list(np.zeros(input_dim)) + [1.]
-        writeNNet([to_numpy(x) for x in weights],
-                  [to_numpy(x) for x in biases],
+        writeNNet([Util.to_numpy(x) for x in weights],
+                  [Util.to_numpy(x) for x in biases],
                   input_mins, input_maxes, means, ranges, self.network_filename)
         # write the property
         with open(self.property_filename, "w") as f:

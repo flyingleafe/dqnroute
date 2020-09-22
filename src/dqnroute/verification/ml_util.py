@@ -1,14 +1,16 @@
 import os
-import numpy as np
-import torch
-from typing import *
-import matplotlib
-import matplotlib.pyplot as plt
-from abc import ABC, abstractmethod
 import random
 
+from typing import *
+from abc import ABC, abstractmethod
 
-class Util:
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+
+
+class Util(ABC):
     """
     A convenience static class for everything that does not have its own class.
     """
@@ -88,9 +90,15 @@ class Util:
         norm_vector = norm_vector.expand(x.shape[0], norm_vector.shape[1])
         return norm_vector @ x
 
+    @staticmethod
     def smooth(p, alpha: float):
         # smoothing to get rid of 0 and 1 probabilities that lead to saturated gradients
         return (1 - alpha) * p  + alpha / 2
 
+    @staticmethod
     def q_values_to_first_probability(qs: torch.tensor, temperature: float, alpha: float) -> torch.tensor:
         return Util.smooth((qs / temperature).softmax(dim=0)[0], alpha)
+    
+    @staticmethod
+    def to_numpy(x: torch.tensor) -> np.ndarray:
+        return x.detach().cpu().numpy()
