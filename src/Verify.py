@@ -1,5 +1,4 @@
 import os
-import re
 import argparse
 import yaml
 
@@ -21,6 +20,7 @@ from dqnroute.verification.adversarial import PGDAdversary
 from dqnroute.verification.ml_util import Util
 from dqnroute.verification.markov_analyzer import MarkovAnalyzer
 from dqnroute.verification.symbolic_analyzer import SymbolicAnalyzer
+from dqnroute.verification.nnet_verifier import NNetVerifier
 
 
 parser = argparse.ArgumentParser(description="Verifier of baggage routing neural networks.")
@@ -46,10 +46,16 @@ parser.add_argument("--cost_bound", type=float, default=100.0,
                     help="upper bound on delivery cost to verify (default: 100)")
 parser.add_argument("--verification_lr", type=float, default=0.001,
                     help="learning rate in learning step verification (default: 0.001)")
-parser.add_argument("--verification_max_delta_q", type=float, default=10.0,
+parser.add_argument("--input_max_delta_q", type=float, default=10.0,
                     help="maximum ΔQ in learning step verification (default: 10.0)")
+
+# commands for verification with Marabou
 parser.add_argument("--marabou_path", type=str, default=None,
                     help="path to the Marabou executable (for command embedding_adversarial_verification)")
+parser.add_argument("--input_eps_l_inf", type=float, default=0.1,
+                    help="maximum L-infty not discrepancy of input embeddings in adversarial robustness verification (default: 0.1)")
+parser.add_argument("--output_max_delta_q", type=float, default=10.0,
+                    help="maximum ΔQ in adversarial robustness verification (default: 10.0)")
 
 parser.add_argument("--pretrain_num_episodes", type=int, default=10000,
                     help="pretrain_num_episodes (default: 10000)")
@@ -277,7 +283,7 @@ if not args.skip_graphviz:
     visualize(g)
     
 sa = SymbolicAnalyzer(g, args.softmax_temperature, args.probability_smoothing,
-                      args.verification_lr, delta_q_max=args.verification_max_delta_q)
+                      args.verification_lr, delta_q_max=args.input_max_delta_q)
 
 def transform_embeddings(sink_embedding: torch.tensor, current_embedding: torch.tensor,
                          neighbor_embedding: torch.tensor) -> torch.tensor:
@@ -350,7 +356,8 @@ elif args.command == "embedding_adversarial_search":
                 :param x: parameter vector (the one expected to converge to an adversarial example)
                 Returns a tuple (gradient pointing to the direction of the adversarial attack,
                                  the corresponding loss function value,
-                                 auxiliary information for printing during optimization)."""
+                                 auxiliary information for printing during optimization).
+                """
                 x = Util.optimizable_clone(x.flatten())
                 embedding_dict = unpack_embeddings(x)
                 objective_inputs = []
@@ -373,83 +380,23 @@ elif args.command == "embedding_adversarial_search":
                 return x.grad, objective_value.item(), f"[{aux_info}]"
             adv.perturb(initial_vector, get_gradient)
 elif args.command == "embedding_adversarial_verification":
-    import subprocess
-    os.chdir("../NNet")
-    from utils.writeNNet import writeNNet
-    os.chdir("../src")
-    
     assert args.marabou_path is not None, "It is mandatory to specify --verification_marabou_path for command embedding_adversarial_verification."
     
     to_numpy = lambda x: x.detach().cpu().numpy()
     list_round = lambda x, digits: [round(y, digits) for y in x]
     network_filename = "../network.nnet"
     property_filename = "../property.txt"
-    
-    def verify_adv_robustness(weights: List[torch.tensor], biases: List[torch.tensor],
-                              input_center: torch.tensor, input_eps: float,
-                              output_constraints: List[str]):
-        # write the NN
-        input_dim = weights[0].shape[1]
-        input_mins = list(np.zeros(input_dim) - 10e6)
-        input_maxes = list(np.zeros(input_dim) + 10e6)
-        means = list(np.zeros(input_dim)) + [0.]
-        ranges = list(np.zeros(input_dim)) + [1.]
-        writeNNet([to_numpy(x) for x in weights],
-                  [to_numpy(x) for x in biases],
-                  input_mins, input_maxes, means, ranges, network_filename)
-        # write the property
-        with open(property_filename, "w") as f:
-            for i in range(input_dim):
-                f.write(f"x{i} >= {input_center[i] - input_eps}{os.linesep}")
-                f.write(f"x{i} <= {input_center[i] + input_eps}{os.linesep}")
-            for constraint in output_constraints:
-                f.write(constraint + os.linesep)
-    
-        # call Marabou
-        command = [args.marabou_path, network_filename, property_filename]
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        lines = []
-        while process.poll() is None:
-            line = process.stdout.readline().decode("utf-8")
-            #print(line, end="")
-            lines += [line.strip()]
-        final_lines = process.stdout.read().decode("utf-8").splitlines()
-        process.stdout.close()
-        for line in final_lines:
-            #print(line)
-            lines += [line.strip()]
-
-        # construct counterexample
-        xs = np.zeros(input_dim) + np.nan
-        y = None
-        for line in lines:
-            tokens = re.split(" *= *", line)
-            if len(tokens) == 2:
-                #print(tokens)
-                value = float(tokens[1])
-                if tokens[0].startswith("x"):
-                    xs[int(tokens[0][1:])] = value
-                elif tokens[0].strip() == "y0":
-                    y = value
-        assert (y is None) == np.isnan(xs).any(), f"Problems with reading a counterexample (xs={xs}, y={y}, lines={lines})!"
-        if y is not None:
-            with torch.no_grad():
-                actual_output = net(Util.conditional_to_cuda(torch.tensor(xs)))
-            print(f"  counterexample: NN({list(xs)}) = {y} [cross-check: {actual_output.item()}]")
-            return False
-        else:
-            return True
-    
     net = g.q_network.ff_net
+    nv = NNetVerifier(args.marabou_path, network_filename, property_filename, net)
     layers = [layer for layer in net]
-    print(layers)
-    
-    input_eps = 0.1
-    delta_q = 3.6
+    print(f"network: {layers}")
     
     for sink in g.sinks:
+        ma = MarkovAnalyzer(g, sink, args.simple_path_cost, verbose=False)
         sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
-        for node in g.node_keys:
+        
+        # for each node from which the sink is reachable, verify q value stability
+        for node in ma.reachable_nodes:
             if node[0] == "sink":
                 # sinks do not have any neighbors
                 continue
@@ -465,12 +412,12 @@ elif args.command == "embedding_adversarial_verification":
                 # two verification queries: check whether the output can be less than the bound
                 # then check whether it can be greater
                 falsified = False
-                for constraint in [f"y0 <= {actual_output - delta_q}",
-                                   f"y0 >= {actual_output + delta_q}"]:
-                    result = verify_adv_robustness(
+                for constraint in [f"y0 <= {actual_output - args.output_max_delta_q}",
+                                   f"y0 >= {actual_output + args.output_max_delta_q}"]:
+                    result = nv.verify_adv_robustness(
                         [layers[0].weight, layers[2].weight, layers[4].weight],
                         [layers[0].bias,   layers[2].bias,   layers[4].bias  ],
-                        emb_center.flatten(), input_eps, [constraint]
+                        emb_center.flatten(), args.input_eps_l_inf, [constraint]
                     )
                     falsified = falsified or not result
                     if falsified:
@@ -478,7 +425,12 @@ elif args.command == "embedding_adversarial_verification":
                 if not falsified:
                     print("  no counterexample")
         
-        # TODO verify probabilities of diverters (accounting for probability smoothing)
+        # for each non-trivial diverter, verify the stability of routing probability
+        for diverter in ma.nontrivial_diverters:
+            print(f"Verifying probability stability for node={diverter} and sink={sink}...")
+            # TODO get current probability
+            
+            # TODO verify accounting for probability smoothing
 
 elif args.command == "q_adversarial":
     plot_index = 0

@@ -4,7 +4,7 @@ from .router_graph import RouterGraph
 from ..utils import AgentId
 
 class MarkovAnalyzer:
-    def __init__(self, g: RouterGraph, sink: AgentId, simple_path_cost: bool):
+    def __init__(self, g: RouterGraph, sink: AgentId, simple_path_cost: bool, verbose: bool = True):
         self.g = g
         # reindex nodes so that only the nodes from which the sink is reachable are considered
         self.reachable_nodes = [node_key for node_key in g.node_keys if g.reachable[node_key, sink]]
@@ -25,7 +25,8 @@ class MarkovAnalyzer:
         bias = [[0] for _ in range(system_size)]
 
         self.params = sympy.symbols([f"p{i}" for i in range(len(self.nontrivial_diverters))])
-        print(f"  parameters: {self.params}")
+        if verbose:
+            print(f"  parameters: {self.params}")
 
         # fill the system of linear equations
         for i in range(system_size):
@@ -49,8 +50,9 @@ class MarkovAnalyzer:
                     # two possible destinations
                     k1, k2 = next_node_keys[0], next_node_keys[1]
                     p = self.params[nontrivial_diverters_to_indices[node_key]]
-                    print(f"      {p} = P({node_key} -> {k1} | sink = {sink})" )
-                    print(f"  1 - {p} = P({node_key} -> {k2} | sink = {sink})" )
+                    if verbose:
+                        print(f"      {p} = P({node_key} -> {k1} | sink = {sink})" )
+                        print(f"  1 - {p} = P({node_key} -> {k2} | sink = {sink})" )
                     if k1 != sink:
                         matrix[i][reachable_nodes_to_indices[k1]] = -p
                     if k2 != sink:
@@ -64,7 +66,8 @@ class MarkovAnalyzer:
         matrix = sympy.Matrix(matrix)
         #print(f"  matrix: {matrix}")
         bias = sympy.Matrix(bias)
-        print(f"  bias: {bias}")
+        if verbose:
+            print(f"  bias: {bias}")
         self.solution = matrix.inv() @ bias
         #print(f"  solution: {self.solution}")
         
