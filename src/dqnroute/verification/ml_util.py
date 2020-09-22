@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from abc import ABC, abstractmethod
 import random
 
-  
+
 class Util:
     """
     A convenience static class for everything that does not have its own class.

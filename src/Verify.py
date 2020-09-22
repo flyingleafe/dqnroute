@@ -23,7 +23,7 @@ from dqnroute.verification.symbolic_analyzer import SymbolicAnalyzer
 
 parser = argparse.ArgumentParser(description="Verifier of baggage routing neural networks.")
 parser.add_argument("--command", type=str, required=True,
-                    help="one of deterministic_test, embedding_adversarial, embedding_adversarial_verification, q_adversarial, q_adversarial_lipschitz, compare")
+                    help="one of deterministic_test, embedding_adversarial_search, embedding_adversarial_verification, q_adversarial, q_adversarial_lipschitz, compare")
 parser.add_argument("--config_file", type=str, required=True,
                     help="YAML config file with the topology graph and other configuration info")
 parser.add_argument("--probability_smoothing", type=float, default=0.01,
@@ -46,6 +46,8 @@ parser.add_argument("--verification_lr", type=float, default=0.001,
                     help="learning rate in learning step verification (default: 0.001)")
 parser.add_argument("--verification_max_delta_q", type=float, default=10.0,
                     help="maximum ΔQ in learning step verification (default: 10.0)")
+parser.add_argument("--marabou_path", type=str, default=None,
+                    help="path to the Marabou executable (for command embedding_adversarial_verification)")
 
 parser.add_argument("--pretrain_num_episodes", type=int, default=10000,
                     help="pretrain_num_episodes (default: 10000)")
@@ -309,7 +311,7 @@ if args.command == "deterministic_test":
                     current_node = neighbors[best_neighbor_index]
                 else:
                     raise AssertionError()
-elif args.command == "embedding_adversarial":
+elif args.command == "embedding_adversarial_search":
     adv = PGDAdversary(rho=1.5, steps=100, step_size=0.02, random_start=True, stop_loss=1e5, verbose=2,
                        norm="scaled_l_2", n_repeat=2, repeat_mode="min", dtype=torch.float64)
     for sink in g.sinks:
@@ -365,7 +367,79 @@ elif args.command == "embedding_adversarial":
                 return x.grad, objective_value.item(), f"[{aux_info}]"
             adv.perturb(initial_vector, get_gradient)
 elif args.command == "embedding_adversarial_verification":
-    pass
+    assert args.marabou_path is not None, "It is mandatory to specify --verification_marabou_path for command embedding_adversarial_verification."
+    
+    os.chdir("../NNet")
+    from utils.writeNNet import writeNNet
+    os.chdir("../src")
+    
+    # write neural network
+    network_filename = "../network.nnet"
+    net = g.q_network.ff_net
+    layers = [layer for layer in net]
+    print(layers)
+    to_numpy = lambda x: x.detach().cpu().numpy()
+    input_dim = emb_dim * 2
+    input_mins = list(np.zeros(input_dim) - 10e6)
+    input_maxes = list(np.zeros(input_dim) + 10e6)
+    means = list(np.zeros(input_dim)) + [0.]
+    ranges = list(np.zeros(input_dim)) + [1.]
+    writeNNet([to_numpy(layers[0].weight), to_numpy(layers[2].weight), to_numpy(layers[4].weight)],
+              [to_numpy(layers[0].bias), to_numpy(layers[2].bias), to_numpy(layers[4].bias)],
+              input_mins, input_maxes, means, ranges, "../network.nnet")
+    
+    # write the property to be verified
+    # so far, just dummy constraints on the input and the outputs
+    property_filename = "../property.txt"
+    eps = 1.989
+    center = 0.0
+    logit_min = -1.123
+    logit_max = 1.123
+    with open(property_filename, "w") as f:
+        for i in range(input_dim):
+            f.write(f"x{i} >= {center - eps}{os.linesep}")
+            f.write(f"x{i} <= {center + eps}{os.linesep}")
+        f.write(f"y0 >= {logit_min}{os.linesep}")
+        f.write(f"y0 <= {logit_max}{os.linesep}")
+    
+    # TODO for a counetrexample, compare the output of the tool with the output of the NN
+    
+    # call Marabou
+    import subprocess
+    #os.system(f"../../Marabou/build/Marabou {network_filename} {property_filename}")
+    command = [args.marabou_path, network_filename, property_filename]
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    lines = []
+    while process.poll() is None:
+        line = process.stdout.readline().decode("utf-8")
+        lines += [line]
+        print(line, end="")
+    line = process.stdout.read().decode("utf-8")
+    lines += [line]
+    print(line)
+    process.stdout.close()
+    
+    # construct counterexample
+    xs = np.zeros(input_dim) + np.nan
+    y = None
+    for line in lines:
+        tokens = line.strip().split(" = ")
+        if len(tokens) == 2:
+            #print(tokens)
+            value = float(tokens[1])
+            if tokens[0].startswith("x"):
+                xs[int(tokens[0][1:])] = value
+            elif tokens[0] == "y0":
+                y = value
+    assert (y is None) == np.isnan(xs).any(), f"Problems with reading a counterexample (xs={xs}, y={y})!"
+    if y is not None:
+        with torch.no_grad():
+            actual_output = net(Util.conditional_to_cuda(torch.tensor(xs)))
+        print(f"counterexample: NN({list(xs)}) = {y} [cross-check: {actual_output.item()}]")
+    else:
+        print("no counterexample")
+    
+
 elif args.command == "q_adversarial":
     plot_index = 0
     for sink in g.sinks:
