@@ -93,7 +93,11 @@ class Util(ABC):
     @staticmethod
     def smooth(p, alpha: float):
         # smoothing to get rid of 0 and 1 probabilities that lead to saturated gradients
-        return (1 - alpha) * p  + alpha / 2
+        return (1 - alpha) * p + alpha / 2
+    
+    @staticmethod
+    def unsmooth(p, alpha: float):
+        return (p - alpha / 2) / (1 - alpha)
 
     @staticmethod
     def q_values_to_first_probability(qs: torch.tensor, temperature: float, alpha: float) -> torch.tensor:

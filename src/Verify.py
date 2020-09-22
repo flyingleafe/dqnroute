@@ -8,6 +8,7 @@ from typing import *
 from collections import OrderedDict
 
 import numpy as np
+import scipy
 import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
@@ -56,6 +57,8 @@ parser.add_argument("--input_eps_l_inf", type=float, default=0.1,
                     help="maximum L-infty not discrepancy of input embeddings in adversarial robustness verification (default: 0.1)")
 parser.add_argument("--output_max_delta_q", type=float, default=10.0,
                     help="maximum ΔQ in adversarial robustness verification (default: 10.0)")
+parser.add_argument("--output_max_delta_p", type=float, default=0.1,
+                    help="maximum Δp in adversarial robustness verification (default: 0.1)")
 
 parser.add_argument("--pretrain_num_episodes", type=int, default=10000,
                     help="pretrain_num_episodes (default: 10000)")
@@ -386,9 +389,7 @@ elif args.command == "embedding_adversarial_verification":
     network_filename = "../network.nnet"
     property_filename = "../property.txt"
     net = g.q_network.ff_net
-    nv = NNetVerifier(args.marabou_path, network_filename, property_filename, net)
-    layers = [layer for layer in net]
-    print(f"network: {layers}")
+    nv = NNetVerifier(args.marabou_path, network_filename, property_filename)
     
     for sink in g.sinks:
         ma = MarkovAnalyzer(g, sink, args.simple_path_cost, verbose=False)
@@ -406,32 +407,118 @@ elif args.command == "embedding_adversarial_verification":
                 emb_center = transform_embeddings(sink_embedding, current_embedding, neighbor_embedding)
                 with torch.no_grad():
                     actual_output = net(emb_center).item()
-                print(f"  computation on real embedding: NN({list_round(Util.to_numpy(emb_center.flatten()), 3)}) = {actual_output}")
+                print(f"  Q on real embedding: NN({list_round(Util.to_numpy(emb_center.flatten()), 3)}) = {actual_output}")
     
                 # two verification queries: check whether the output can be less than the bound
                 # then check whether it can be greater
-                falsified = False
-                for constraint in [f"y0 <= {actual_output - args.output_max_delta_q}",
-                                   f"y0 >= {actual_output + args.output_max_delta_q}"]:
-                    result = nv.verify_adv_robustness(
-                        [layers[0].weight, layers[2].weight, layers[4].weight],
-                        [layers[0].bias,   layers[2].bias,   layers[4].bias  ],
-                        emb_center.flatten(), args.input_eps_l_inf, [constraint]
-                    )
-                    falsified = falsified or not result
-                    if falsified:
-                        break
-                if not falsified:
-                    print("  no counterexample")
-        
+                nv.verify_adv_robustness(
+                    net,
+                    [net[0].weight, net[2].weight, net[4].weight],
+                    [net[0].bias,   net[2].bias,   net[4].bias  ],
+                    emb_center.flatten(), args.input_eps_l_inf,
+                    [f"y0 <= {actual_output - args.output_max_delta_q}",
+                     f"y0 >= {actual_output + args.output_max_delta_q}"],
+                    check_or=True
+                )
+            
         # for each non-trivial diverter, verify the stability of routing probability
         for diverter in ma.nontrivial_diverters:
-            print(f"Verifying probability stability for node={diverter} and sink={sink}...")
-            # TODO get current probability
-            #Util.q_values_to_first_probability
+            print(f"Verifying the stability of routing probability for node={diverter} and sink={sink}...")
+            current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(diverter, sink)
+            # the first halves of these vectors are equal:
+            embs_center = [transform_embeddings(sink_embedding, current_embedding, neighbor_embedding)
+                           for neighbor_embedding in neighbor_embeddings]
+            #print(embs_center[1] - embs_center[0])
+            emb_center = torch.cat((embs_center[0], embs_center[1][:, emb_dim:]), dim=1)
             
-            # TODO verify accounting for probability smoothing
-
+            # get current probability
+            q_values = g.q_forward(current_embedding, sink_embedding.repeat(2, 1),
+                                   torch.cat(neighbor_embeddings)).flatten()
+            p = Util.q_values_to_first_probability(q_values, args.softmax_temperature,
+                                                   args.probability_smoothing).item()
+            def to_q_diff(p: float) -> float:
+                unsmoothed = Util.unsmooth(p, args.probability_smoothing)
+                eps = 1e-9
+                if unsmoothed <= eps:
+                    return -np.infty
+                if unsmoothed > 1 - eps:
+                    return np.infty
+                return scipy.special.logit(unsmoothed) * args.softmax_temperature
+            
+            q_diff_min = to_q_diff(p - args.output_max_delta_p)
+            q_diff_max = to_q_diff(p + args.output_max_delta_p)
+            
+            print(f"  Q values: {Util.to_numpy(q_values)}")
+            print(f"  p on real embedding: {p}")
+            print(f"  checking whether p is in [{p - args.output_max_delta_p}, {p + args.output_max_delta_p}]")
+            print(f"  checking whether the difference of Qs of two neighbors is in [{q_diff_min}, {q_diff_max}]")
+            
+            cases_to_check = []
+            if q_diff_min != -np.infty:
+                cases_to_check += [f"+y0 -y1 <= {q_diff_min}"]
+            if q_diff_max !=  np.infty:
+                cases_to_check += [f"+y0 -y1 >= {q_diff_max}"]
+            print(f"  cases to check: {cases_to_check}")
+            
+            """
+            Emulate computations for two neighbors simultaneously.
+            (All embeddings here are assumed to be shifted by the current embedding.)
+            
+            Computation of the first hidden layer for nbr1:
+              (A11 A12) (e_sink) + (a1)
+              (A21 A22) (e_nbr1)   (a2)
+            Computation of the first hidden layer for nbr2:
+              (A11 A12) (e_sink) + (a1)
+              (A21 A22) (e_nbr2)   (a2)
+            Computing both while using single e_sink:
+              (A11 A12 0) (e_sink)   (a1)
+              (A21 A22 0) (e_nbr1) + (a2)
+              (A11 0 A12) (e_nbr2)   (a1)
+              (A21 0 A22)            (a2)
+            
+            Other matrices will just be block diagonal.
+            """
+            with torch.no_grad():
+                A, B, C = net[0].weight, net[2].weight, net[4].weight
+                a, b, c = net[0].bias,   net[2].bias,   net[4].bias
+                A11 = A[:A.shape[0]//2,  :A.shape[1]//2 ]
+                A12 = A[:A.shape[0]//2,   A.shape[1]//2:]
+                A21 = A[ A.shape[0]//2:, :A.shape[1]//2 ]
+                A22 = A[ A.shape[0]//2:,  A.shape[1]//2:]
+                O = A11 * 0
+                A_new = torch.cat((torch.cat((A11, A12, O), dim=1),
+                                   torch.cat((A21, A22, O), dim=1),
+                                   torch.cat((A11, O, A12), dim=1),
+                                   torch.cat((A21, O, A22), dim=1)), dim=0)
+                O = B * 0
+                B_new = torch.cat((torch.cat((B, O), dim=1),
+                                   torch.cat((O, B), dim=1)), dim=0)
+                O = C * 0
+                C_new = torch.cat((torch.cat((C, O), dim=1),
+                                   torch.cat((O, C), dim=1)), dim=0)
+                a_new = torch.cat((a, a), dim=0)
+                b_new = torch.cat((b, b), dim=0)
+                c_new = torch.cat((c, c), dim=0)
+        
+            def to_torch_linear(weight, bias):
+                m = torch.nn.Linear(*weight.shape)
+                m.weight = torch.nn.Parameter(weight)
+                m.bias = torch.nn.Parameter(bias)
+                return m
+        
+            # merely to compute the ouput independently, not using the verification tool:
+            net_new = torch.nn.Sequential(
+                to_torch_linear(A_new, a_new),
+                torch.nn.ReLU(),
+                to_torch_linear(B_new, b_new),
+                torch.nn.ReLU(),
+                to_torch_linear(C_new, c_new),
+            )
+            
+            nv.verify_adv_robustness(
+                net_new, [A_new, B_new, C_new], [a_new, b_new, c_new], emb_center.flatten(),
+                args.input_eps_l_inf, cases_to_check, check_or=True
+            )
 elif args.command == "q_adversarial":
     plot_index = 0
     for sink in g.sinks:
