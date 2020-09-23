@@ -106,3 +106,10 @@ class Util(ABC):
     @staticmethod
     def to_numpy(x: torch.tensor) -> np.ndarray:
         return x.detach().cpu().numpy()
+
+    @staticmethod
+    def to_torch_linear(weight: torch.tensor, bias: torch.tensor) -> torch.nn.Linear:
+        m = torch.nn.Linear(*weight.shape)
+        m.weight = torch.nn.Parameter(weight)
+        m.bias = torch.nn.Parameter(bias)
+        return m

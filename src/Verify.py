@@ -388,8 +388,59 @@ elif args.command == "embedding_adversarial_verification":
     list_round = lambda x, digits: [round(y, digits) for y in x]
     network_filename = "../network.nnet"
     property_filename = "../property.txt"
-    net = g.q_network.ff_net
+    
     nv = NNetVerifier(args.marabou_path, network_filename, property_filename)
+    
+    """
+    Emulate computations for two neighbors simultaneously.
+    (All embeddings here are assumed to be shifted by the current embedding.)
+    
+    Computation of the first hidden layer for nbr1:
+        (A11 A12) (e_sink) + (a1)
+        (A21 A22) (e_nbr1)   (a2)
+    Computation of the first hidden layer for nbr2:
+        (A11 A12) (e_sink) + (a1)
+        (A21 A22) (e_nbr2)   (a2)
+    Computing both while using single e_sink:
+        (A11 A12 0) (e_sink)   (a1)
+        (A21 A22 0) (e_nbr1) + (a2)
+        (A11 0 A12) (e_nbr2)   (a1)
+        (A21 0 A22)            (a2)
+    
+    Other matrices will just be block diagonal.
+    """
+    
+    net = g.q_network.ff_net
+    with torch.no_grad():
+        A, B, C = net[0].weight, net[2].weight, net[4].weight
+        a, b, c = net[0].bias,   net[2].bias,   net[4].bias
+        A11 = A[:A.shape[0]//2,  :A.shape[1]//2 ]
+        A12 = A[:A.shape[0]//2,   A.shape[1]//2:]
+        A21 = A[ A.shape[0]//2:, :A.shape[1]//2 ]
+        A22 = A[ A.shape[0]//2:,  A.shape[1]//2:]
+        O = A11 * 0
+        A_new = torch.cat((torch.cat((A11, A12, O), dim=1),
+                           torch.cat((A21, A22, O), dim=1),
+                           torch.cat((A11, O, A12), dim=1),
+                           torch.cat((A21, O, A22), dim=1)), dim=0)
+        O = B * 0
+        B_new = torch.cat((torch.cat((B, O), dim=1),
+                           torch.cat((O, B), dim=1)), dim=0)
+        O = C * 0
+        C_new = torch.cat((torch.cat((C, O), dim=1),
+                           torch.cat((O, C), dim=1)), dim=0)
+        a_new = torch.cat((a, a), dim=0)
+        b_new = torch.cat((b, b), dim=0)
+        c_new = torch.cat((c, c), dim=0)
+        
+        # merely to compute the ouput independently, not using the verification tool:
+        net_new = torch.nn.Sequential(
+            Util.to_torch_linear(A_new, a_new),
+            torch.nn.ReLU(),
+            Util.to_torch_linear(B_new, b_new),
+            torch.nn.ReLU(),
+            Util.to_torch_linear(C_new, c_new),
+        )
     
     for sink in g.sinks:
         ma = MarkovAnalyzer(g, sink, args.simple_path_cost, verbose=False)
@@ -409,12 +460,11 @@ elif args.command == "embedding_adversarial_verification":
                     actual_output = net(emb_center).item()
                 print(f"  Q on real embedding: NN({list_round(Util.to_numpy(emb_center.flatten()), 3)}) = {actual_output}")
     
-                # two verification queries: check whether the output can be less than the bound
+                # two verification queries: 
+                # check whether the output can be less than the bound,
                 # then check whether it can be greater
                 nv.verify_adv_robustness(
-                    net,
-                    [net[0].weight, net[2].weight, net[4].weight],
-                    [net[0].bias,   net[2].bias,   net[4].bias  ],
+                    net, [A, B, C], [a, b, c],
                     emb_center.flatten(), args.input_eps_l_inf,
                     [f"y0 <= {actual_output - args.output_max_delta_q}",
                      f"y0 >= {actual_output + args.output_max_delta_q}"],
@@ -459,61 +509,6 @@ elif args.command == "embedding_adversarial_verification":
             if q_diff_max !=  np.infty:
                 cases_to_check += [f"+y0 -y1 >= {q_diff_max}"]
             print(f"  cases to check: {cases_to_check}")
-            
-            """
-            Emulate computations for two neighbors simultaneously.
-            (All embeddings here are assumed to be shifted by the current embedding.)
-            
-            Computation of the first hidden layer for nbr1:
-              (A11 A12) (e_sink) + (a1)
-              (A21 A22) (e_nbr1)   (a2)
-            Computation of the first hidden layer for nbr2:
-              (A11 A12) (e_sink) + (a1)
-              (A21 A22) (e_nbr2)   (a2)
-            Computing both while using single e_sink:
-              (A11 A12 0) (e_sink)   (a1)
-              (A21 A22 0) (e_nbr1) + (a2)
-              (A11 0 A12) (e_nbr2)   (a1)
-              (A21 0 A22)            (a2)
-            
-            Other matrices will just be block diagonal.
-            """
-            with torch.no_grad():
-                A, B, C = net[0].weight, net[2].weight, net[4].weight
-                a, b, c = net[0].bias,   net[2].bias,   net[4].bias
-                A11 = A[:A.shape[0]//2,  :A.shape[1]//2 ]
-                A12 = A[:A.shape[0]//2,   A.shape[1]//2:]
-                A21 = A[ A.shape[0]//2:, :A.shape[1]//2 ]
-                A22 = A[ A.shape[0]//2:,  A.shape[1]//2:]
-                O = A11 * 0
-                A_new = torch.cat((torch.cat((A11, A12, O), dim=1),
-                                   torch.cat((A21, A22, O), dim=1),
-                                   torch.cat((A11, O, A12), dim=1),
-                                   torch.cat((A21, O, A22), dim=1)), dim=0)
-                O = B * 0
-                B_new = torch.cat((torch.cat((B, O), dim=1),
-                                   torch.cat((O, B), dim=1)), dim=0)
-                O = C * 0
-                C_new = torch.cat((torch.cat((C, O), dim=1),
-                                   torch.cat((O, C), dim=1)), dim=0)
-                a_new = torch.cat((a, a), dim=0)
-                b_new = torch.cat((b, b), dim=0)
-                c_new = torch.cat((c, c), dim=0)
-        
-            def to_torch_linear(weight, bias):
-                m = torch.nn.Linear(*weight.shape)
-                m.weight = torch.nn.Parameter(weight)
-                m.bias = torch.nn.Parameter(bias)
-                return m
-        
-            # merely to compute the ouput independently, not using the verification tool:
-            net_new = torch.nn.Sequential(
-                to_torch_linear(A_new, a_new),
-                torch.nn.ReLU(),
-                to_torch_linear(B_new, b_new),
-                torch.nn.ReLU(),
-                to_torch_linear(C_new, c_new),
-            )
             
             nv.verify_adv_robustness(
                 net_new, [A_new, B_new, C_new], [a_new, b_new, c_new], emb_center.flatten(),
