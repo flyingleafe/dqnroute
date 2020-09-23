@@ -32,7 +32,7 @@ The implemented features are:
 
 ## Dependencies
 
-Python package dependencies are in [requirements.txt](/requirements.txt). You can get simpy from [here](https://pypi.org/project/simpy/). Note that simpy and sympy are completely different packages, and both are needed. Pygraphviz: for [Linux/Mac](https://anaconda.org/anaconda/pygraphviz), [for Windows](https://anaconda.org/alubbock/pygraphviz).
+Python package dependencies are in [requirements.txt](/requirements.txt). You can get simpy from [here](https://pypi.org/project/simpy/). Note that simpy and sympy are completely different packages, and both are needed. Pygraphviz: [for Linux/Mac](https://anaconda.org/anaconda/pygraphviz), [for Windows](https://anaconda.org/alubbock/pygraphviz).
 
 To use the "embedding_adversarial_verification" command of Verify.py, you need to install [Marabou](https://github.com/NeuralNetworkVerification/Marabou). Marabou is executed as a process and you need to pass the path to the executable as a command line argument --marabou_path.
 
