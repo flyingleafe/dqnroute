@@ -30,6 +30,8 @@ The implemented features are:
 * Command "q_adversarial": visualization of the changes on delivery time when the network is altered by a single gradient descent step performed in a particular combination of nodes.
 * Command "q_adversarial_lipschitz": verification that the delivery time in the aforementioned circumstances does not exceed the provided bound. Verification is implemented through the estimation of Lipschitz constants of scalar-input functions.
 
+Refer to [the slides](/rl_verif.pdf) for more information.
+
 ## Dependencies
 
 Python package dependencies are in [requirements.txt](/requirements.txt). You can get simpy from [here](https://pypi.org/project/simpy/). Note that simpy and sympy are completely different packages, and both are needed. Pygraphviz: [for Linux/Mac](https://anaconda.org/anaconda/pygraphviz), [for Windows](https://anaconda.org/alubbock/pygraphviz).
