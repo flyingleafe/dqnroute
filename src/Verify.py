@@ -293,6 +293,50 @@ def transform_embeddings(sink_embedding: torch.tensor, current_embedding: torch.
     return torch.cat((sink_embedding - current_embedding,
                       neighbor_embedding - current_embedding), dim=1)
 
+def create_blocks():
+    """
+    During formal verification, emulate computations for two neighbors simultaneously
+    All embeddings here are assumed to be shifted by the current embedding.
+    
+    Computation of the first hidden layer for nbr1:
+        (A11 A12) (e_sink) + (a1)
+        (A21 A22) (e_nbr1)   (a2)
+    Computation of the first hidden layer for nbr2:
+        (A11 A12) (e_sink) + (a1)
+        (A21 A22) (e_nbr2)   (a2)
+    Computing both while using single e_sink:
+        (A11 A12 0) (e_sink)   (a1)
+        (A21 A22 0) (e_nbr1) + (a2)
+        (A11 0 A12) (e_nbr2)   (a1)
+        (A21 0 A22)            (a2)
+    
+    Other matrices will just be block diagonal.
+    """
+    
+    net = g.q_network.ff_net
+    with torch.no_grad():
+        A, B, C = net[0].weight, net[2].weight, net[4].weight
+        a, b, c = net[0].bias,   net[2].bias,   net[4].bias
+        A11 = A[:A.shape[0]//2,  :A.shape[1]//2 ]
+        A12 = A[:A.shape[0]//2,   A.shape[1]//2:]
+        A21 = A[ A.shape[0]//2:, :A.shape[1]//2 ]
+        A22 = A[ A.shape[0]//2:,  A.shape[1]//2:]
+        O = A11 * 0
+        A_new = torch.cat((torch.cat((A11, A12, O), dim=1),
+                           torch.cat((A21, A22, O), dim=1),
+                           torch.cat((A11, O, A12), dim=1),
+                           torch.cat((A21, O, A22), dim=1)), dim=0)
+        B_new = Util.make_block_diagonal(B, 2)
+        C_new = Util.make_block_diagonal(C, 2)
+        a_new = torch.cat((a,) * 2, dim=0)
+        b_new = torch.cat((b,) * 2, dim=0)
+        c_new = torch.cat((c,) * 2, dim=0)
+        
+        # merely to compute the output independently, not using the verification tool:
+        net_new = Util.to_torch_relu_nn([A_new, B_new, C_new], [a_new, b_new, c_new])
+        return A_new, B_new, C_new, a_new, b_new, c_new, net_new
+    
+
 print(f"Running command {args.command}...")
 if args.command == "deterministic_test":
     for source in g.sources:
@@ -331,7 +375,7 @@ elif args.command == "embedding_adversarial_search":
     adv = PGDAdversary(rho=1.5, steps=100, step_size=0.02, random_start=True, stop_loss=1e5, verbose=2,
                        norm="scaled_l_2", n_repeat=2, repeat_mode="min", dtype=torch.float64)
     for sink in g.sinks:
-        print(f"Measuring robustness of delivery to {sink}...")
+        print(f"Measuring adversarial robustness of delivery to {sink}...")
         ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
         sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
         # gather all embeddings that we need to compute the objective
@@ -351,7 +395,7 @@ elif args.command == "embedding_adversarial_search":
         initial_vector = pack_embeddings(stored_embeddings)
 
         for source in ma.reachable_sources:
-            print(f"  Measuring robustness of delivery from {source} to {sink}...")
+            print(f"  Measuring adversarial robustness of delivery from {source} to {sink}...")
             objective, lambdified_objective = ma.get_objective(source)
 
             def get_gradient(x: torch.tensor) -> Tuple[torch.tensor, float, str]:
@@ -382,65 +426,82 @@ elif args.command == "embedding_adversarial_search":
                                       for param, value in zip(ma.params, objective_inputs)])
                 return x.grad, objective_value.item(), f"[{aux_info}]"
             adv.perturb(initial_vector, get_gradient)
+elif args.command == "embedding_adversarial_full_verification":
+    assert args.marabou_path is not None, "It is mandatory to specify --verification_marabou_path for command embedding_adversarial_verification."
+    
+    list_round = lambda x, digits: [round(y, digits) for y in x]
+    network_filename, property_filename = "../network.nnet", "../property.txt"
+    nv = NNetVerifier(args.marabou_path, network_filename, property_filename)
+    A_new, B_new, C_new, a_new, b_new, c_new, _ = create_blocks()
+    
+    for sink in g.sinks:
+        print(f"Verifying adversarial robustness of delivery to {sink}...")
+        ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
+        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
+        # gather all embeddings that we need to compute the objective
+        stored_embeddings = OrderedDict({sink: sink_embedding})
+        for node_key in ma.reachable_nodes:
+            stored_embeddings[node_key], _, _ = g.node_to_embeddings(node_key, sink)
+        
+        # we also need the indices of all nodes in this embedding storage
+        node_key_to_index = {key: i for i, key in enumerate(stored_embeddings.keys())}
+        assert node_key_to_index[sink] == 0
+            
+        def pack_embeddings(embedding_dict: OrderedDict) -> torch.tensor:
+            return torch.cat(tuple(embedding_dict.values())).flatten()
+
+        initial_vector = pack_embeddings(stored_embeddings)
+
+        n = len(stored_embeddings)
+        m = len(ma.params)
+        print(f"Number of embeddings: {n}, number of the probabilities: {m}")
+        I = Util.conditional_to_cuda(torch.tensor(np.identity(emb_dim), dtype=torch.float64))
+        O = I * 0
+        
+        # STAGE 1: create a matrix that transforms all (unshifted) embeddings
+        # to groups of shifted embeddings (sink, nbr1, nbr2) for each probability
+            
+        emb_conversion = Util.conditional_to_cuda(torch.zeros(emb_dim * 3 * m, emb_dim * n, dtype=torch.float64))
+                                                                
+        for prob_index, diverter_key in enumerate(ma.nontrivial_diverters):
+            _, neighbors, _ = g.node_to_embeddings(diverter_key, sink)
+                
+            # fill the next (emb_dim * 3) rows of the matrix
+            #   fill with I for the sink and neighbors
+            #   fill with -I for the current node (to subtract its embedding)
+                
+            # sink embedding, neighbor 1 embedding, neighbor 2 embedding:
+            for k, key in enumerate([sink] + neighbors):
+                Util.fill_block(emb_conversion, 3 * prob_index + k, node_key_to_index[key], I)
+                # shift the embedding by the current one:
+                Util.fill_block(emb_conversion, 3 * prob_index + k, node_key_to_index[diverter_key], -I)
+            
+        #for line in emb_conversion.astype(np.int32):
+        #    print("".join([str(x) for x in line]).replace("-1", "X"))
+        
+        for source in ma.reachable_sources:
+            print(f"  Verifying adversarial robustness of delivery from {source} to {sink}...")
+            objective, lambdified_objective = ma.get_objective(source)
+        
+        # STAGE 2: create matrices for each probability from blocks
+        # then multiply this matrix by the previous one
+        
+        A_large = Util.make_block_diagonal(A_new, m)
+        A_large = A_large @ emb_conversion
+        B_large = Util.make_block_diagonal(B_new, m)
+        C_large = Util.make_block_diagonal(C_new, m)
+        a_large = torch.cat((a_new,) * m, dim=0)
+        b_large = torch.cat((b_new,) * m, dim=0)
+        c_large = torch.cat((c_new,) * m, dim=0)
+
+    
 elif args.command == "embedding_adversarial_verification":
     assert args.marabou_path is not None, "It is mandatory to specify --verification_marabou_path for command embedding_adversarial_verification."
     
     list_round = lambda x, digits: [round(y, digits) for y in x]
-    network_filename = "../network.nnet"
-    property_filename = "../property.txt"
-    
+    network_filename, property_filename = "../network.nnet", "../property.txt"
     nv = NNetVerifier(args.marabou_path, network_filename, property_filename)
-    
-    """
-    Emulate computations for two neighbors simultaneously.
-    (All embeddings here are assumed to be shifted by the current embedding.)
-    
-    Computation of the first hidden layer for nbr1:
-        (A11 A12) (e_sink) + (a1)
-        (A21 A22) (e_nbr1)   (a2)
-    Computation of the first hidden layer for nbr2:
-        (A11 A12) (e_sink) + (a1)
-        (A21 A22) (e_nbr2)   (a2)
-    Computing both while using single e_sink:
-        (A11 A12 0) (e_sink)   (a1)
-        (A21 A22 0) (e_nbr1) + (a2)
-        (A11 0 A12) (e_nbr2)   (a1)
-        (A21 0 A22)            (a2)
-    
-    Other matrices will just be block diagonal.
-    """
-    
-    net = g.q_network.ff_net
-    with torch.no_grad():
-        A, B, C = net[0].weight, net[2].weight, net[4].weight
-        a, b, c = net[0].bias,   net[2].bias,   net[4].bias
-        A11 = A[:A.shape[0]//2,  :A.shape[1]//2 ]
-        A12 = A[:A.shape[0]//2,   A.shape[1]//2:]
-        A21 = A[ A.shape[0]//2:, :A.shape[1]//2 ]
-        A22 = A[ A.shape[0]//2:,  A.shape[1]//2:]
-        O = A11 * 0
-        A_new = torch.cat((torch.cat((A11, A12, O), dim=1),
-                           torch.cat((A21, A22, O), dim=1),
-                           torch.cat((A11, O, A12), dim=1),
-                           torch.cat((A21, O, A22), dim=1)), dim=0)
-        O = B * 0
-        B_new = torch.cat((torch.cat((B, O), dim=1),
-                           torch.cat((O, B), dim=1)), dim=0)
-        O = C * 0
-        C_new = torch.cat((torch.cat((C, O), dim=1),
-                           torch.cat((O, C), dim=1)), dim=0)
-        a_new = torch.cat((a, a), dim=0)
-        b_new = torch.cat((b, b), dim=0)
-        c_new = torch.cat((c, c), dim=0)
-        
-        # merely to compute the ouput independently, not using the verification tool:
-        net_new = torch.nn.Sequential(
-            Util.to_torch_linear(A_new, a_new),
-            torch.nn.ReLU(),
-            Util.to_torch_linear(B_new, b_new),
-            torch.nn.ReLU(),
-            Util.to_torch_linear(C_new, c_new),
-        )
+    A_new, B_new, C_new, a_new, b_new, c_new, net_new = create_blocks()
     
     for sink in g.sinks:
         ma = MarkovAnalyzer(g, sink, args.simple_path_cost, verbose=False)

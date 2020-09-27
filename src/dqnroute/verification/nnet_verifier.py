@@ -9,9 +9,9 @@ import torch
 
 from .ml_util import Util
 
-os.chdir("../NNet")
+import sys
+sys.path.append("../NNet")
 from utils.writeNNet import writeNNet
-os.chdir("../src")
 
 class NNetVerifier:
     def __init__(self, marabou_path: str, network_filename: str, property_filename: str):

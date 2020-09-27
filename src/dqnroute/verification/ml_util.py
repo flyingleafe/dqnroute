@@ -113,3 +113,29 @@ class Util(ABC):
         m.weight = torch.nn.Parameter(weight)
         m.bias = torch.nn.Parameter(bias)
         return m
+    
+    @staticmethod
+    def to_torch_relu_nn(weights: List[torch.tensor], biases: List[torch.tensor]) -> torch.nn.Sequential:
+        assert len(weights) == len(biases)
+        modules = []
+        for w, b in zip(weights, biases):
+            modules += [Util.to_torch_linear(w, b), torch.nn.ReLU()]
+        modules = modules[:-1]
+        return torch.nn.Sequential(*modules)
+    
+    @staticmethod
+    def fill_block(m: torch.tensor, i: int, j: int, target: torch.tensor):
+        start_row, end_row = target.shape[0] * i, target.shape[1] * (i + 1)
+        start_col, end_col = target.shape[0] * j, target.shape[1] * (j + 1)
+        m[start_row:end_row, start_col:end_col] = target
+        
+    @staticmethod
+    def make_block_diagonal(block: torch.tensor, times: int) -> torch.tensor:
+        O = block * 0
+        blocks = np.empty((times, times), dtype=object)
+        for i in range(times):
+            for j in range(times):
+                blocks[i, j] = block if i == j else O
+        blocks = [torch.cat(tuple(line), dim=1) for line in blocks]
+        return torch.cat(tuple(blocks), dim=0)
+    
