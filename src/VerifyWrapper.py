@@ -11,7 +11,7 @@ config = ("tarau2010.yaml", 4.5, 100000)                       # Fictitious grap
 
 #command, command_args = "deterministic_test", ""
 #command, command_args = "embedding_adversarial_search", ""
-#command, command_args = "embedding_adversarial_verification", "--marabou_path ../../Marabou/build/Marabou --output_max_delta_q 3.6 --input_eps_l_inf 0.1 --output_max_delta_p 0.00001"
+#command, command_args = "embedding_adversarial_full_verification", "--marabou_path ../../Marabou/build/Marabou --output_max_delta_q 3.6 --input_eps_l_inf 0.1 --output_max_delta_p 0.00001"
 #command, command_args = "q_adversarial", ""
 #command, command_args = "q_adversarial_lipschitz", ""
 command, command_args = "compare", ""

@@ -293,6 +293,9 @@ def transform_embeddings(sink_embedding: torch.tensor, current_embedding: torch.
     return torch.cat((sink_embedding - current_embedding,
                       neighbor_embedding - current_embedding), dim=1)
 
+def check_marabou():
+    assert args.marabou_path is not None, "It is mandatory to specify --verification_marabou_path for command embedding_adversarial_verification."
+
 def create_blocks():
     """
     During formal verification, emulate computations for two neighbors simultaneously
@@ -427,8 +430,7 @@ elif args.command == "embedding_adversarial_search":
                 return x.grad, objective_value.item(), f"[{aux_info}]"
             adv.perturb(initial_vector, get_gradient)
 elif args.command == "embedding_adversarial_full_verification":
-    assert args.marabou_path is not None, "It is mandatory to specify --verification_marabou_path for command embedding_adversarial_verification."
-    
+    check_marabou()
     list_round = lambda x, digits: [round(y, digits) for y in x]
     network_filename, property_filename = "../network.nnet", "../property.txt"
     nv = NNetVerifier(args.marabou_path, network_filename, property_filename)
@@ -450,13 +452,12 @@ elif args.command == "embedding_adversarial_full_verification":
         def pack_embeddings(embedding_dict: OrderedDict) -> torch.tensor:
             return torch.cat(tuple(embedding_dict.values())).flatten()
 
-        initial_vector = pack_embeddings(stored_embeddings)
+        emb_center = pack_embeddings(stored_embeddings)
 
         n = len(stored_embeddings)
         m = len(ma.params)
         print(f"Number of embeddings: {n}, number of the probabilities: {m}")
         I = Util.conditional_to_cuda(torch.tensor(np.identity(emb_dim), dtype=torch.float64))
-        O = I * 0
         
         # STAGE 1: create a matrix that transforms all (unshifted) embeddings
         # to groups of shifted embeddings (sink, nbr1, nbr2) for each probability
@@ -493,11 +494,22 @@ elif args.command == "embedding_adversarial_full_verification":
         a_large = torch.cat((a_new,) * m, dim=0)
         b_large = torch.cat((b_new,) * m, dim=0)
         c_large = torch.cat((c_new,) * m, dim=0)
+        net_large = Util.to_torch_relu_nn([A_large, B_large, C_large], [a_large, b_large, c_large])
+        
+        # TODO replace with real constraints
+        output_constraints = []
+        for prob_index in range(n):
+            output_constraints += [f"+y{2 * prob_index} -y{2 * prob_index + 1} <= 0.1"]
+            output_constraints += [f"+y{2 * prob_index} -y{2 * prob_index + 1} >= -0.1"]
+        
+        nv.verify_adv_robustness(
+            net_large, [A_large, B_large, C_large], [a_large, b_large, c_large],
+            emb_center.flatten(), args.input_eps_l_inf,
+            output_constraints, check_or=False
+        )
 
-    
 elif args.command == "embedding_adversarial_verification":
-    assert args.marabou_path is not None, "It is mandatory to specify --verification_marabou_path for command embedding_adversarial_verification."
-    
+    check_marabou()
     list_round = lambda x, digits: [round(y, digits) for y in x]
     network_filename, property_filename = "../network.nnet", "../property.txt"
     nv = NNetVerifier(args.marabou_path, network_filename, property_filename)
