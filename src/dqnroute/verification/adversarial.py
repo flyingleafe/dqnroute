@@ -14,8 +14,8 @@ class Adversary(ABC):
     """
     
     @abstractmethod
-    def perturb(self, initial_vector: torch.tensor,
-                get_gradient: Callable[[torch.tensor], Tuple[torch.tensor, float]]) -> torch.tensor:
+    def perturb(self, initial_vector: torch.Tensor,
+                get_gradient: Callable[[torch.Tensor], Tuple[torch.Tensor, float]]) -> torch.Tensor:
         """
         Perturb the given vector. 
         :param initial_vector: initial vector. If this is the original image representation, it must be flattened
@@ -70,13 +70,13 @@ class PGDAdversary(Adversary):
         self.shrinking_repeats = repeat_mode == "min"
         self.dtype = dtype
     
-    def norm_(self, x: torch.tensor) -> float:
+    def norm_(self, x: torch.Tensor) -> float:
         """
         (Possibly scaled) norm of x.
         """
         return x.norm(np.infty if self.inf_norm else 2).item() / (np.sqrt(x.numel()) if self.scale_norm else 1)
     
-    def normalize_gradient_(self, x: torch.tensor) -> torch.tensor:
+    def normalize_gradient_(self, x: torch.Tensor) -> torch.Tensor:
         """
         Normalizes the vector of gradients.
         In the L2 space, this is done by dividing the vector by its norm.
@@ -90,7 +90,7 @@ class PGDAdversary(Adversary):
                 return x * 0
             return x / norm
     
-    def project_(self, x: torch.tensor, rho: float) -> torch.tensor:
+    def project_(self, x: torch.Tensor, rho: float) -> torch.Tensor:
         """
         Projects the vector onto the rho-ball.
         In the L2 space, this is done by scaling the vector.
@@ -98,8 +98,8 @@ class PGDAdversary(Adversary):
         """
         return x.clamp(-rho, rho) if self.inf_norm else (x / self.norm_(x) * rho)
     
-    def perturb(self, initial_vector: torch.tensor,
-                get_gradient: Callable[[torch.tensor], Tuple[torch.tensor, float, object]]) -> torch.tensor:
+    def perturb(self, initial_vector: torch.Tensor,
+                get_gradient: Callable[[torch.Tensor], Tuple[torch.Tensor, float, object]]) -> torch.Tensor:
         #with torch.autograd.detect_anomaly():
         with contextlib.nullcontext():
             best_perturbation = None

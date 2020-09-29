@@ -28,7 +28,7 @@ class Util(ABC):
         pickle.dump(o, gzip.open(filename, "w"), pickle.HIGHEST_PROTOCOL)
         
     @staticmethod
-    def optimizable_clone(x: torch.tensor) -> torch.tensor:
+    def optimizable_clone(x: torch.Tensor) -> torch.Tensor:
         """
         Clones a PyTorch tensor and makes it suitable for optimization.
         :param x: input tensor.
@@ -47,7 +47,7 @@ class Util(ABC):
             p.requires_grad_(value)
     
     @staticmethod
-    def conditional_to_cuda(x: Union[torch.tensor, torch.nn.Module]) -> torch.tensor:
+    def conditional_to_cuda(x: Union[torch.Tensor, torch.nn.Module]) -> torch.Tensor:
         """
         Returns the tensor/module on GPU if there is at least 1 GPU, otherwise just returns the tensor.
         :param x: a PyTorch tensor or module.
@@ -80,7 +80,7 @@ class Util(ABC):
         torch.cuda.manual_seed_all(seed + 2)
         
     @staticmethod
-    def normalize_latent(x: torch.tensor):
+    def normalize_latent(x: torch.Tensor):
         """
         Divides each latent vector of a batch by its scaled Euclidean norm.
         :param x: batch of latent vectors.
@@ -100,7 +100,7 @@ class Util(ABC):
         return (p - alpha / 2) / (1 - alpha)
 
     @staticmethod
-    def q_values_to_first_probability(qs: torch.tensor, temperature: float, alpha: float) -> torch.tensor:
+    def q_values_to_first_probability(qs: torch.Tensor, temperature: float, alpha: float) -> torch.Tensor:
         return Util.smooth((qs / temperature).softmax(dim=0)[0], alpha)
     
     @staticmethod
@@ -108,14 +108,14 @@ class Util(ABC):
         return x.detach().cpu().numpy()
 
     @staticmethod
-    def to_torch_linear(weight: torch.tensor, bias: torch.tensor) -> torch.nn.Linear:
+    def to_torch_linear(weight: torch.Tensor, bias: torch.Tensor) -> torch.nn.Linear:
         m = torch.nn.Linear(*weight.shape)
         m.weight = torch.nn.Parameter(weight)
         m.bias = torch.nn.Parameter(bias)
         return m
     
     @staticmethod
-    def to_torch_relu_nn(weights: List[torch.tensor], biases: List[torch.tensor]) -> torch.nn.Sequential:
+    def to_torch_relu_nn(weights: List[torch.Tensor], biases: List[torch.Tensor]) -> torch.nn.Sequential:
         assert len(weights) == len(biases)
         modules = []
         for w, b in zip(weights, biases):
@@ -124,13 +124,13 @@ class Util(ABC):
         return torch.nn.Sequential(*modules)
     
     @staticmethod
-    def fill_block(m: torch.tensor, i: int, j: int, target: torch.tensor):
+    def fill_block(m: torch.Tensor, i: int, j: int, target: torch.Tensor):
         start_row, end_row = target.shape[0] * i, target.shape[1] * (i + 1)
         start_col, end_col = target.shape[0] * j, target.shape[1] * (j + 1)
         m[start_row:end_row, start_col:end_col] = target
         
     @staticmethod
-    def make_block_diagonal(block: torch.tensor, times: int) -> torch.tensor:
+    def make_block_diagonal(block: torch.Tensor, times: int) -> torch.Tensor:
         O = block * 0
         blocks = np.empty((times, times), dtype=object)
         for i in range(times):
@@ -138,4 +138,11 @@ class Util(ABC):
                 blocks[i, j] = block if i == j else O
         blocks = [torch.cat(tuple(line), dim=1) for line in blocks]
         return torch.cat(tuple(blocks), dim=0)
+    
+    @staticmethod
+    def list_round(x, digits: int) -> list:
+        if issubclass(type(x), torch.Tensor):
+            x = Util.to_numpy(x)
+        #print(x)
+        return [round(y, digits) for y in x]
     

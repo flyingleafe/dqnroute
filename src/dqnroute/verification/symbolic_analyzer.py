@@ -34,10 +34,10 @@ class SymbolicAnalyzer:
         self.A,     self.b,     self.C,     self.d,     self.E,     self.f     = tuple([None] * 6)
         self.A_hat, self.b_hat, self.C_hat, self.d_hat, self.E_hat, self.f_hat = tuple([None] * 6)
     
-    def tensor_to_sympy(self, x: torch.tensor) -> sympy.Matrix:
+    def tensor_to_sympy(self, x: torch.Tensor) -> sympy.Matrix:
         return sympy.Matrix(Util.to_numpy(x))
     
-    def _layer_to_sympy(self, x: torch.tensor) -> sympy.Matrix:
+    def _layer_to_sympy(self, x: torch.Tensor) -> sympy.Matrix:
         return self.tensor_to_sympy(x.weight), self.tensor_to_sympy(x.bias)
     
     def _layer_grad_to_sympy(self, x: torch.tensor) -> sympy.Matrix:
@@ -63,8 +63,8 @@ class SymbolicAnalyzer:
     #                        neighbor_embedding: torch.tensor):
     #    return self.g.q_forward(current_embedding, sink_embedding, neighbor_embedding).flatten().item()
     
-    def compute_gradients(self, curent_embedding: torch.tensor, sink_embedding: torch.tensor,
-                          neighbor_embedding: torch.tensor) -> torch.tensor:
+    def compute_gradients(self, curent_embedding: torch.Tensor, sink_embedding: torch.Tensor,
+                          neighbor_embedding: torch.tensor) -> torch.Tensor:
         opt = torch.optim.SGD(self.g.q_network.parameters(), lr=self.lr)
         opt.zero_grad()
         predicted_q = self.g.q_forward(curent_embedding, sink_embedding, neighbor_embedding).flatten()
@@ -79,8 +79,8 @@ class SymbolicAnalyzer:
                 param -= (-1 if reverse else 1) * self.lr * mse_gradient
     
     @torch.no_grad()
-    def compute_ps(self, ma: MarkovAnalyzer, diverter: AgentId, sink: AgentId, sink_embeddings: torch.tensor,
-                   predicted_q: torch.tensor, actual_q: torch.tensor):
+    def compute_ps(self, ma: MarkovAnalyzer, diverter: AgentId, sink: AgentId, sink_embeddings: torch.Tensor,
+                   predicted_q: torch.Tensor, actual_q: torch.Tensor) -> List[float]:
         ps = []
         self._gd_step(predicted_q, actual_q, False)
         for diverter in ma.nontrivial_diverters:

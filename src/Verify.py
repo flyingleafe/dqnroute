@@ -8,7 +8,6 @@ from typing import *
 from collections import OrderedDict
 
 import numpy as np
-import scipy
 import matplotlib.pyplot as plt
 import seaborn as sns
 import torch
@@ -23,6 +22,8 @@ from dqnroute.verification.markov_analyzer import MarkovAnalyzer
 from dqnroute.verification.symbolic_analyzer import SymbolicAnalyzer
 from dqnroute.verification.nnet_verifier import NNetVerifier
 
+NETWORK_FILENAME = "../network.nnet"
+PROPERTY_FILENAME = "../property.txt"
 
 parser = argparse.ArgumentParser(description="Verifier of baggage routing neural networks.")
 parser.add_argument("--command", type=str, required=True,
@@ -200,7 +201,7 @@ def pretrain(args, dir_with_models: str, pretrain_filename: str):
     #conveyor_network_ng_emb_ws_losses = qnetwork_pretrain(conveyor_network_ng_emb_ws, shuffle(data_conv), epochs=20,
     #                                                      embedding=conv_emb, save_net=False)
 
-dir_with_models = 'conveyor_test_ng'
+dir_with_models = "conveyor_test_ng"
 filename_suffix = f"_{emb_dim}_{graph_size}_{os.path.split(scenario)[1]}.bin"
 pretrain_filename = f"igor_pretrained{filename_suffix}"
 pretrain_path = Path(TORCH_MODELS_DIR) / dir_with_models / pretrain_filename
@@ -284,61 +285,24 @@ def visualize(g: RouterGraph):
 
 if not args.skip_graphviz:
     visualize(g)
-    
-sa = SymbolicAnalyzer(g, args.softmax_temperature, args.probability_smoothing,
-                      args.verification_lr, delta_q_max=args.input_max_delta_q)
 
-def transform_embeddings(sink_embedding: torch.tensor, current_embedding: torch.tensor,
-                         neighbor_embedding: torch.tensor) -> torch.tensor:
-    return torch.cat((sink_embedding - current_embedding,
+def transform_embeddings(sink_embedding    : torch.Tensor,
+                         current_embedding : torch.Tensor,
+                         neighbor_embedding: torch.Tensor) -> torch.Tensor:
+    return torch.cat((sink_embedding     - current_embedding,
                       neighbor_embedding - current_embedding), dim=1)
 
-def check_marabou():
-    assert args.marabou_path is not None, "It is mandatory to specify --verification_marabou_path for command embedding_adversarial_verification."
+def get_symbolic_analyzer():
+    return SymbolicAnalyzer(g, args.softmax_temperature, args.probability_smoothing,
+                            args.verification_lr, delta_q_max=args.input_max_delta_q)
 
-def create_blocks():
-    """
-    During formal verification, emulate computations for two neighbors simultaneously
-    All embeddings here are assumed to be shifted by the current embedding.
-    
-    Computation of the first hidden layer for nbr1:
-        (A11 A12) (e_sink) + (a1)
-        (A21 A22) (e_nbr1)   (a2)
-    Computation of the first hidden layer for nbr2:
-        (A11 A12) (e_sink) + (a1)
-        (A21 A22) (e_nbr2)   (a2)
-    Computing both while using single e_sink:
-        (A11 A12 0) (e_sink)   (a1)
-        (A21 A22 0) (e_nbr1) + (a2)
-        (A11 0 A12) (e_nbr2)   (a1)
-        (A21 0 A22)            (a2)
-    
-    Other matrices will just be block diagonal.
-    """
-    
-    net = g.q_network.ff_net
-    with torch.no_grad():
-        A, B, C = net[0].weight, net[2].weight, net[4].weight
-        a, b, c = net[0].bias,   net[2].bias,   net[4].bias
-        A11 = A[:A.shape[0]//2,  :A.shape[1]//2 ]
-        A12 = A[:A.shape[0]//2,   A.shape[1]//2:]
-        A21 = A[ A.shape[0]//2:, :A.shape[1]//2 ]
-        A22 = A[ A.shape[0]//2:,  A.shape[1]//2:]
-        O = A11 * 0
-        A_new = torch.cat((torch.cat((A11, A12, O), dim=1),
-                           torch.cat((A21, A22, O), dim=1),
-                           torch.cat((A11, O, A12), dim=1),
-                           torch.cat((A21, O, A22), dim=1)), dim=0)
-        B_new = Util.make_block_diagonal(B, 2)
-        C_new = Util.make_block_diagonal(C, 2)
-        a_new = torch.cat((a,) * 2, dim=0)
-        b_new = torch.cat((b,) * 2, dim=0)
-        c_new = torch.cat((c,) * 2, dim=0)
-        
-        # merely to compute the output independently, not using the verification tool:
-        net_new = Util.to_torch_relu_nn([A_new, B_new, C_new], [a_new, b_new, c_new])
-        return A_new, B_new, C_new, a_new, b_new, c_new, net_new
-    
+def get_nnet_verifier():
+    assert args.marabou_path is not None, (
+        "It is mandatory to specify --verification_marabou_path for command "
+        "embedding_adversarial_verification.")
+    return NNetVerifier(g, args.marabou_path, NETWORK_FILENAME, PROPERTY_FILENAME,
+                        args.probability_smoothing, args.softmax_temperature, emb_dim)
+
 
 print(f"Running command {args.command}...")
 if args.command == "deterministic_test":
@@ -363,7 +327,8 @@ if args.command == "deterministic_test":
                     assert len(out_nodes) == 1
                     current_node = out_nodes[0]
                 elif current_node[0] == "diverter":
-                    current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(current_node, sink)
+                    current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(current_node,
+                                                                                             sink)
                     q_values = []
                     for neighbor, neighbor_embedding in zip(neighbors, neighbor_embeddings):
                         with torch.no_grad():
@@ -404,9 +369,9 @@ elif args.command == "embedding_adversarial_search":
             def get_gradient(x: torch.tensor) -> Tuple[torch.tensor, float, str]:
                 """
                 :param x: parameter vector (the one expected to converge to an adversarial example)
-                Returns a tuple (gradient pointing to the direction of the adversarial attack,
-                                 the corresponding loss function value,
-                                 auxiliary information for printing during optimization).
+                :return: a tuple (gradient pointing to the direction of the adversarial attack,
+                                  the corresponding loss function value,
+                                  auxiliary information for printing during optimization).
                 """
                 x = Util.optimizable_clone(x.flatten())
                 embedding_dict = unpack_embeddings(x)
@@ -430,91 +395,17 @@ elif args.command == "embedding_adversarial_search":
                 return x.grad, objective_value.item(), f"[{aux_info}]"
             adv.perturb(initial_vector, get_gradient)
 elif args.command == "embedding_adversarial_full_verification":
-    check_marabou()
-    list_round = lambda x, digits: [round(y, digits) for y in x]
-    network_filename, property_filename = "../network.nnet", "../property.txt"
-    nv = NNetVerifier(args.marabou_path, network_filename, property_filename)
-    A_new, B_new, C_new, a_new, b_new, c_new, _ = create_blocks()
-    
+    nv = get_nnet_verifier()
     for sink in g.sinks:
         print(f"Verifying adversarial robustness of delivery to {sink}...")
         ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
-        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
-        # gather all embeddings that we need to compute the objective
-        stored_embeddings = OrderedDict({sink: sink_embedding})
-        for node_key in ma.reachable_nodes:
-            stored_embeddings[node_key], _, _ = g.node_to_embeddings(node_key, sink)
-        
-        # we also need the indices of all nodes in this embedding storage
-        node_key_to_index = {key: i for i, key in enumerate(stored_embeddings.keys())}
-        assert node_key_to_index[sink] == 0
-            
-        def pack_embeddings(embedding_dict: OrderedDict) -> torch.tensor:
-            return torch.cat(tuple(embedding_dict.values())).flatten()
-
-        emb_center = pack_embeddings(stored_embeddings)
-
-        n = len(stored_embeddings)
-        m = len(ma.params)
-        print(f"Number of embeddings: {n}, number of the probabilities: {m}")
-        I = Util.conditional_to_cuda(torch.tensor(np.identity(emb_dim), dtype=torch.float64))
-        
-        # STAGE 1: create a matrix that transforms all (unshifted) embeddings
-        # to groups of shifted embeddings (sink, nbr1, nbr2) for each probability
-            
-        emb_conversion = Util.conditional_to_cuda(torch.zeros(emb_dim * 3 * m, emb_dim * n, dtype=torch.float64))
-                                                                
-        for prob_index, diverter_key in enumerate(ma.nontrivial_diverters):
-            _, neighbors, _ = g.node_to_embeddings(diverter_key, sink)
-                
-            # fill the next (emb_dim * 3) rows of the matrix
-            #   fill with I for the sink and neighbors
-            #   fill with -I for the current node (to subtract its embedding)
-                
-            # sink embedding, neighbor 1 embedding, neighbor 2 embedding:
-            for k, key in enumerate([sink] + neighbors):
-                Util.fill_block(emb_conversion, 3 * prob_index + k, node_key_to_index[key], I)
-                # shift the embedding by the current one:
-                Util.fill_block(emb_conversion, 3 * prob_index + k, node_key_to_index[diverter_key], -I)
-            
-        #for line in emb_conversion.astype(np.int32):
-        #    print("".join([str(x) for x in line]).replace("-1", "X"))
-        
         for source in ma.reachable_sources:
-            print(f"  Verifying adversarial robustness of delivery from {source} to {sink}...")
-            objective, lambdified_objective = ma.get_objective(source)
-        
-        # STAGE 2: create matrices for each probability from blocks
-        # then multiply this matrix by the previous one
-        
-        A_large = Util.make_block_diagonal(A_new, m)
-        A_large = A_large @ emb_conversion
-        B_large = Util.make_block_diagonal(B_new, m)
-        C_large = Util.make_block_diagonal(C_new, m)
-        a_large = torch.cat((a_new,) * m, dim=0)
-        b_large = torch.cat((b_new,) * m, dim=0)
-        c_large = torch.cat((c_new,) * m, dim=0)
-        net_large = Util.to_torch_relu_nn([A_large, B_large, C_large], [a_large, b_large, c_large])
-        
-        # TODO replace with real constraints
-        output_constraints = []
-        for prob_index in range(n):
-            output_constraints += [f"+y{2 * prob_index} -y{2 * prob_index + 1} <= 0.1"]
-            output_constraints += [f"+y{2 * prob_index} -y{2 * prob_index + 1} >= -0.1"]
-        
-        nv.verify_adv_robustness(
-            net_large, [A_large, B_large, C_large], [a_large, b_large, c_large],
-            emb_center.flatten(), args.input_eps_l_inf,
-            output_constraints, check_or=False
-        )
+            print(f"  Measuring adversarial robustness of delivery from {source} to {sink}...")
+            result = nv.verify_cost_delivery_bound(sink, source, ma, args.input_eps_l_inf, args.cost_bound)
+            print(f"Verification result: {result}")
 
 elif args.command == "embedding_adversarial_verification":
-    check_marabou()
-    list_round = lambda x, digits: [round(y, digits) for y in x]
-    network_filename, property_filename = "../network.nnet", "../property.txt"
-    nv = NNetVerifier(args.marabou_path, network_filename, property_filename)
-    A_new, B_new, C_new, a_new, b_new, c_new, net_new = create_blocks()
-    
+    nv = get_nnet_verifier()
     for sink in g.sinks:
         ma = MarkovAnalyzer(g, sink, args.simple_path_cost, verbose=False)
         sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
@@ -530,14 +421,16 @@ elif args.command == "embedding_adversarial_verification":
             for neighbor, neighbor_embedding in zip(neighbors, neighbor_embeddings):
                 emb_center = transform_embeddings(sink_embedding, current_embedding, neighbor_embedding)
                 with torch.no_grad():
-                    actual_output = net(emb_center).item()
-                print(f"  Q on real embedding: NN({list_round(Util.to_numpy(emb_center.flatten()), 3)}) = {actual_output}")
+                    actual_output = nv.net(emb_center).item()
+                ROUND_DIGITS = 3
+                print(f"  Q on real embedding: NN({Util.list_round(emb_center.flatten(), ROUND_DIGITS)})"
+                      f" = {round(actual_output, ROUND_DIGITS)}")
     
                 # two verification queries: 
                 # check whether the output can be less than the bound,
                 # then check whether it can be greater
                 nv.verify_adv_robustness(
-                    net, [A, B, C], [a, b, c],
+                    nv.net, [nv.A, nv.B, nv.C], [nv.a, nv.b, nv.c],
                     emb_center.flatten(), args.input_eps_l_inf,
                     [f"y0 <= {actual_output - args.output_max_delta_q}",
                      f"y0 >= {actual_output + args.output_max_delta_q}"],
@@ -559,35 +452,25 @@ elif args.command == "embedding_adversarial_verification":
                                    torch.cat(neighbor_embeddings)).flatten()
             p = Util.q_values_to_first_probability(q_values, args.softmax_temperature,
                                                    args.probability_smoothing).item()
-            def to_q_diff(p: float) -> float:
-                unsmoothed = Util.unsmooth(p, args.probability_smoothing)
-                eps = 1e-9
-                if unsmoothed <= eps:
-                    return -np.infty
-                if unsmoothed > 1 - eps:
-                    return np.infty
-                return scipy.special.logit(unsmoothed) * args.softmax_temperature
-            
-            q_diff_min = to_q_diff(p - args.output_max_delta_p)
-            q_diff_max = to_q_diff(p + args.output_max_delta_p)
+            q_diff_min = nv.probability_to_q_diff(p - args.output_max_delta_p)
+            q_diff_max = nv.probability_to_q_diff(p + args.output_max_delta_p)
             
             print(f"  Q values: {Util.to_numpy(q_values)}")
             print(f"  p on real embedding: {p}")
             print(f"  checking whether p is in [{p - args.output_max_delta_p}, {p + args.output_max_delta_p}]")
-            print(f"  checking whether the difference of Qs of two neighbors is in [{q_diff_min}, {q_diff_max}]")
+            print(f"  checking whether the difference of Qs of two neighbors is in"
+                  f" [{q_diff_min}, {q_diff_max}]")
             
-            cases_to_check = []
-            if q_diff_min != -np.infty:
-                cases_to_check += [f"+y0 -y1 <= {q_diff_min}"]
-            if q_diff_max !=  np.infty:
-                cases_to_check += [f"+y0 -y1 >= {q_diff_max}"]
+            cases_to_check = ([f"+y0 -y1 <= {q_diff_min}"] if q_diff_min != -np.infty else []) \
+                           + ([f"+y0 -y1 >= {q_diff_max}"] if q_diff_max !=  np.infty else [])
             print(f"  cases to check: {cases_to_check}")
             
             nv.verify_adv_robustness(
-                net_new, [A_new, B_new, C_new], [a_new, b_new, c_new], emb_center.flatten(),
-                args.input_eps_l_inf, cases_to_check, check_or=True
+                nv.net_new, [nv.A_new, nv.B_new, nv.C_new], [nv.a_new, nv.b_new, nv.c_new],
+                emb_center.flatten(), args.input_eps_l_inf, cases_to_check, check_or=True
             )
 elif args.command == "q_adversarial":
+    sa = get_symbolic_analyzer()
     plot_index = 0
     for sink in g.sinks:
         print(f"Measuring robustness of delivery to {sink}...")
@@ -607,7 +490,8 @@ elif args.command == "q_adversarial":
                     # we assume a linear change of parameters
                     reference_q = sa.compute_gradients(current_embedding, sink_embedding,
                                                        neighbor_embedding).flatten().item()
-                    actual_qs = reference_q + np.linspace(-sa.delta_q_max, sa.delta_q_max, 351)
+                    NO_POINTS = 351
+                    actual_qs = reference_q + np.linspace(-sa.delta_q_max, sa.delta_q_max, NO_POINTS)
                     kappa = sa.get_transformed_cost(ma, objective, args.cost_bound)
                     lambdified_kappa = sympy.lambdify(ma.params, kappa)
                     objective_values = torch.empty(len(actual_qs))
@@ -622,8 +506,10 @@ elif args.command == "q_adversarial":
                     plt.subplots_adjust(hspace=0.3)
                     caption_starts = ("Delivery cost (τ)", "Transformed delivery cost (κ)")
                     axes[0].set_yscale("log")
-                    for ax, caption_start, values in zip(axes, caption_starts, (objective_values, kappa_values)):
-                        label = f"{caption_start} from {source} to {sink} when making optimization step with current={node_key}, neighbor={neighbor_key}"
+                    for ax, caption_start, values in zip(axes, caption_starts,
+                                                         (objective_values, kappa_values)):
+                        label = (f"{caption_start} from {source} to {sink} when making optimization"
+                                 f" step with current={node_key}, neighbor={neighbor_key}")
                         print(f"{label}...")
                         ax.set_title(label)
                         ax.plot(actual_qs, values)
@@ -641,6 +527,7 @@ elif args.command == "q_adversarial":
                     print(f"Empirically found maximum of κ: {kappa_values.max():.6f}")
                     plot_index += 1
 elif args.command == "q_adversarial_lipschitz":
+    sa = get_symbolic_analyzer()
     print(sa.net)
     sa.load_matrices()
     
@@ -664,7 +551,8 @@ elif args.command == "q_adversarial_lipschitz":
                                                                    diverter_embedding,
                                                                    neighbor_embeddings[i]).T)
                            for i in range(2)]
-                logit = sa.to_scalar(sa.sympy_q(delta_e[0]) - sa.sympy_q(delta_e[1])) / args.softmax_temperature
+                logit = sa.to_scalar(sa.sympy_q(delta_e[0]) -
+                                     sa.sympy_q(delta_e[1])) / args.softmax_temperature
                 dlogit_dbeta = logit.diff(sa.beta)
                 computed_logits_and_derivatives[diverter_key] = logit, dlogit_dbeta
             else:
@@ -708,7 +596,8 @@ elif args.command == "q_adversarial_lipschitz":
                     derivative_bounds = {}
                     for param, diverter_key in zip(ma.params, ma.nontrivial_diverters):
                         _, current_neighbors, _ = g.node_to_embeddings(diverter_key, sink)
-                        print(f"      Computing the logit and its derivative for {param} = P({diverter_key} -> {current_neighbors[0]} | sink = {sink})....")
+                        print(f"      Computing the logit and its derivative for {param} ="
+                              f" P({diverter_key} -> {current_neighbors[0]} | sink = {sink})....")
                         logit, dlogit_dbeta = compute_logit_and_derivative(sa, diverter_key)
                         
                         # surprisingly, the strings are very slow to obtain
@@ -720,7 +609,8 @@ elif args.command == "q_adversarial_lipschitz":
                         derivative_bounds[param.name] = sa.estimate_upper_bound(dlogit_dbeta)
 
                     print(f"      Computing the final upper bound on dκ(β)/dβ...")
-                    top_level_bound = sa.estimate_top_level_upper_bound(dkappa_dbeta, ps_function_names, derivative_bounds)
+                    top_level_bound = sa.estimate_top_level_upper_bound(dkappa_dbeta, ps_function_names,
+                                                                        derivative_bounds)
                     print(f"      Final upper bound on the Lipschitz constant of κ(β): {top_level_bound}")
                     
                     def q_to_kappa(actual_q: float) -> float:
@@ -735,7 +625,8 @@ elif args.command == "q_adversarial_lipschitz":
                     no_evaluations = 2
                     checked_q_measure = 0.0
                     
-                    def prove_bound(left_q: float, right_q: float, left_kappa: float, right_kappa: float, depth: int) -> bool:
+                    def prove_bound(left_q: float, right_q: float,
+                                    left_kappa: float, right_kappa: float, depth: int) -> bool:
                         global empirical_bound, no_evaluations, max_depth, checked_q_measure
                         mid_q = (left_q + right_q) / 2
                         mid_kappa = q_to_kappa(mid_q)
@@ -747,15 +638,18 @@ elif args.command == "q_adversarial_lipschitz":
                         if max_kappa > 0:
                             worst_q = actual_qs[worst_index]
                             worst_dq = worst_q - reference_q
-                            print(f"        Counterexample found: q = {worst_q:.6f}, Δq = {worst_dq:.6f}, β = {q_to_beta(worst_q):.6f}, κ = {max_kappa:.6f}")
+                            print(f"        Counterexample found: q = {worst_q:.6f}, Δq = {worst_dq:.6f},"
+                                  f" β = {q_to_beta(worst_q):.6f}, κ = {max_kappa:.6f}")
                             return False
                             
                         # 2. try to find proof on [left, right]
                         kappa_upper_bound = -np.infty
                         max_on_interval = np.empty(2)
-                        for i, (q_interval, kappa_interval) in enumerate(zip(sa.to_intervals(actual_qs), sa.to_intervals(kappa_values))):
+                        for i, (q_interval, kappa_interval) in enumerate(zip(sa.to_intervals(actual_qs),
+                                                                             sa.to_intervals(kappa_values))):
                             left_beta, right_beta = q_to_beta(q_interval[0]), q_to_beta(q_interval[1])
-                            max_on_interval[i] = (top_level_bound * (right_beta - left_beta) + sum(kappa_interval)) / 2
+                            max_on_interval[i] = (top_level_bound * (right_beta - left_beta) +
+                                                  sum(kappa_interval)) / 2
                         if max_on_interval.max() < 0:
                             checked_q_measure += right_q - left_q
                             return True
@@ -766,12 +660,15 @@ elif args.command == "q_adversarial_lipschitz":
                         empirical_bound = max(empirical_bound, max_kappa)
                         if no_evaluations % 100 == 0:
                             percentage = checked_q_measure / sa.delta_q_max / 2 * 100
-                            print(f"      Status: {no_evaluations} evaluations, empirical bound is {empirical_bound:.6f}, maximum depth is {max_depth}, checked Δq percentage: {percentage:.2f}")
+                            print(f"      Status: {no_evaluations} evaluations, empirical bound is"
+                                  f" {empirical_bound:.6f}, maximum depth is {max_depth}, checked Δq"
+                                  f" percentage: {percentage:.2f}")
                         
                         # 3. otherwise, try recursively
                         calls = [(lambda: prove_bound(left_q, mid_q,  left_kappa, mid_kappa,   depth + 1)),
                                  (lambda: prove_bound(mid_q,  right_q, mid_kappa, right_kappa, depth + 1))]
-                        # to produce counetrexamples faster, start from the most empirically dangerous subinterval
+                        # to produce counetrexamples faster,
+                        # start from the most empirically dangerous subinterval
                         if max_on_interval.argmax() == 1:
                             calls = calls[::-1]
                         return calls[0]() and calls[1]()
