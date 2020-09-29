@@ -5,7 +5,6 @@ import yaml
 from pathlib import Path
 from tqdm import tqdm
 from typing import *
-from collections import OrderedDict
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -21,6 +20,7 @@ from dqnroute.verification.ml_util import Util
 from dqnroute.verification.markov_analyzer import MarkovAnalyzer
 from dqnroute.verification.symbolic_analyzer import SymbolicAnalyzer
 from dqnroute.verification.nnet_verifier import NNetVerifier
+from dqnroute.verification.embedding_packer import EmbeddingPacker
 
 NETWORK_FILENAME = "../network.nnet"
 PROPERTY_FILENAME = "../property.txt"
@@ -292,11 +292,11 @@ def transform_embeddings(sink_embedding    : torch.Tensor,
     return torch.cat((sink_embedding     - current_embedding,
                       neighbor_embedding - current_embedding), dim=1)
 
-def get_symbolic_analyzer():
+def get_symbolic_analyzer() -> SymbolicAnalyzer:
     return SymbolicAnalyzer(g, args.softmax_temperature, args.probability_smoothing,
                             args.verification_lr, delta_q_max=args.input_max_delta_q)
 
-def get_nnet_verifier():
+def get_nnet_verifier() -> NNetVerifier:
     assert args.marabou_path is not None, (
         "It is mandatory to specify --verification_marabou_path for command "
         "embedding_adversarial_verification.")
@@ -319,8 +319,7 @@ if args.command == "deterministic_test":
                 visited_nodes.add(current_node)
                 print("    in:", current_node)
                 if current_node[0] == "sink":
-                    print("    ", end="")
-                    print("OK" if current_node == sink else "FAIL due to wrong destination")
+                    print("    " + ("OK" if current_node == sink else "FAIL due to wrong destination"))
                     break
                 elif current_node[0] in ["source", "junction"]:
                     out_nodes = g.get_out_nodes(current_node)
@@ -346,27 +345,16 @@ elif args.command == "embedding_adversarial_search":
         print(f"Measuring adversarial robustness of delivery to {sink}...")
         ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
         sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
+        
         # gather all embeddings that we need to compute the objective
-        stored_embeddings = OrderedDict({sink: sink_embedding})
-        for node_key in ma.reachable_nodes:
-            stored_embeddings[node_key], _, _ = g.node_to_embeddings(node_key, sink)
-
-        def pack_embeddings(embedding_dict: OrderedDict) -> torch.tensor:
-            return torch.cat(tuple(embedding_dict.values())).flatten()
-
-        def unpack_embeddings(embedding_vector: torch.tensor) -> OrderedDict:
-            embedding_dict = OrderedDict()
-            for i, (key, value) in enumerate(stored_embeddings.items()):
-                embedding_dict[key] = embedding_vector[i*emb_dim:(i + 1)*emb_dim].reshape(1, emb_dim)
-            return embedding_dict
-
-        initial_vector = pack_embeddings(stored_embeddings)
+        embedding_packer = EmbeddingPacker(g, sink, sink_embedding, ma.reachable_nodes)
+        initial_vector = embedding_packer.initial_vector()
 
         for source in ma.reachable_sources:
             print(f"  Measuring adversarial robustness of delivery from {source} to {sink}...")
             objective, lambdified_objective = ma.get_objective(source)
 
-            def get_gradient(x: torch.tensor) -> Tuple[torch.tensor, float, str]:
+            def get_gradient(x: torch.Tensor) -> Tuple[torch.Tensor, float, str]:
                 """
                 :param x: parameter vector (the one expected to converge to an adversarial example)
                 :return: a tuple (gradient pointing to the direction of the adversarial attack,
@@ -374,7 +362,7 @@ elif args.command == "embedding_adversarial_search":
                                   auxiliary information for printing during optimization).
                 """
                 x = Util.optimizable_clone(x.flatten())
-                embedding_dict = unpack_embeddings(x)
+                embedding_dict = embedding_packer.unpack(x)
                 objective_inputs = []
                 perturbed_sink_embeddings = embedding_dict[sink].repeat(2, 1)
                 for diverter in ma.nontrivial_diverters:

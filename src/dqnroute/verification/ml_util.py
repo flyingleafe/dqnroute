@@ -19,7 +19,7 @@ class Util(ABC):
     cuda_enabled = True
 
     @staticmethod
-    def dump_model(filename: str, o):
+    def dump_model(filename: str, o: object):
         """
         Dumps an object to disk with pickle.
         :param filename: filename.
@@ -104,7 +104,7 @@ class Util(ABC):
         return Util.smooth((qs / temperature).softmax(dim=0)[0], alpha)
     
     @staticmethod
-    def to_numpy(x: torch.tensor) -> np.ndarray:
+    def to_numpy(x: torch.Tensor) -> np.ndarray:
         return x.detach().cpu().numpy()
 
     @staticmethod
@@ -146,3 +146,14 @@ class Util(ABC):
         #print(x)
         return [round(y, digits) for y in x]
     
+class EmbeddingPacker:
+    @staticmethod
+    def pack(embedding_dict: OrderedDict) -> torch.Tensor:
+        return torch.cat(tuple(embedding_dict.values())).flatten()
+
+    @staticmethod
+    def unpack(embedding_vector: torch.Tensor) -> OrderedDict:
+        embedding_dict = OrderedDict()
+        for i, (key, value) in enumerate(stored_embeddings.items()):
+            embedding_dict[key] = embedding_vector[i*emb_dim:(i + 1)*emb_dim].reshape(1, emb_dim)
+        return embedding_dict

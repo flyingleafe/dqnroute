@@ -1,6 +1,6 @@
+import os
 import subprocess
 import re
-import os
 
 from typing import *
 from abc import ABC
@@ -13,6 +13,7 @@ import z3
 from .ml_util import Util
 from .router_graph import RouterGraph
 from .markov_analyzer import MarkovAnalyzer
+from .embedding_packer import EmbeddingPacker
 from ..utils import AgentId
 
 import sys
@@ -61,7 +62,7 @@ class Counterexample(VerificationResult):
         return (f"Counterexample{{xs = {Util.list_round(self.xs, ROUND_DIGITS)},"
                                f" ys = {Util.list_round(self.ys, ROUND_DIGITS)}}}")
 
-def verify_conjunction(*calls: Callable[[], VerificationResult]) -> VerificationResult:
+def verify_conjunction(calls: List[Callable[[], VerificationResult]]) -> VerificationResult:
     for call in calls:
         result = call()
         if type(result) == Counterexample:
@@ -213,7 +214,7 @@ class NNetVerifier:
         of shifted embeddings (sink, nbr1, nbr2) for each probability.
         """
         m = len(ma.params)
-        n = len(self.stored_embeddings)
+        n = self.embedding_packer.number_of_embeddings()
         I = torch.tensor(np.identity(self.emb_dim), dtype=torch.float64)
         result = torch.zeros(self.emb_dim * 3 * m, self.emb_dim * n, dtype=torch.float64)
         
@@ -226,9 +227,11 @@ class NNetVerifier:
                 
             # sink embedding, neighbor 1 embedding, neighbor 2 embedding:
             for k, key in enumerate([sink] + neighbors):
-                Util.fill_block(result, 3 * prob_index + k, self.node_key_to_index[key], I)
+                Util.fill_block(result, 3 * prob_index + k,
+                                self.embedding_packer.node_key_to_index(key), I)
                 # shift the embedding by the current one:
-                Util.fill_block(result, 3 * prob_index + k, self.node_key_to_index[diverter_key], -I)
+                Util.fill_block(result, 3 * prob_index + k,
+                                self.embedding_packer.node_key_to_index(diverter_key), -I)
         return Util.conditional_to_cuda(result)
     
     def verify_cost_delivery_bound(self, sink: AgentId, source: AgentId, ma: MarkovAnalyzer,
@@ -237,20 +240,13 @@ class NNetVerifier:
         self.objective, self.lambdified_objective = ma.get_objective(source)
 
         # gather all embeddings that we need to compute the objective:
-        self.stored_embeddings = OrderedDict({sink: sink_embedding})
-        for node_key in ma.reachable_nodes:
-            self.stored_embeddings[node_key], _, _ = self.g.node_to_embeddings(node_key, sink)
+        self.embedding_packer = EmbeddingPacker(self.g, sink, sink_embedding, ma.reachable_nodes)
+        # pack the default embeddings, the input center for robustness verification:
+        self.emb_center = self.embedding_packer.initial_vector()
         
         m = len(ma.params)
-        n = len(self.stored_embeddings)
+        n = self.embedding_packer.number_of_embeddings()
         print(f"Number of embeddings: {n}, number of the probabilities: {m}")
-        
-        # pack the default embeddings, the input center for robustness verification:
-        self.emb_center = torch.cat(tuple(self.stored_embeddings.values())).flatten()
-                    
-        # we also need the indices of all nodes in this embedding storage:
-        self.node_key_to_index = {key: i for i, key in enumerate(self.stored_embeddings.keys())}
-        assert self.node_key_to_index[sink] == 0
         
         # STAGE 1: create a matrix that transforms all (unshifted) embeddings
         # to groups of shifted embeddings (sink, nbr1, nbr2) for each probability
@@ -280,7 +276,7 @@ class NNetVerifier:
         print(f"Verifying {region}")
         objective, lambdified_objective = ma.get_objective(source)
         m = len(ma.params)
-        n = len(self.stored_embeddings)
+        n = self.embedding_packer.number_of_embeddings()
         
         # R is our probability hyperrectange
         
@@ -288,15 +284,7 @@ class NNetVerifier:
         if self._prove_bound_for_region(m, cost_bound, region):
             return Verified.INSTANCE
         
-        region_reachable = True
-        # TODO
-        
-        if not region_reachable:
-            return False
-        
         # 2. Find out whether R is reachable (for some allowed embedding)
-        # if the region is initial, it is always reachable
-        
         result = self.verify_adv_robustness(
             self.net_large,
             [self.A_large, self.B_large, self.C_large],
@@ -308,12 +296,14 @@ class NNetVerifier:
             return result
         # type(result) == Counterexample
         
+        # 3. If R is reachable, check whether the bound is exceeded for the found example
         # TODO run the network on the found point
         
+        # 4. If no conclusion can be made, split R and try recursively
         r1, r2 = region.split()
-        run_recursively = lambda r: self._verify_cost_delivery_bound(
-            sink, source, ma, input_eps_l_inf, cost_bound, r, False)
-        return verify_conjunction(run_recursively(r1), run_recursively(r2))
+        calls = [lambda: self._verify_cost_delivery_bound(
+            sink, source, ma, input_eps_l_inf, cost_bound, r, False) for r in [r1, r2]]
+        return verify_conjunction(calls)
         
     def verify_adv_robustness(self, net: torch.nn.Module, weights: List[torch.Tensor],
                               biases: List[torch.Tensor], input_center: torch.Tensor, input_eps: float,
@@ -321,7 +311,7 @@ class NNetVerifier:
         if check_or:
             calls = [lambda: self.verify_adv_robustness(net, weights, biases, input_center, input_eps, 
                                                         [constraint], False) for constraint in output_constraints]
-            return verify_conjunction(*calls)
+            return verify_conjunction(calls)
         
         # write the NN
         input_dim = weights[0].shape[1]
