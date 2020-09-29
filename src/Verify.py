@@ -400,10 +400,9 @@ elif args.command == "embedding_adversarial_full_verification":
         print(f"Verifying adversarial robustness of delivery to {sink}...")
         ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
         for source in ma.reachable_sources:
-            print(f"  Measuring adversarial robustness of delivery from {source} to {sink}...")
+            print(f"  Verifying adversarial robustness of delivery from {source} to {sink}...")
             result = nv.verify_cost_delivery_bound(sink, source, ma, args.input_eps_l_inf, args.cost_bound)
-            print(f"    Verification result: {result}")
-
+            print(f"    {result}")
 elif args.command == "embedding_adversarial_verification":
     nv = get_nnet_verifier()
     for sink in g.sinks:
@@ -465,7 +464,7 @@ elif args.command == "embedding_adversarial_verification":
                            + ([f"+y0 -y1 >= {q_diff_max}"] if q_diff_max !=  np.infty else [])
             print(f"  cases to check: {cases_to_check}")
             
-            nv.verify_adv_robustness(
+            result = nv.verify_adv_robustness(
                 nv.net_new, [nv.A_new, nv.B_new, nv.C_new], [nv.a_new, nv.b_new, nv.c_new],
                 emb_center.flatten(), args.input_eps_l_inf, cases_to_check, check_or=True
             )

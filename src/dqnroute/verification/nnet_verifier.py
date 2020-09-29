@@ -8,6 +8,7 @@ from abc import ABC
 import numpy as np
 import scipy
 import torch
+import z3
 
 from .ml_util import Util
 from .router_graph import RouterGraph
@@ -103,9 +104,9 @@ class ProbabilityRegion:
             expr = f"+y{2 * i} -y{2 * i + 1}"
             constraints += [f"{expr} >= {lower}"] if lower > -np.inf else []
             constraints += [f"{expr} <= {upper}"] if upper <  np.inf else []
-        assert len(constraints) > 0, (
-            "Got empty constraints, but the constraints must be non-trivial, which is ensured by"
-            "omitting verification for the initial, always-reachable probability region.")
+        #assert len(constraints) > 0, (
+        #    "Got empty constraints, but the constraints must be non-trivial, which is ensured by"
+        #    "omitting verification for the initial, always-reachable probability region.")
         return constraints
     
     def split(self) -> Tuple['ProbabilityRegion', 'ProbabilityRegion']:
@@ -262,6 +263,17 @@ class NNetVerifier:
         region = ProbabilityRegion.get_initial(len(ma.params), self)
         return self._verify_cost_delivery_bound(sink, source, ma, input_eps_l_inf, cost_bound, region, True)
 
+    def _prove_bound_for_region(self, probability_dimension: int, cost_bound: float, region: ProbabilityRegion) -> bool:
+        z3.set_option(rational_to_decimal=True)
+        ps = [z3.Real(f"p{i}") for i in range(probability_dimension)]
+        constrains = [self.lambdified_objective(*ps) >= cost_bound]
+        constrains += [ps[i] >= region.lower_bounds[i] for i in range(probability_dimension)]
+        constrains += [ps[i] <= region.upper_bounds[i] for i in range(probability_dimension)]
+        s = z3.Solver()
+        s.add(constrains)
+        result = s.check()
+        return str(result) == "unsat"
+    
     def _verify_cost_delivery_bound(self, sink: AgentId, source: AgentId, ma: MarkovAnalyzer,
                                     input_eps_l_inf: float, cost_bound: float,
                                     region: ProbabilityRegion, region_is_initial: bool) -> VerificationResult:
@@ -273,6 +285,9 @@ class NNetVerifier:
         # R is our probability hyperrectange
         
         # 1. Prove or refute ∀p ∈ R cost ≤ cost_bound with CSP/SMT solvers
+        if self._prove_bound_for_region(m, cost_bound, region):
+            return Verified.INSTANCE
+        
         region_reachable = True
         # TODO
         
@@ -281,15 +296,19 @@ class NNetVerifier:
         
         # 2. Find out whether R is reachable (for some allowed embedding)
         # if the region is initial, it is always reachable
-        region_reachable = region_is_initial or self.verify_adv_robustness(
+        
+        result = self.verify_adv_robustness(
             self.net_large,
             [self.A_large, self.B_large, self.C_large],
             [self.a_large, self.b_large, self.c_large],
             self.emb_center.flatten(), input_eps_l_inf,
             region.get_reachability_constraints(), check_or=False
         )
-        if not region_reachable:
-            return False
+        if type(result) == Verified:
+            return result
+        # type(result) == Counterexample
+        
+        # TODO run the network on the found point
         
         r1, r2 = region.split()
         run_recursively = lambda r: self._verify_cost_delivery_bound(
