@@ -3,6 +3,7 @@ import re
 import os
 
 from typing import *
+from abc import ABC
 
 import numpy as np
 import scipy
@@ -18,15 +19,69 @@ sys.path.append("../NNet")
 from utils.writeNNet import writeNNet
 
 
+ROUND_DIGITS = 3
+
+
+class VerificationResult(ABC):
+    @staticmethod
+    def from_marabou(marabou_lines: List[str], input_dim: int, output_dim: int):
+        xs = np.zeros(input_dim)  + np.nan
+        ys = np.zeros(output_dim) + np.nan
+        for line in marabou_lines:
+            tokens = re.split(" *= *", line)
+            if len(tokens) == 2:
+                #print(tokens)
+                value = float(tokens[1])
+                index = int(tokens[0][1:])
+                symbol = tokens[0].strip()[0]
+                if symbol == "x":
+                    xs[index] = value
+                elif symbol == "y":
+                    ys[index] = value
+                else:
+                    raise RuntimeError(f"Unexpected assignment {line}.")
+        assert np.isnan(xs).all() == np.isnan(ys).all(), \
+               f"Problems with reading a counterexample (xs={xs}, ys={ys}, lines={lines})!"
+        return Verified.INSTANCE if np.isnan(xs).all() else Counterexample(xs, ys)
+        
+
+class Verified(VerificationResult):
+    def __str__(self):
+        return "Verified"
+Verified.INSTANCE = Verified()
+        
+
+class Counterexample(VerificationResult):
+    def __init__(self, xs: np.ndarray, ys: np.ndarray):
+        self.xs = xs
+        self.ys = ys
+        
+    def __str__(self):
+        return (f"Counterexample{{xs = {Util.list_round(self.xs, ROUND_DIGITS)},"
+                               f" ys = {Util.list_round(self.ys, ROUND_DIGITS)}}}")
+
+def verify_conjunction(*calls: Callable[[], VerificationResult]) -> VerificationResult:
+    for call in calls:
+        result = call()
+        if type(result) == Counterexample:
+            return result
+    return Verified.INSTANCE
+
+
 class ProbabilityRegion:
     def __init__(self, lower_bounds: np.ndarray, upper_bounds: np.ndarray, verifier: 'NNetVerifier'):
         assert lower_bounds.shape == upper_bounds.shape
         self.lower_bounds = lower_bounds
         self.upper_bounds = upper_bounds
-        self.m = lower_bounds.shape[0]
         self.lengths = upper_bounds - lower_bounds
+        assert (self.lengths > 0).all(), (self.lower_bounds, self.upper_bounds)
         self.verifier = verifier
-        
+    
+    def __str__(self):
+        return "Region{" + ", ".join([f"p{i} ∈ [{round(l, ROUND_DIGITS)}, {round(u, ROUND_DIGITS)}]"
+                                      for i, (l, u) in enumerate(zip(self.lower_bounds,
+                                                                     self.upper_bounds))]) + "}"
+    
     @staticmethod
     def get_initial(size: int, verifier: 'NNetVerifier') -> 'ProbabilityRegion':
         """
@@ -42,7 +97,7 @@ class ProbabilityRegion:
         # convert probabilities to q value differences
         # since the probabilities are separated from 0 and 1, conversion will not produce infinities
         constraints = []
-        for i in range(self.m):
+        for i in range(self.lower_bounds.shape[0]):
             lower = self.verifier.probability_to_q_diff(self.lower_bounds[i])
             upper = self.verifier.probability_to_q_diff(self.upper_bounds[i])
             expr = f"+y{2 * i} -y{2 * i + 1}"
@@ -59,12 +114,10 @@ class ProbabilityRegion:
         """
         longest_dimension = np.argmax(self.lengths)
         split_value = (self.lower_bounds[longest_dimension] + self.upper_bounds[longest_dimension]) / 2 
-        lower1, lower2 = np.copy(self.lower_bounds), np.copy(self.lower_bounds)
-        upper1, upper2 = np.copy(self.upper_bounds), np.copy(self.upper_bounds)
-        upper1[longest_dimension] = split_value
-        lower1[longest_dimension] = split_value
-        return (ProbabilityRegion(lower1, upper1, self.verifier),
-                ProbabilityRegion(lower2, upper2, self.verifier))
+        upper1, lower2 = np.copy(self.upper_bounds), np.copy(self.lower_bounds)
+        upper1[longest_dimension] = lower2[longest_dimension] = split_value
+        return (ProbabilityRegion(self.lower_bounds, upper1, self.verifier),
+                ProbabilityRegion(lower2, self.upper_bounds, self.verifier))
 
     
 class NNetVerifier:
@@ -178,7 +231,7 @@ class NNetVerifier:
         return Util.conditional_to_cuda(result)
     
     def verify_cost_delivery_bound(self, sink: AgentId, source: AgentId, ma: MarkovAnalyzer,
-                                   input_eps_l_inf: float, cost_bound: float) -> bool:
+                                   input_eps_l_inf: float, cost_bound: float) -> VerificationResult:
         sink_embedding, _, _ = self.g.node_to_embeddings(sink, sink)
         self.objective, self.lambdified_objective = ma.get_objective(source)
 
@@ -211,7 +264,8 @@ class NNetVerifier:
 
     def _verify_cost_delivery_bound(self, sink: AgentId, source: AgentId, ma: MarkovAnalyzer,
                                     input_eps_l_inf: float, cost_bound: float,
-                                    region: ProbabilityRegion, region_is_initial: bool) -> bool:
+                                    region: ProbabilityRegion, region_is_initial: bool) -> VerificationResult:
+        print(f"Verifying {region}")
         objective, lambdified_objective = ma.get_objective(source)
         m = len(ma.params)
         n = len(self.stored_embeddings)
@@ -240,32 +294,22 @@ class NNetVerifier:
         r1, r2 = region.split()
         run_recursively = lambda r: self._verify_cost_delivery_bound(
             sink, source, ma, input_eps_l_inf, cost_bound, r, False)
-        return run_recursively(r1) and run_recursively(r2)
+        return verify_conjunction(run_recursively(r1), run_recursively(r2))
         
-    def verify_adv_robustness(self, net: torch.nn.Module, weights: List[torch.tensor],
-                              biases: List[torch.tensor], input_center: torch.tensor, input_eps: float,
-                              output_constraints: List[str], check_or: bool) -> bool:
+    def verify_adv_robustness(self, net: torch.nn.Module, weights: List[torch.Tensor],
+                              biases: List[torch.Tensor], input_center: torch.Tensor, input_eps: float,
+                              output_constraints: List[str], check_or: bool) -> VerificationResult:
         if check_or:
-            # run separately for each constraint
-            falsified = False
-            for constraint in output_constraints:
-                result = self.verify_adv_robustness(
-                    net, weights, biases, input_center, input_eps, [constraint], False
-                )
-                falsified = falsified or not result
-                if falsified:
-                    break
-            if not falsified:
-                print("  no counterexample")
-            return
-        
-        output_dim = biases[-1].shape[0]
+            calls = [lambda: self.verify_adv_robustness(net, weights, biases, input_center, input_eps, 
+                                                        [constraint], False) for constraint in output_constraints]
+            return verify_conjunction(*calls)
         
         # write the NN
         input_dim = weights[0].shape[1]
+        output_dim = biases[-1].shape[0]
         input_mins  = list(np.zeros(input_dim) - 10e6)
         input_maxes = list(np.zeros(input_dim) + 10e6)
-        means =  list(np.zeros(input_dim)) + [0.]
+        means  = list(np.zeros(input_dim)) + [0.]
         ranges = list(np.zeros(input_dim)) + [1.]
         writeNNet([Util.to_numpy(x) for x in weights],
                   [Util.to_numpy(x) for x in biases],
@@ -293,29 +337,12 @@ class NNetVerifier:
             lines += [line.strip()]
 
         # construct counterexample
-        xs = np.zeros(input_dim)  + np.nan
-        ys = np.zeros(output_dim) + np.nan
-        for line in lines:
-            tokens = re.split(" *= *", line)
-            if len(tokens) == 2:
-                #print(tokens)
-                value = float(tokens[1])
-                index = int(tokens[0][1:]) 
-                if tokens[0].strip().startswith("x"):
-                    xs[index] = value
-                elif tokens[0].strip().startswith("y"):
-                    ys[index] = value
-                else:
-                    raise RuntimeError(f"Unexpected assignment {line}.")
-        assert     np.isnan(xs).all() and     np.isnan(ys).all() or \
-               not np.isnan(xs).any() and not np.isnan(ys).any(), \
-               f"Problems with reading a counterexample (xs={xs}, ys={ys}, lines={lines})!"
-        if not np.isnan(ys).any():
+        result = VerificationResult.from_marabou(lines, input_dim, output_dim)
+        if type(result) == Counterexample:
             with torch.no_grad():
-                actual_output = Util.to_numpy(net(Util.conditional_to_cuda(torch.tensor(xs))))
-            assert (np.abs(ys - actual_output) < 0.01).all(), "Output cross-check failed!"
-            ROUND_DIGITS = 3
-            print(f"  counterexample: NN({Util.list_round(xs, ROUND_DIGITS)}) = {Util.list_round(ys, ROUND_DIGITS)} [cross-check: {Util.list_round(actual_output, ROUND_DIGITS)}]")
-            return False
-        else:
-            return True
+                actual_output = Util.to_numpy(net(Util.conditional_to_cuda(torch.tensor(result.xs))))
+            assert (np.abs(result.ys - actual_output) < 0.01).all(), "Output cross-check failed!"
+            print(f"  counterexample: NN({Util.list_round(result.xs, ROUND_DIGITS)}) ="
+                  f" {Util.list_round(result.ys, ROUND_DIGITS)} [cross-check:"
+                  f" {Util.list_round(actual_output, ROUND_DIGITS)}]")
+        return result

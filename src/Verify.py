@@ -402,7 +402,7 @@ elif args.command == "embedding_adversarial_full_verification":
         for source in ma.reachable_sources:
             print(f"  Measuring adversarial robustness of delivery from {source} to {sink}...")
             result = nv.verify_cost_delivery_bound(sink, source, ma, args.input_eps_l_inf, args.cost_bound)
-            print(f"Verification result: {result}")
+            print(f"    Verification result: {result}")
 
 elif args.command == "embedding_adversarial_verification":
     nv = get_nnet_verifier()
@@ -429,13 +429,14 @@ elif args.command == "embedding_adversarial_verification":
                 # two verification queries: 
                 # check whether the output can be less than the bound,
                 # then check whether it can be greater
-                nv.verify_adv_robustness(
+                result = nv.verify_adv_robustness(
                     nv.net, [nv.A, nv.B, nv.C], [nv.a, nv.b, nv.c],
                     emb_center.flatten(), args.input_eps_l_inf,
                     [f"y0 <= {actual_output - args.output_max_delta_q}",
                      f"y0 >= {actual_output + args.output_max_delta_q}"],
                     check_or=True
                 )
+                print(f"    Verification result: {result}")
             
         # for each non-trivial diverter, verify the stability of routing probability
         for diverter in ma.nontrivial_diverters:
@@ -457,10 +458,9 @@ elif args.command == "embedding_adversarial_verification":
             
             print(f"  Q values: {Util.to_numpy(q_values)}")
             print(f"  p on real embedding: {p}")
-            print(f"  checking whether p is in [{p - args.output_max_delta_p}, {p + args.output_max_delta_p}]")
-            print(f"  checking whether the difference of Qs of two neighbors is in"
-                  f" [{q_diff_min}, {q_diff_max}]")
-            
+            print(f"  Checking whether p is ins [{p - args.output_max_delta_p}, {p + args.output_max_delta_p}].")
+            print(f"  Checking whether the difference of Qs of two neighbors is in"
+                  f" [{q_diff_min}, {q_diff_max}].")
             cases_to_check = ([f"+y0 -y1 <= {q_diff_min}"] if q_diff_min != -np.infty else []) \
                            + ([f"+y0 -y1 >= {q_diff_max}"] if q_diff_max !=  np.infty else [])
             print(f"  cases to check: {cases_to_check}")
@@ -469,6 +469,7 @@ elif args.command == "embedding_adversarial_verification":
                 nv.net_new, [nv.A_new, nv.B_new, nv.C_new], [nv.a_new, nv.b_new, nv.c_new],
                 emb_center.flatten(), args.input_eps_l_inf, cases_to_check, check_or=True
             )
+            print(f"  Verification result: {result}")
 elif args.command == "q_adversarial":
     sa = get_symbolic_analyzer()
     plot_index = 0
