@@ -1,6 +1,7 @@
 import os
 import subprocess
 import re
+#import multiprocessing
 
 from typing import *
 from abc import ABC
@@ -44,13 +45,12 @@ class VerificationResult(ABC):
                     raise RuntimeError(f"Unexpected assignment {line}.")
         assert np.isnan(xs).all() == np.isnan(ys).all(), \
                f"Problems with reading a counterexample (xs={xs}, ys={ys}, lines={lines})!"
-        return Verified.INSTANCE if np.isnan(xs).all() else Counterexample(xs, ys)
+        return Verified() if np.isnan(xs).all() else Counterexample(xs, ys)
         
 
 class Verified(VerificationResult):
     def __str__(self):
         return "Verified"
-Verified.INSTANCE = Verified()
         
 
 class Counterexample(VerificationResult):
@@ -67,7 +67,7 @@ def verify_conjunction(calls: List[Callable[[], VerificationResult]]) -> Verific
         result = call()
         if type(result) == Counterexample:
             return result
-    return Verified.INSTANCE
+    return Verified()
 
 
 class ProbabilityRegion:
@@ -166,22 +166,20 @@ class NNetVerifier:
         """
 
         self.net = self.g.q_network.ff_net
-        self.A, self.B, self.C = self.net[0].weight, self.net[2].weight, self.net[4].weight
-        self.a, self.b, self.c = self.net[0].bias,   self.net[2].bias,   self.net[4].bias
-        A11 = self.A[:self.A.shape[0]//2,  :self.A.shape[1]//2 ]
-        A12 = self.A[:self.A.shape[0]//2,   self.A.shape[1]//2:]
-        A21 = self.A[ self.A.shape[0]//2:, :self.A.shape[1]//2 ]
-        A22 = self.A[ self.A.shape[0]//2:,  self.A.shape[1]//2:]
+        self.A, self.B, self.C = [self.net[i].weight for i in [0, 2, 4]]
+        self.a, self.b, self.c = [self.net[i].bias   for i in [0, 2, 4]]
+        d1, d2 = self.A.shape[0] // 2, self.A.shape[1] // 2
+        A11 = self.A[:d1,  :d2 ]
+        A12 = self.A[:d1,   d2:]
+        A21 = self.A[ d1:, :d2 ]
+        A22 = self.A[ d1:,  d2:]
         O = A11 * 0
         self.A_new = torch.cat((torch.cat((A11, A12, O), dim=1),
                                 torch.cat((A21, A22, O), dim=1),
                                 torch.cat((A11, O, A12), dim=1),
                                 torch.cat((A21, O, A22), dim=1)), dim=0)
-        self.B_new = Util.make_block_diagonal(self.B, 2)
-        self.C_new = Util.make_block_diagonal(self.C, 2)
-        self.a_new = torch.cat((self.a,) * 2, dim=0)
-        self.b_new = torch.cat((self.b,) * 2, dim=0)
-        self.c_new = torch.cat((self.c,) * 2, dim=0)
+        self.B_new, self.C_new       = [Util.make_block_diagonal(x, 2) for x in [self.B, self.C]]
+        self.a_new, self.b_new, self.c_new = [Util.repeat_tensor(x, 2) for x in [self.a, self.b, self.c]]
         # merely to compute the output independently, not using the verification tool:
         self.net_new = Util.to_torch_relu_nn([self.A_new, self.B_new, self.C_new],
                                              [self.a_new, self.b_new, self.c_new])
@@ -190,11 +188,12 @@ class NNetVerifier:
     def create_large_blocks(self, probability_dimension: int):
         self.A_large = Util.make_block_diagonal(self.A_new, probability_dimension)
         self.A_large = self.A_large @ self.emb_conversion
-        self.B_large = Util.make_block_diagonal(self.B_new, probability_dimension)
-        self.C_large = Util.make_block_diagonal(self.C_new, probability_dimension)
-        self.a_large = torch.cat((self.a_new,) * probability_dimension, dim=0)
-        self.b_large = torch.cat((self.b_new,) * probability_dimension, dim=0)
-        self.c_large = torch.cat((self.c_new,) * probability_dimension, dim=0)
+                                  
+        self.B_large, self.C_large = [Util.make_block_diagonal(x, probability_dimension)
+                                      for x in [self.B_new, self.C_new]]
+        self.a_large, self.b_large, self.c_large = [Util.repeat_tensor(x, probability_dimension)
+                                                    for x in [self.a_new, self.b_new, self.c_new]]
+
         #print(A_large.shape, B_large.shape, C_large.shape, a_large.shape, b_large.shape, c_large.shape)
         self.net_large = Util.to_torch_relu_nn([self.A_large, self.B_large, self.C_large],
                                                [self.a_large, self.b_large, self.c_large])
@@ -234,6 +233,18 @@ class NNetVerifier:
                                 self.embedding_packer.node_key_to_index(diverter_key), -I)
         return Util.conditional_to_cuda(result)
     
+    def _prove_bound_for_region(self, probability_dimension: int, cost_bound: float,
+                                region: ProbabilityRegion) -> bool:
+        z3.set_option(rational_to_decimal=True)
+        ps = [z3.Real(f"p{i}") for i in range(probability_dimension)]
+        constraints = [self.lambdified_objective(*ps) >= cost_bound]
+        constraints += [ps[i] >= region.lower_bounds[i] for i in range(probability_dimension)]
+        constraints += [ps[i] <= region.upper_bounds[i] for i in range(probability_dimension)]
+        s = z3.Solver()
+        s.add(constraints)
+        result = s.check()
+        return str(result) == "unsat"
+    
     def verify_cost_delivery_bound(self, sink: AgentId, source: AgentId, ma: MarkovAnalyzer,
                                    input_eps_l_inf: float, cost_bound: float) -> VerificationResult:
         sink_embedding, _, _ = self.g.node_to_embeddings(sink, sink)
@@ -246,7 +257,7 @@ class NNetVerifier:
         
         m = len(ma.params)
         n = self.embedding_packer.number_of_embeddings()
-        print(f"Number of embeddings: {n}, number of the probabilities: {m}")
+        print(f"    Number of embeddings: {n}, number of probabilities: {m}")
         
         # STAGE 1: create a matrix that transforms all (unshifted) embeddings
         # to groups of shifted embeddings (sink, nbr1, nbr2) for each probability
@@ -257,34 +268,24 @@ class NNetVerifier:
         self.create_large_blocks(m)
         
         region = ProbabilityRegion.get_initial(len(ma.params), self)
-        return self._verify_cost_delivery_bound(sink, source, ma, input_eps_l_inf, cost_bound, region, True)
-
-    def _prove_bound_for_region(self, probability_dimension: int, cost_bound: float, region: ProbabilityRegion) -> bool:
-        z3.set_option(rational_to_decimal=True)
-        ps = [z3.Real(f"p{i}") for i in range(probability_dimension)]
-        constrains = [self.lambdified_objective(*ps) >= cost_bound]
-        constrains += [ps[i] >= region.lower_bounds[i] for i in range(probability_dimension)]
-        constrains += [ps[i] <= region.upper_bounds[i] for i in range(probability_dimension)]
-        s = z3.Solver()
-        s.add(constrains)
-        result = s.check()
-        return str(result) == "unsat"
+        return self._verify_cost_delivery_bound(sink, source, ma, input_eps_l_inf, cost_bound, region, 0)
     
     def _verify_cost_delivery_bound(self, sink: AgentId, source: AgentId, ma: MarkovAnalyzer,
                                     input_eps_l_inf: float, cost_bound: float,
-                                    region: ProbabilityRegion, region_is_initial: bool) -> VerificationResult:
-        print(f"Verifying {region}")
-        objective, lambdified_objective = ma.get_objective(source)
+                                    region: ProbabilityRegion, depth: int) -> VerificationResult:
+        print(f"    [depth={depth}] Currently verifying: {region}.")
         m = len(ma.params)
         n = self.embedding_packer.number_of_embeddings()
         
         # R is our probability hyperrectange
         
         # 1. Prove or refute ∀p ∈ R cost ≤ cost_bound with CSP/SMT solvers
+        print(f"    [depth={depth}] Calling Z3...")
         if self._prove_bound_for_region(m, cost_bound, region):
-            return Verified.INSTANCE
+            return Verified()
         
         # 2. Find out whether R is reachable (for some allowed embedding)
+        print(f"    [depth={depth}] Calling Marabou...")
         result = self.verify_adv_robustness(
             self.net_large,
             [self.A_large, self.B_large, self.C_large],
@@ -293,16 +294,37 @@ class NNetVerifier:
             region.get_reachability_constraints(), check_or=False
         )
         if type(result) == Verified:
+            print(f"    [depth={depth}] SMT verification proved that the bound cannot be exceeeded in"
+                  " this probability region.")
             return result
-        # type(result) == Counterexample
+        assert type(result) == Counterexample
         
         # 3. If R is reachable, check whether the bound is exceeded for the found example
         # TODO run the network on the found point
+        with torch.no_grad():
+            xs = Util.conditional_to_cuda(torch.DoubleTensor(result.xs))
+            ys = Util.conditional_to_cuda(torch.DoubleTensor(result.ys))
+            embedding_dict = self.embedding_packer.unpack(xs)
+            objective_value, ps = self.embedding_packer.compute_objective(
+                embedding_dict, ma.nontrivial_diverters, self.lambdified_objective,
+                self.softmax_temperature, self.probability_smoothing)
+            objective_value = objective_value.item()
+            executed_ps = [p.item() for p in ps]
+            counterexample_ps = [Util.q_values_to_first_probability(ys[(2 * i):(2 * i+2)], self.softmax_temperature,
+                                                                    self.probability_smoothing).item()
+                                 for i in range(m)]
+        print(f"    [depth={depth}] Checking candidate counterexample with"
+              f" ys={Util.list_round(counterexample_ps, ROUND_DIGITS)}"
+              f" [cross-check: {Util.list_round(executed_ps, ROUND_DIGITS)}]...")
+        if objective_value >= cost_bound:
+            print(f"    [depth={depth}] True counterexample found!")
+            return result
         
         # 4. If no conclusion can be made, split R and try recursively
+        print(f"    [depth={depth}] No conclusion, trying recursively...")
         r1, r2 = region.split()
         calls = [lambda: self._verify_cost_delivery_bound(
-            sink, source, ma, input_eps_l_inf, cost_bound, r, False) for r in [r1, r2]]
+            sink, source, ma, input_eps_l_inf, cost_bound, r, depth + 1) for r in [r1, r2]]
         return verify_conjunction(calls)
         
     def verify_adv_robustness(self, net: torch.nn.Module, weights: List[torch.Tensor],
@@ -332,19 +354,22 @@ class NNetVerifier:
                 f.write(constraint + os.linesep)
     
         # call Marabou
-        command = [self.marabou_path, self.network_filename, self.property_filename]
+        #dnc = ["--dnc", "--num-workers", "2"]#str(multiprocessing.cpu_count())]
+        dnc = []
+        command = [self.marabou_path, "--verbosity", "0", *dnc, self.network_filename, self.property_filename]
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         lines = []
         while process.poll() is None:
             line = process.stdout.readline().decode("utf-8")
-            print(line, end="")
+            #print(line, end="")
             lines += [line.strip()]
         final_lines = process.stdout.read().decode("utf-8").splitlines()
         process.stdout.close()
         for line in final_lines:
-            print(line)
+            #print(line)
             lines += [line.strip()]
-
+        print("  ".join(lines))
+            
         # construct counterexample
         result = VerificationResult.from_marabou(lines, input_dim, output_dim)
         if type(result) == Counterexample:

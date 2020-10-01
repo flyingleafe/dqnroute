@@ -80,7 +80,7 @@ class Util(ABC):
         torch.cuda.manual_seed_all(seed + 2)
         
     @staticmethod
-    def normalize_latent(x: torch.Tensor):
+    def normalize_latent(x: torch.Tensor) -> torch.Tensor:
         """
         Divides each latent vector of a batch by its scaled Euclidean norm.
         :param x: batch of latent vectors.
@@ -111,7 +111,7 @@ class Util(ABC):
     def to_torch_linear(weight: torch.Tensor, bias: torch.Tensor) -> torch.nn.Linear:
         m = torch.nn.Linear(*weight.shape)
         m.weight = torch.nn.Parameter(weight)
-        m.bias = torch.nn.Parameter(bias)
+        m.bias   = torch.nn.Parameter(bias)
         return m
     
     @staticmethod
@@ -140,20 +140,12 @@ class Util(ABC):
         return torch.cat(tuple(blocks), dim=0)
     
     @staticmethod
+    def repeat_tensor(x: torch.Tensor, times: int) -> torch.Tensor:
+        return torch.cat((x,) * times, dim=0)
+    
+    @staticmethod
     def list_round(x, digits: int) -> list:
         if issubclass(type(x), torch.Tensor):
             x = Util.to_numpy(x)
         #print(x)
         return [round(y, digits) for y in x]
-    
-class EmbeddingPacker:
-    @staticmethod
-    def pack(embedding_dict: OrderedDict) -> torch.Tensor:
-        return torch.cat(tuple(embedding_dict.values())).flatten()
-
-    @staticmethod
-    def unpack(embedding_vector: torch.Tensor) -> OrderedDict:
-        embedding_dict = OrderedDict()
-        for i, (key, value) in enumerate(stored_embeddings.items()):
-            embedding_dict[key] = embedding_vector[i*emb_dim:(i + 1)*emb_dim].reshape(1, emb_dim)
-        return embedding_dict

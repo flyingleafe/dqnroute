@@ -4,7 +4,9 @@ from typing import *
 import torch
 
 from ..utils import AgentId
+from .ml_util import Util
 from .router_graph import RouterGraph
+
 
 class EmbeddingPacker:
     """
@@ -20,6 +22,8 @@ class EmbeddingPacker:
         # the indices of all nodes in this embedding storage:
         self._node_key_to_index = {key: i for i, key in enumerate(self._stored_embeddings.keys())}
         assert self._node_key_to_index[sink] == 0
+        self._g = g
+        self._sink = sink
 
     def pack(self, embedding_dict: OrderedDict) -> torch.Tensor:
         return torch.cat(tuple(embedding_dict.values())).flatten()
@@ -27,7 +31,9 @@ class EmbeddingPacker:
     def unpack(self, embedding_vector: torch.Tensor) -> OrderedDict:
         embedding_dict = OrderedDict()
         for i, (key, value) in enumerate(self._stored_embeddings.items()):
-            embedding_dict[key] = embedding_vector[i*self._emb_dim:(i + 1)*self._emb_dim].reshape(1, self._emb_dim)
+            i1 = self._emb_dim * i
+            i2 = self._emb_dim * (i + 1)
+            embedding_dict[key] = embedding_vector[i1:i2].reshape(1, self._emb_dim)
         return embedding_dict
     
     def initial_vector(self) -> torch.Tensor:
@@ -38,3 +44,17 @@ class EmbeddingPacker:
     
     def node_key_to_index(self, key: AgentId) -> int:
         return self._node_key_to_index[key]
+    
+    def compute_objective(self, embedding_dict: OrderedDict, nontrivial_diverters: List[AgentId],
+                          lambdified_objective: Callable, softmax_temperature: float,
+                          probability_smoothing: float) -> torch.Tensor:
+        ps = []
+        sink_embeddings = embedding_dict[self._sink].repeat(2, 1)
+        for diverter in nontrivial_diverters:
+            diverter_embeddings = embedding_dict[diverter].repeat(2, 1)
+            _, current_neighbors, _ = self._g.node_to_embeddings(diverter, self._sink)
+            neighbor_embeddings = torch.cat([embedding_dict[current_neighbor]
+                                             for current_neighbor in current_neighbors])
+            q_values = self._g.q_forward(diverter_embeddings, sink_embeddings, neighbor_embeddings).flatten()
+            ps += [Util.q_values_to_first_probability(q_values, softmax_temperature, probability_smoothing)]
+        return lambdified_objective(*ps), ps

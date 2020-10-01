@@ -352,7 +352,7 @@ elif args.command == "embedding_adversarial_search":
 
         for source in ma.reachable_sources:
             print(f"  Measuring adversarial robustness of delivery from {source} to {sink}...")
-            objective, lambdified_objective = ma.get_objective(source)
+            _, lambdified_objective = ma.get_objective(source)
 
             def get_gradient(x: torch.Tensor) -> Tuple[torch.Tensor, float, str]:
                 """
@@ -362,25 +362,14 @@ elif args.command == "embedding_adversarial_search":
                                   auxiliary information for printing during optimization).
                 """
                 x = Util.optimizable_clone(x.flatten())
-                embedding_dict = embedding_packer.unpack(x)
-                objective_inputs = []
-                perturbed_sink_embeddings = embedding_dict[sink].repeat(2, 1)
-                for diverter in ma.nontrivial_diverters:
-                    perturbed_diverter_embeddings = embedding_dict[diverter].repeat(2, 1)
-                    _, current_neighbors, _ = g.node_to_embeddings(diverter, sink)
-                    perturbed_neighbor_embeddings = torch.cat([embedding_dict[current_neighbor]
-                                                               for current_neighbor in current_neighbors])
-                    q_values = g.q_forward(perturbed_diverter_embeddings, perturbed_sink_embeddings,
-                                           perturbed_neighbor_embeddings).flatten()
-                    objective_inputs += [Util.q_values_to_first_probability(q_values,
-                                                                            args.softmax_temperature,
-                                                                            args.probability_smoothing)]
-                objective_value = lambdified_objective(*objective_inputs)
-                #print(Util.to_numpy(objective_value))
+                objective_value, objective_inputs = embedding_packer.compute_objective(
+                    embedding_packer.unpack(x), ma.nontrivial_diverters, lambdified_objective,
+                    args.softmax_temperature, args.probability_smoothing)
                 objective_value.backward()
                 aux_info = ", ".join([f"{param}={value.detach().cpu().item():.4f}"
                                       for param, value in zip(ma.params, objective_inputs)])
                 return x.grad, objective_value.item(), f"[{aux_info}]"
+            
             adv.perturb(initial_vector, get_gradient)
 elif args.command == "embedding_adversarial_full_verification":
     nv = get_nnet_verifier()

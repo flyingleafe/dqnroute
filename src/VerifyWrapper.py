@@ -6,7 +6,7 @@ def run(command: str, config_file: str, temperature: float, cost_bound: float, m
 #config = ("acyclic_conveyor_energy_test.yaml", 1.5, 100000)   # Mukhutdinov
 #config = ("conveyor_cyclic_energy_test.yaml", 1.5, 100000)    # Very simple fictitious graph with cycle
 #config = ("conveyor_cyclic2_energy_test.yaml", 1.5, 12430.0)  # A complication of the previous example
-config = ("tarau2010.yaml", 4.5, 100)                          # Fictitious graph from the literature
+config = ("tarau2010.yaml", 4.5, 200)                          # Fictitious graph from the literature
 #config = ("johnstone2010.yaml", 3.0, 100000)                  # Almost real graph from the literature
 
 #command, command_args = "deterministic_test", ""

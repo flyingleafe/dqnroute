@@ -40,7 +40,7 @@ class SymbolicAnalyzer:
     def _layer_to_sympy(self, x: torch.Tensor) -> sympy.Matrix:
         return self.tensor_to_sympy(x.weight), self.tensor_to_sympy(x.bias)
     
-    def _layer_grad_to_sympy(self, x: torch.tensor) -> sympy.Matrix:
+    def _layer_grad_to_sympy(self, x: torch.Tensor) -> sympy.Matrix:
         return self.tensor_to_sympy(x.weight.grad), self.tensor_to_sympy(x.bias.grad)
     
     def load_matrices(self):
@@ -64,7 +64,7 @@ class SymbolicAnalyzer:
     #    return self.g.q_forward(current_embedding, sink_embedding, neighbor_embedding).flatten().item()
     
     def compute_gradients(self, curent_embedding: torch.Tensor, sink_embedding: torch.Tensor,
-                          neighbor_embedding: torch.tensor) -> torch.Tensor:
+                          neighbor_embedding: torch.Tensor) -> torch.Tensor:
         opt = torch.optim.SGD(self.g.q_network.parameters(), lr=self.lr)
         opt.zero_grad()
         predicted_q = self.g.q_forward(curent_embedding, sink_embedding, neighbor_embedding).flatten()
@@ -72,7 +72,7 @@ class SymbolicAnalyzer:
         return predicted_q
     
     @torch.no_grad()
-    def _gd_step(self, predicted_q: torch.tensor, actual_q: torch.tensor, reverse: bool):
+    def _gd_step(self, predicted_q: torch.Tensor, actual_q: torch.Tensor, reverse: bool):
         for param in self.g.q_network.parameters():
             if param.grad is not None:
                 mse_gradient = 2 * (predicted_q - actual_q) * param.grad
