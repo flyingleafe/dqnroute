@@ -57,10 +57,20 @@ class Counterexample(VerificationResult):
     def __init__(self, xs: np.ndarray, ys: np.ndarray):
         self.xs = xs
         self.ys = ys
-        
+        self.probabilities = None
+        self.objective_value = None
+    
+    def add_objective_value(self, probabilities: np.ndarray, objective_value: float):
+        self.probabilities = probabilities
+        self.objective_value = objective_value
+    
     def __str__(self):
-        return (f"Counterexample{{xs = {Util.list_round(self.xs, ROUND_DIGITS)},"
-                               f" ys = {Util.list_round(self.ys, ROUND_DIGITS)}}}")
+        round_list = lambda x: Util.list_round(x, ROUND_DIGITS)
+        probs = "?" if self.probabilities   is None else f"{round_list(self.probabilities)}"
+        obj = "?"   if self.objective_value is None else f"{self.objective_value:.4f}"
+        return (f"Counterexample{{embeddings = {round_list(self.xs)},"
+                               f" Q values = {round_list(self.ys)},"
+                               f" probabilities = {probs}, objective = {obj}}}")
 
 def verify_conjunction(calls: List[Callable[[], VerificationResult]]) -> VerificationResult:
     for call in calls:
@@ -317,6 +327,7 @@ class NNetVerifier:
               f" ys={Util.list_round(counterexample_ps, ROUND_DIGITS)}"
               f" [cross-check: {Util.list_round(executed_ps, ROUND_DIGITS)}]...")
         if objective_value >= cost_bound:
+            result.add_objective_value(np.array(counterexample_ps), objective_value)
             print(f"    [depth={depth}] True counterexample found!")
             return result
         
