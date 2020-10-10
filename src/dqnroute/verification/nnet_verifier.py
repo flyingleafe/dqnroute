@@ -53,6 +53,10 @@ class Verified(VerificationResult):
         return "Verified"
         
 
+def marabou_float2str(x: float) -> str:
+    return f"{x:.15f}"
+
+
 class Counterexample(VerificationResult):
     def __init__(self, xs: np.ndarray, ys: np.ndarray):
         self.xs = xs
@@ -113,8 +117,8 @@ class ProbabilityRegion:
             lower = self.verifier.probability_to_q_diff(self.lower_bounds[i])
             upper = self.verifier.probability_to_q_diff(self.upper_bounds[i])
             expr = f"+y{2 * i} -y{2 * i + 1}"
-            constraints += [f"{expr} >= {lower}"] if lower > -np.inf else []
-            constraints += [f"{expr} <= {upper}"] if upper <  np.inf else []
+            constraints += [f"{expr} >= {marabou_float2str(lower)}"] if lower > -np.inf else []
+            constraints += [f"{expr} <= {marabou_float2str(upper)}"] if upper <  np.inf else []
         #assert len(constraints) > 0, (
         #    "Got empty constraints, but the constraints must be non-trivial, which is ensured by"
         #    "omitting verification for the initial, always-reachable probability region.")
@@ -359,8 +363,9 @@ class NNetVerifier:
         # write the property
         with open(self.property_filename, "w") as f:
             for i in range(input_dim):
-                f.write(f"x{i} >= {input_center[i] - input_eps}{os.linesep}")
-                f.write(f"x{i} <= {input_center[i] + input_eps}{os.linesep}")
+                # the format is essential, Marabou does not support the exponential format
+                f.write(f"x{i} >= {marabou_float2str(input_center[i] - input_eps)}{os.linesep}")
+                f.write(f"x{i} <= {marabou_float2str(input_center[i] + input_eps)}{os.linesep}")
             for constraint in output_constraints:
                 f.write(constraint + os.linesep)
     

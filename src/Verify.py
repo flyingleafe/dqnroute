@@ -19,7 +19,7 @@ from dqnroute.verification.adversarial import PGDAdversary
 from dqnroute.verification.ml_util import Util
 from dqnroute.verification.markov_analyzer import MarkovAnalyzer
 from dqnroute.verification.symbolic_analyzer import SymbolicAnalyzer
-from dqnroute.verification.nnet_verifier import NNetVerifier
+from dqnroute.verification.nnet_verifier import NNetVerifier, marabou_float2str
 from dqnroute.verification.embedding_packer import EmbeddingPacker
 
 NETWORK_FILENAME = "../network.nnet"
@@ -408,8 +408,9 @@ elif args.command == "embedding_adversarial_verification":
                 result = nv.verify_adv_robustness(
                     nv.net, [nv.A, nv.B, nv.C], [nv.a, nv.b, nv.c],
                     emb_center.flatten(), args.input_eps_l_inf,
-                    [f"y0 <= {actual_output - args.output_max_delta_q}",
-                     f"y0 >= {actual_output + args.output_max_delta_q}"],
+                    # the format is essential, Marabou does not support the exponential format
+                    [f"y0 <= {marabou_float2str(actual_output - args.output_max_delta_q)}",
+                     f"y0 >= {marabou_float2str(actual_output + args.output_max_delta_q)}"],
                     check_or=True
                 )
                 print(f"    Verification result: {result}")
@@ -437,8 +438,9 @@ elif args.command == "embedding_adversarial_verification":
             print(f"  Checking whether p is ins [{p - args.output_max_delta_p}, {p + args.output_max_delta_p}].")
             print(f"  Checking whether the difference of Qs of two neighbors is in"
                   f" [{q_diff_min}, {q_diff_max}].")
-            cases_to_check = ([f"+y0 -y1 <= {q_diff_min}"] if q_diff_min != -np.infty else []) \
-                           + ([f"+y0 -y1 >= {q_diff_max}"] if q_diff_max !=  np.infty else [])
+            # the format is essential, Marabou does not support the exponential format
+            cases_to_check = ([f"+y0 -y1 <= {marabou_float2str(q_diff_min)}"] if q_diff_min != -np.infty else []) \
+                           + ([f"+y0 -y1 >= {marabou_float2str(q_diff_max)}"] if q_diff_max !=  np.infty else [])
             print(f"  cases to check: {cases_to_check}")
             
             result = nv.verify_adv_robustness(
