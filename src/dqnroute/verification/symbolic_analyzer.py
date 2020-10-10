@@ -81,6 +81,9 @@ class SymbolicAnalyzer:
     @torch.no_grad()
     def compute_ps(self, ma: MarkovAnalyzer, diverter: AgentId, sink: AgentId, sink_embeddings: torch.Tensor,
                    predicted_q: torch.Tensor, actual_q: torch.Tensor) -> List[float]:
+        """
+        Compute probabilities after a single step of a gradient descent.
+        """
         ps = []
         self._gd_step(predicted_q, actual_q, False)
         for diverter in ma.nontrivial_diverters:
@@ -105,7 +108,11 @@ class SymbolicAnalyzer:
         return (interval[1] - interval[0]) / 2
     
     def _dummy_solve_expression(self, expr: sympy.Expr) -> List[float]:
-        """ This looks stupid, but this is faster than sympy.solve for linear equations. """
+        """
+        This is a solver for linear 1-variable expressions of a particular kind that sympy
+        produces after simpications. The existence of this method may look stupid, but
+        sympy.solve solves such expressions very slowly.
+        """
         try:
             assert type(expr) == sympy.Add, type(expr)
             assert len(expr.args) == 2, len(expr.args)
@@ -245,6 +252,8 @@ class SymbolicAnalyzer:
             nominator *= -1
             denominator *= -1
         kappa = nominator - cost_bound * denominator
+        # Added later by Igor: Hmm, changing the signs looks stupid.
+        # I assume that just returning -kappa would suffice.
         return kappa
                     
         

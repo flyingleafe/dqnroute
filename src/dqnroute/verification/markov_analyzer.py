@@ -1,11 +1,14 @@
 import sympy
 
+from typing import *
+
 from .router_graph import RouterGraph
 from ..utils import AgentId
 
 class MarkovAnalyzer:
     def __init__(self, g: RouterGraph, sink: AgentId, simple_path_cost: bool, verbose: bool = True):
         self.g = g
+        self.sink = sink
         # reindex nodes so that only the nodes from which the sink is reachable are considered
         self.reachable_nodes = [node_key for node_key in g.node_keys if g.reachable[node_key, sink]]
         print(f"  Nodes from which {sink} is reachable: {self.reachable_nodes}")
@@ -71,9 +74,9 @@ class MarkovAnalyzer:
         self.solution = matrix.inv() @ bias
         #print(f"  solution: {self.solution}")
         
-    def get_objective(self, source: AgentId):
+    def get_objective(self, source: AgentId) -> Tuple[sympy.Expr, Callable]:
         source_index = self.g.node_keys_to_indices[source]
         symbolic_objective = sympy.simplify(self.solution[source_index])
-        print(f"    Expected delivery cost from {source} = {symbolic_objective}")
+        print(f"    E(delivery cost from {source} to {self.sink}) = {symbolic_objective}")
         objective = sympy.lambdify(self.params, symbolic_objective)
         return symbolic_objective, objective

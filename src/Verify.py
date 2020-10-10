@@ -27,7 +27,9 @@ PROPERTY_FILENAME = "../property.txt"
 
 parser = argparse.ArgumentParser(description="Verifier of baggage routing neural networks.")
 parser.add_argument("--command", type=str, required=True,
-                    help="one of deterministic_test, embedding_adversarial_search, embedding_adversarial_verification, q_adversarial, q_adversarial_lipschitz, compare")
+                    help=("one of compare, deterministic_test, embedding_adversarial_search, "
+                          "embedding_adversarial_verification, embedding_adversarial_full_verification, "
+                          "compute_expected_cost, q_adversarial, q_adversarial_lipschitz"))
 parser.add_argument("--config_file", type=str, required=True,
                     help="YAML config file with the topology graph and other configuration info")
 parser.add_argument("--probability_smoothing", type=float, default=0.01,
@@ -43,13 +45,16 @@ parser.add_argument("--simple_path_cost", action="store_true",
 parser.add_argument("--skip_graphviz", action="store_true",
                     help="do not visualize graphs")
 parser.add_argument("--softmax_temperature", type=float, default=1.5,
-                    help="custom softmax temperature (higher temperature means larger entropy in routing decisions; default: 1.5)")
+                    help=("custom softmax temperature (higher temperature means larger entropy in routing "
+                          "decisions; default: 1.5)"))
 parser.add_argument("--cost_bound", type=float, default=100.0,
                     help="upper bound on delivery cost to verify (default: 100)")
 parser.add_argument("--verification_lr", type=float, default=0.001,
                     help="learning rate in learning step verification (default: 0.001)")
 parser.add_argument("--input_max_delta_q", type=float, default=10.0,
                     help="maximum ΔQ in learning step verification (default: 10.0)")
+parser.add_argument("--q_adversarial_no_points", type=int, default=351,
+                    help="number of points used to create plots in command q_adversarial")
 
 # commands for verification with Marabou
 parser.add_argument("--marabou_path", type=str, default=None,
@@ -448,6 +453,19 @@ elif args.command == "embedding_adversarial_verification":
                 emb_center.flatten(), args.input_eps_l_inf, cases_to_check, check_or=True
             )
             print(f"  Verification result: {result}")
+elif args.command == "compute_expected_cost":
+    sa = get_symbolic_analyzer()
+    for sink in g.sinks:
+        ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
+        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
+        sink_embeddings = sink_embedding.repeat(2, 1)
+        for source in ma.reachable_sources:
+            print(f"Delivery from {source} to {sink})...")
+            _, lambdified_objective = ma.get_objective(source)
+            ps = sa.compute_ps(ma, diverter, sink, sink_embeddings, 0, 0)
+            objective_value = lambdified_objective(*ps)
+            print(f"    Computed probabilities: {Util.list_round(ps, 6)}")
+            print(f"    E(delivery cost from {source} to {sink}) = {objective_value}")
 elif args.command == "q_adversarial":
     sa = get_symbolic_analyzer()
     plot_index = 0
@@ -469,21 +487,21 @@ elif args.command == "q_adversarial":
                     # we assume a linear change of parameters
                     reference_q = sa.compute_gradients(current_embedding, sink_embedding,
                                                        neighbor_embedding).flatten().item()
-                    NO_POINTS = 351
-                    actual_qs = reference_q + np.linspace(-sa.delta_q_max, sa.delta_q_max, NO_POINTS)
+                    actual_qs = reference_q + np.linspace(-sa.delta_q_max, sa.delta_q_max,
+                                                          args.q_adversarial_no_points)
                     kappa = sa.get_transformed_cost(ma, objective, args.cost_bound)
                     lambdified_kappa = sympy.lambdify(ma.params, kappa)
                     objective_values = torch.empty(len(actual_qs))
-                    kappa_values = torch.empty(len(actual_qs))
+                    kappa_values     = torch.empty(len(actual_qs))
                     for i, actual_q in enumerate(actual_qs):
                         ps = sa.compute_ps(ma, diverter, sink, sink_embeddings, reference_q, actual_q)
                         objective_values[i] = lambdified_objective(*ps)
-                        kappa_values[i] = lambdified_kappa(*ps)
+                        kappa_values[i]     = lambdified_kappa(*ps)
 
                     # plot
                     fig, axes = plt.subplots(2, 1, figsize=(13, 6))
                     plt.subplots_adjust(hspace=0.3)
-                    caption_starts = ("Delivery cost (τ)", "Transformed delivery cost (κ)")
+                    caption_starts = "Delivery cost (τ)", "Transformed delivery cost (κ)"
                     axes[0].set_yscale("log")
                     for ax, caption_start, values in zip(axes, caption_starts,
                                                          (objective_values, kappa_values)):
@@ -492,8 +510,7 @@ elif args.command == "q_adversarial":
                         print(f"{label}...")
                         ax.set_title(label)
                         ax.plot(actual_qs, values)
-                        gap = values.max() - values.min()
-                        y_delta = 0 if gap > 0 else 5
+                        y_delta = 0 if np.ptp(values) > 0 else 5
                         # show the zero step value:
                         ax.vlines(reference_q, min(values) - y_delta, max(values) + y_delta)
                         ax.hlines(values[len(values) // 2], min(actual_qs), max(actual_qs))

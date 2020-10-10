@@ -12,10 +12,11 @@ config = ("tarau2010.yaml", 4.5, 972)                          # Fictitious grap
 #command, command_args = "deterministic_test", ""
 #command, command_args = "embedding_adversarial_search", ""
 #command, command_args = "embedding_adversarial_verification", "--output_max_delta_q 3.6 --input_eps_l_inf 0.1 --output_max_delta_p 0.00001"
-#command, command_args = "embedding_adversarial_full_verification", "--input_eps_l_inf 0.001"
+#command, command_args = "embedding_adversarial_full_verification", "--input_eps_l_inf 0.000"
 #command, command_args = "q_adversarial", ""
+command, command_args = "compute_expected_cost", ""
 #command, command_args = "q_adversarial_lipschitz", ""
-сommand, command_args = "compare", ""
+#сommand, command_args = "compare", ""
 
 if command_args != "":
     command_args += " "

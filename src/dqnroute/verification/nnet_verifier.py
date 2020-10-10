@@ -308,7 +308,7 @@ class NNetVerifier:
             region.get_reachability_constraints(), check_or=False
         )
         if type(result) == Verified:
-            print(f"    [depth={depth}] SMT verification proved that the bound cannot be exceeeded in"
+            print(f"    [depth={depth}] SMT verification proved that the bound cannot be exceeded in"
                   " this probability region.")
             return result
         assert type(result) == Counterexample
