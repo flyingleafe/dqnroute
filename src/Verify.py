@@ -734,9 +734,9 @@ elif args.command == "compare":
         ax.set_ylabel(ylabel, fontsize=font_size)
 
         if save_path is not None:
-            fig.savefig('../img/' + save_path, bbox_inches='tight')
+            fig.savefig(f'../img/' + save_path, bbox_inches='tight')
     
-    plot_data(dfs, figsize=(10, 8), font_size=22, energy_ylim=(7e6, 2.3e7),
+    plot_data(dfs, figsize=(14, 8), font_size=22,
               time_save_path='conveyors-break-1-time.pdf', energy_save_path='conveyors-break-1-energy.pdf')
 
 else:
