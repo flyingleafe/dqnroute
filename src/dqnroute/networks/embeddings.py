@@ -81,7 +81,7 @@ class LaplacianEigenmap(Embedding):
             weight = 'weight'
 
         graph = nx.relabel_nodes(graph.to_undirected(), agent_idx)
-
+        
         if weight is not None:
             if self.renormalize_weights:
                 sum_w = sum([ps[weight] for _, _, ps in graph.edges(data=True)])
@@ -100,16 +100,28 @@ class LaplacianEigenmap(Embedding):
 
         A = nx.to_scipy_sparse_matrix(graph, nodelist=sorted(graph.nodes),
                                       weight=weight, format='csr', dtype=np.float32)
+        
         n, m = A.shape
         diags = A.sum(axis=1)
         D = sp.spdiags(diags.flatten(), [0], m, n, format='csr')
         L = D - A
 
-        values, vectors = sp.linalg.eigsh(L, k=self.dim + 1, M=D, which='SM')
+        # (Changed by Igor):
+        # Added v0 parameter, the "starting vector for iteration".
+        # Otherwise, the operation behaves nondeterministically, and as a result
+        # different nodes may learn different embeddings. I am not speaking about
+        # minor floating point errors, the problem was worse.
+        
+        #values, vectors = sp.linalg.eigsh(L, k=self.dim + 1, M=D, which='SM')
+        values, vectors = sp.linalg.eigsh(L, k=self.dim + 1, M=D, which='SM', v0=np.ones(A.shape[0]))
+     
+        # End (Changed by Igor)
+        
         self._X = vectors[:, 1:]
-
+        
         if weight is not None and self.renormalize_weights:
             self._X *= avg_w
+        #print(self._X.flatten()[:3])
 
     def transform(self, idx):
         return self._X[idx]

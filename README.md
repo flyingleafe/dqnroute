@@ -15,7 +15,8 @@ The changes w.r.t. the original dqnroute are:
 * [Examples](/launches/igor) of baggage handling topology graphs, in particular with cycles:
     * [Example](/launches/igor/tarau2010.yaml) (and [visualization](/launches/igor/ConveyorGraph-Tarau2010.pdf)) based on [Tarau, Alina N., Bart De Schutter, and Hans Hellendoorn. "Model-based control for route choice in automated baggage handling systems." IEEE Transactions on Systems, Man, and Cybernetics, Part C (Applications and Reviews) 40.3 (2010): 341-351](https://ieeexplore.ieee.org/abstract/document/5382550/).
     * [Example](/launches/igor/johnstone2010.yaml) (and [visualization](/launches/igor/ConveyorGraph-Johnstone2010.pdf)) based on [Johnstone, Michael, Doug Creighton, and Saeid Nahavandi. "Status-based routing in baggage handling systems: Searching verses learning." IEEE Transactions on Systems, Man, and Cybernetics, Part C (Applications and Reviews) 40.2 (2009): 189-200](https://ieeexplore.ieee.org/abstract/document/5357429/).
-* A fix (?) for the bug: a bag was processed incorrectly if it passed twice along the same conveyor. This is possible only in topology graphs with cycles.
+* Bugfix: a bag was processed incorrectly if it passed twice along the same conveyor. This is possible only in topology graphs with cycles.
+* Bugfix: Laplacian Eigenmap embeddings were computed nondeterministically (with different random initialization), making different nodes have different embedding matrices. The initialization was replaced to a fixed, deterministic one.
 
 Unfortunately, some features are currently implemented with global variables due to Igor's lack of good understanding of the simulation model.
 
@@ -23,20 +24,23 @@ Unfortunately, some features are currently implemented with global variables due
 
 The script [Verify.py](/src/Verify.py) and a subpackage [verification](/src/dqnroute/verification) implement several methods of neural network analysis and verification. This is still work in progress and may contain bugs.
 
-The implemented features are:
+The implemented features correspond to different commands (--command) of Verify.py:
 
-* Command "embedding_adversarial_search": search for adversarial examples that maximize bag delivery time with respect to input node embeddings, assuming that the network is frozen (not learning) during the delivery. The search is implemented with projected gradient descent (PGD).
-* Command "embedding_adversarial_verification": verification of the stability of the outputs of the neural network: its Q value prediction (when run for a fixed current node / neighbor / destination combination) and routing probabilities (for a fixed diverted / destination combination). Verification is implemented by using the [Marabou](https://github.com/NeuralNetworkVerification/Marabou) framework.
-* Command "q_adversarial": visualization of the changes on delivery time when the network is altered by a single gradient descent step performed in a particular combination of nodes.
-* Command "q_adversarial_lipschitz": verification that the delivery time in the aforementioned circumstances does not exceed the provided bound. Verification is implemented through the estimation of Lipschitz constants of scalar-input functions.
+* "compute_expected_cost": computes the expected bag delivery time (EBDT), assuming that the network is frozen (not learning) during the delivery. This assumption is also used below unless specified otherwise.
+* "embedding_adversarial_search": searches for adversarial examples that maximize the EBDT with respect to input node embeddings. The search is implemented with projected gradient descent (PGD).
+* "embedding_adversarial_verification": verifies the stability of the outputs of the neural network: its Q value prediction (when run for a fixed current node / neighbor / destination combination) and routing probabilities (for a fixed diverted / destination combination). Verification is implemented by using the [Marabou](https://github.com/NeuralNetworkVerification/Marabou) framework.
+* "embedding_adversarial_full_verification": verifies the adversarial robustness of the EBDT with respect to node embeddings. Verification is implemented by using the [Marabou](https://github.com/NeuralNetworkVerification/Marabou) framework. Verification may be slow.
+* "q_adversarial": visualizes the changes in the EBDT when the network is altered by a single gradient descent step performed in a particular combination of nodes.
+* "q_adversarial_lipschitz": verifies that the EBDT in the aforementioned circumstances does not exceed the provided bound. Verification is implemented through the estimation of Lipschitz constants of scalar-input functions.
 
 Refer to [the slides](/rl_verif.pdf) for more information.
 
 ## Dependencies
 
-Python package dependencies are in [requirements.txt](/requirements.txt). You can get simpy from [here](https://pypi.org/project/simpy/). Note that simpy and sympy are completely different packages, and both are needed. Pygraphviz: [for Linux/Mac](https://anaconda.org/anaconda/pygraphviz), [for Windows](https://anaconda.org/alubbock/pygraphviz).
-
-To use the "embedding_adversarial_verification" command of Verify.py, you need to install [Marabou](https://github.com/NeuralNetworkVerification/Marabou). Marabou is executed as a process and you need to pass the path to the executable as a command line argument --marabou_path.
+* Python package dependencies are in [requirements.txt](/requirements.txt).
+* You can get simpy from [here](https://pypi.org/project/simpy/). Note that simpy and sympy are completely different packages, and both are needed.
+* Pygraphviz: [for Linux/Mac](https://anaconda.org/anaconda/pygraphviz), [for Windows](https://anaconda.org/alubbock/pygraphviz). Pygraphviz requires graphviz to be installed and available from the command line. Additional instructions for Windows: TODO.
+* To use the "embedding_adversarial_verification" and embedding_adversarial_full_verification" commands of Verify.py, you need to install [Marabou](https://github.com/NeuralNetworkVerification/Marabou). Marabou is executed as a process and you need to pass the path to the executable as a command line argument --marabou_path.
 
 ## Running
 

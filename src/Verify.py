@@ -210,7 +210,8 @@ dir_with_models = "conveyor_test_ng"
 filename_suffix = f"_{emb_dim}_{graph_size}_{os.path.split(scenario)[1]}.bin"
 pretrain_filename = f"igor_pretrained{filename_suffix}"
 pretrain_path = Path(TORCH_MODELS_DIR) / dir_with_models / pretrain_filename
-if args.force_pretrain or not pretrain_path.exists():
+do_pretrain = args.force_pretrain or not pretrain_path.exists()
+if do_pretrain:
     print(f"Pretraining {pretrain_path}...")
     pretrain(args, dir_with_models, pretrain_filename)
 else:
@@ -263,13 +264,13 @@ def train(args, dir_with_models: str, pretrain_filename: str, train_filename: st
 
 train_filename = f"igor_trained{filename_suffix}"
 train_path = Path(TORCH_MODELS_DIR) / dir_with_models / train_filename
-retrain = args.force_train or not train_path.exists() or args.command == "compare"
-if retrain:
+do_train = args.force_train or not train_path.exists() or args.command == "compare" or do_pretrain
+if do_train:
     print(f"Training {train_path}...")
 else:
     print(f"Using the already trained model {train_path}...")
     
-dqn_log, world = train(args, dir_with_models, pretrain_filename, train_filename, "dqn_emb", retrain, True)
+dqn_log, world = train(args, dir_with_models, pretrain_filename, train_filename, "dqn_emb", do_train, True)
 
 
 # 4. load the router graph

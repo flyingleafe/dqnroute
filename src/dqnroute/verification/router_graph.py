@@ -1,6 +1,7 @@
 from typing import *
 
 import pygraphviz as pgv
+import numpy as np
 import torch
 
 from ..utils import AgentId
@@ -14,6 +15,8 @@ class RouterGraph:
         self.world = world
         self.graph = world.topology_graph
         self.routers = world.handlers
+        
+        self.check_embeddings()
         
         # add source/diverter/sink -> router mapping
         self.node_to_router = {}
@@ -135,6 +138,23 @@ class RouterGraph:
         assert our_router_edges == sorted(nw.edges()), f"{our_router_edges} != {sorted(nw.edges())}"
         #print("Edges between routers:", nw.edges())
         
+    def check_embeddings(self):
+        no_routers = sum([len(r.routers) for _, r in self.routers.items()])
+        embeddings = []
+        for _, router_keeper in self.routers.items():
+            for _, router in router_keeper.routers.items():                
+                embeddings += [np.concatenate([router.embedding.transform(i) for i in range(no_routers)])]
+        
+        for i in range(len(embeddings)):
+            for j in range(i + 1, len(embeddings)):
+                diff = np.abs(embeddings[i] - embeddings[j])
+                if diff.max() > 0.01:
+                    for embedding in embeddings:
+                        print(list(embedding.round(4)))
+                    print(list(diff.round(4)))
+                    raise RuntimeError("Embeddings are inconsistent between nodes! This may be caused "
+                                       "by the nondeterminism in computing embeddings.")
+    
     def to_graphviz(self):
         gv_graph = pgv.AGraph(directed=True)
 
@@ -211,10 +231,10 @@ class RouterGraph:
                 print(1 if self.reachable[from_node, to_node] else 0, end="")
             print(f" # from {from_node}")
     
-    def _get_router_embedding(self, router_key: AgentId) -> torch.tensor:
+    def _get_router_embedding(self, router_key: AgentId) -> torch.Tensor:
         return Util.conditional_to_cuda(torch.DoubleTensor([self.node_repr(router_key[1])]))
     
-    def node_to_embeddings(self, current_node: AgentId, sink: AgentId) -> Tuple[torch.tensor, List[torch.tensor]]:
+    def node_to_embeddings(self, current_node: AgentId, sink: AgentId) -> Tuple[torch.Tensor, List[torch.Tensor]]:
         current_router = self.node_to_router[current_node]
         current_embedding = self._get_router_embedding(current_router)
         if current_node[0] == "sink":
@@ -223,5 +243,5 @@ class RouterGraph:
             out_nodes = self.get_out_nodes(current_node)
             # leave only nodes from which the sink is reachable
             out_nodes = [out_node for out_node in out_nodes if self.reachable[out_node, sink]]
-        out_embeddings = [self._get_router_embedding(self.node_to_router[out_node]) for out_node in out_nodes] 
+        out_embeddings = [self._get_router_embedding(self.node_to_router[out_node]) for out_node in out_nodes]
         return current_embedding, out_nodes, out_embeddings
