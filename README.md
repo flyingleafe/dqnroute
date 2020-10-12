@@ -38,8 +38,14 @@ Refer to [the slides](/rl_verif.pdf) for more information.
 ## Dependencies
 
 * Python package dependencies are in [requirements.txt](/requirements.txt).
+* Install pytorch according to [this page instructions](https://pytorch.org/get-started/locally/)
 * You can get simpy from [here](https://pypi.org/project/simpy/). Note that simpy and sympy are completely different packages, and both are needed.
-* Pygraphviz: [for Linux/Mac](https://anaconda.org/anaconda/pygraphviz), [for Windows](https://anaconda.org/alubbock/pygraphviz). Pygraphviz requires graphviz to be installed and available from the command line. Additional instructions for Windows: TODO.
+* Pygraphviz: [for Linux/Mac](https://anaconda.org/anaconda/pygraphviz), [for Windows](https://anaconda.org/alubbock/pygraphviz). Pygraphviz requires graphviz to be installed and available from the command line. 
+* Pygraphviz. Additional instructions for Windows:
+   1. Download graphviz-2.38.msi from [here](https://graphviz.gitlab.io/_pages/Download/Download_windows.html) and install it
+   2. Download the wheel file you need from [here](http://www.lfd.uci.edu/~gohlke/pythonlibs/#pygraphviz) (For instance, if you have python **3.7** and  **windows** **x64** platform, then install "pygraphviz‑1.6‑cp37‑cp**37**m‑**win**_amd**64**.whl")
+   3. Navigate to the directory that you downloaded the wheel file to
+   4. Run ```pip install <the name of file file you downloaded>```
 * To use the "embedding_adversarial_verification" and embedding_adversarial_full_verification" commands of Verify.py, you need to install [Marabou](https://github.com/NeuralNetworkVerification/Marabou). Marabou is executed as a process and you need to pass the path to the executable as a command line argument --marabou_path.
 
 ## Running
