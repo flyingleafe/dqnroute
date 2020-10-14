@@ -93,6 +93,9 @@ class ProbabilityRegion:
         assert (self.lengths > 0).all(), (self.lower_bounds, self.upper_bounds)
         self.verifier = verifier
     
+    def volume(self) -> float:
+        return np.prod(self.lengths)
+    
     def __str__(self):
         return "Region{" + ", ".join([f"p{i} ∈ [{round(l, ROUND_DIGITS)}, {round(u, ROUND_DIGITS)}]"
                                       for i, (l, u) in enumerate(zip(self.lower_bounds,
@@ -157,6 +160,9 @@ class NNetVerifier:
         self.A_large, self.B_large, self.C_large, self.a_large, self.b_large, self.c_large = [None] * 6
         self.stored_embeddings, self.emb_conversion, self.node_key_to_index = [None] * 3
         self.emb_center, self.objective, self.lambdified_objective = [None] * 3
+        
+        # this will measure verification progress (to be reset in each verification call):
+        self._verified_volume_meter = None
         
     @torch.no_grad()
     def create_small_blocks(self):
@@ -261,6 +267,9 @@ class NNetVerifier:
         result = s.check()
         return str(result) == "unsat"
     
+    def _verified_fraction(self, probability_dimension: int) -> float:
+        return self._verified_volume_meter / (1 - self.probability_smoothing) ** probability_dimension
+    
     def verify_cost_delivery_bound(self, sink: AgentId, source: AgentId, ma: MarkovAnalyzer,
                                    input_eps_l_inf: float, cost_bound: float) -> VerificationResult:
         sink_embedding, _, _ = self.g.node_to_embeddings(sink, sink)
@@ -283,21 +292,25 @@ class NNetVerifier:
         # then multiply this matrix by the previous one
         self.create_large_blocks(m)
         
+        self._verified_volume_meter = 0.0
+        
         region = ProbabilityRegion.get_initial(len(ma.params), self)
         return self._verify_cost_delivery_bound(sink, source, ma, input_eps_l_inf, cost_bound, region, 0)
     
     def _verify_cost_delivery_bound(self, sink: AgentId, source: AgentId, ma: MarkovAnalyzer,
                                     input_eps_l_inf: float, cost_bound: float,
                                     region: ProbabilityRegion, depth: int) -> VerificationResult:
-        print(f"    [depth={depth}] Currently verifying: {region}.")
         m = len(ma.params)
         n = self.embedding_packer.number_of_embeddings()
+        print(f"    [depth={depth}] Verified probability mass percentage: {self._verified_fraction(m) * 100:.2f}%")
+        print(f"    [depth={depth}] Currently verifying: {region}.")
         
         # R is our probability hyperrectange
         
         # 1. Prove or refute ∀p ∈ R cost ≤ cost_bound with CSP/SMT solvers
         print(f"    [depth={depth}] Calling Z3...")
         if self._prove_bound_for_region(m, cost_bound, region):
+            self._verified_volume_meter += region.volume()
             return Verified()
         
         # 2. Find out whether R is reachable (for some allowed embedding)
@@ -312,6 +325,7 @@ class NNetVerifier:
         if type(result) == Verified:
             print(f"    [depth={depth}] SMT verification proved that the bound cannot be exceeded in"
                   " this probability region.")
+            self._verified_volume_meter += region.volume()
             return result
         assert type(result) == Counterexample
         
@@ -342,7 +356,8 @@ class NNetVerifier:
         r1, r2 = region.split()
         calls = [lambda: self._verify_cost_delivery_bound(
             sink, source, ma, input_eps_l_inf, cost_bound, r, depth + 1) for r in [r1, r2]]
-        return verify_conjunction(calls)
+        result = verify_conjunction(calls)
+        return result
         
     def verify_adv_robustness(self, net: torch.nn.Module, weights: List[torch.Tensor],
                               biases: List[torch.Tensor], input_center: torch.Tensor, input_eps: float,
