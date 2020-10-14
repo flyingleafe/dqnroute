@@ -69,13 +69,13 @@ class PGDAdversary(Adversary):
         self.shrinking_repeats = repeat_mode == "min"
         self.dtype = dtype
     
-    def norm_(self, x: torch.Tensor) -> float:
+    def _norm(self, x: torch.Tensor) -> float:
         """
         (Possibly scaled) norm of x.
         """
         return x.norm(np.infty if self.inf_norm else 2).item() / (np.sqrt(x.numel()) if self.scale_norm else 1)
     
-    def normalize_gradient_(self, x: torch.Tensor) -> torch.Tensor:
+    def _normalize_gradient(self, x: torch.Tensor) -> torch.Tensor:
         """
         Normalizes the vector of gradients.
         In the L2 space, this is done by dividing the vector by its norm.
@@ -84,18 +84,18 @@ class PGDAdversary(Adversary):
         if self.inf_norm:
             return x.sign()
         else:
-            norm = self.norm_(x)
+            norm = self._norm(x)
             if norm == 0:
                 return x * 0
             return x / norm
     
-    def project_(self, x: torch.Tensor, rho: float) -> torch.Tensor:
+    def _project(self, x: torch.Tensor, rho: float) -> torch.Tensor:
         """
         Projects the vector onto the rho-ball.
         In the L2 space, this is done by scaling the vector.
         In the L-inf space, this is done by clamping all components independently.
         """
-        return x.clamp(-rho, rho) if self.inf_norm else (x / self.norm_(x) * rho)
+        return x.clamp(-rho, rho) if self.inf_norm else (x / self._norm(x) * rho)
     
     def perturb(self, initial_vector: torch.Tensor,
                 get_gradient: Callable[[torch.Tensor], Tuple[torch.Tensor, float, object]]) -> torch.Tensor:
@@ -119,12 +119,12 @@ class PGDAdversary(Adversary):
                     # uniform radius, random direction
                     # note that this distribution is not uniform in terms of R^n!
                     perturbation = torch.randn(1, x1.numel(), dtype=self.dtype)
-                    perturbation /= self.norm_(perturbation) / rho
+                    perturbation /= self._norm(perturbation) / rho
                     perturbation *= np.random.rand()
                 perturbation = Util.conditional_to_cuda(perturbation)
 
             if self.verbose > 0:
-                print(f">> #run = {run_n}, ║x1║ = {self.norm_(x1):.5f}, ρ = {rho:.5f}")
+                print(f">> #run = {run_n}, ║x1║ = {self._norm(x1):.5f}, ρ = {rho:.5f}")
 
             found = False
             for i in range(self.steps):
@@ -134,25 +134,25 @@ class PGDAdversary(Adversary):
                 if self.verbose > 0:
                     if classification_loss > self.stop_loss or i == self.steps - 1 or i % 5 == 0 and self.verbose > 1:
                         print(f"step {i:3d}: objective = {classification_loss:7f}, "
-                                f"║Δx║ = {self.norm_(perturbation):.5f}, ║x║ = {self.norm_(perturbed_vector):.5f}, {aux_info}")
+                                f"║Δx║ = {self._norm(perturbation):.5f}, ║x║ = {self._norm(perturbed_vector):.5f}, {aux_info}")
                 if classification_loss > self.stop_loss:
                     found = True
                     break
                 # learning step
-                perturbation_step = rho * self.step_size * self.normalize_gradient_(classification_gradient)
+                perturbation_step = rho * self.step_size * self._normalize_gradient(classification_gradient)
                 if perturbation_step.norm() == 0:
                     print(f"zero gradient, stopping")
                     break
                 perturbation += perturbation_step
                 # projecting on rho-ball around x1
-                if self.norm_(perturbation) > rho:
-                    perturbation = self.project_(perturbation, rho)
+                if self._norm(perturbation) > rho:
+                    perturbation = self._project(perturbation, rho)
 
             # end of run
             if found:
                 if self.shrinking_repeats:
-                    if self.norm_(perturbation) < best_perturbation_norm:
-                        best_perturbation_norm = self.norm_(perturbation)
+                    if self._norm(perturbation) < best_perturbation_norm:
+                        best_perturbation_norm = self._norm(perturbation)
                         best_perturbation = perturbation
                         rho = best_perturbation_norm
                 else: # regular repeats

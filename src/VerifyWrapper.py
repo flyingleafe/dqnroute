@@ -1,4 +1,5 @@
 import os
+import time
 
 def run(command: str, config_file: str, temperature: float, cost_bound: float, more_args: str = ""):
     os.system(f"ipython Verify.py -- --command {command} --config_file ../launches/igor/{config_file} --softmax_temperature {temperature} --cost_bound {cost_bound} --marabou_path ../../Marabou/build/Marabou {more_args}")
@@ -21,6 +22,7 @@ command, command_args = "compare", ""
 if command_args != "":
     command_args += " "
 
+start_time = time.time()
 run(command, config[0], config[1], config[2], more_args=command_args+(
     #""
     #"--skip_graphviz --verification_lr 0.001"
@@ -29,3 +31,4 @@ run(command, config[0], config[1], config[2], more_args=command_args+(
     #"--skip_graphviz --force_pretrain --force_train"
     #"--skip_graphviz --force_train"
 ))
+print(f"Elapsed time: {time.time() - start_time:.3f} s")

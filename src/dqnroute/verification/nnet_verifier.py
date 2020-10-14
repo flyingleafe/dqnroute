@@ -25,65 +25,6 @@ from utils.writeNNet import writeNNet
 ROUND_DIGITS = 3
 
 
-class VerificationResult(ABC):
-    @staticmethod
-    def from_marabou(marabou_lines: List[str], input_dim: int, output_dim: int):
-        xs = np.zeros(input_dim)  + np.nan
-        ys = np.zeros(output_dim) + np.nan
-        for line in marabou_lines:
-            tokens = re.split(" *= *", line)
-            if len(tokens) == 2:
-                #print(tokens)
-                value = float(tokens[1])
-                index = int(tokens[0][1:])
-                symbol = tokens[0].strip()[0]
-                if symbol == "x":
-                    xs[index] = value
-                elif symbol == "y":
-                    ys[index] = value
-                else:
-                    raise RuntimeError(f"Unexpected assignment {line}.")
-        assert np.isnan(xs).all() == np.isnan(ys).all(), \
-               f"Problems with reading a counterexample (xs={xs}, ys={ys}, lines={lines})!"
-        return Verified() if np.isnan(xs).all() else Counterexample(xs, ys)
-        
-
-class Verified(VerificationResult):
-    def __str__(self):
-        return "Verified"
-        
-
-def marabou_float2str(x: float) -> str:
-    return f"{x:.15f}"
-
-
-class Counterexample(VerificationResult):
-    def __init__(self, xs: np.ndarray, ys: np.ndarray):
-        self.xs = xs
-        self.ys = ys
-        self.probabilities = None
-        self.objective_value = None
-    
-    def add_objective_value(self, probabilities: np.ndarray, objective_value: float):
-        self.probabilities = probabilities
-        self.objective_value = objective_value
-    
-    def __str__(self):
-        round_list = lambda x: Util.list_round(x, ROUND_DIGITS)
-        probs = "?" if self.probabilities   is None else f"{round_list(self.probabilities)}"
-        obj = "?"   if self.objective_value is None else f"{self.objective_value:.4f}"
-        return (f"Counterexample{{embeddings = {round_list(self.xs)},"
-                               f" Q values = {round_list(self.ys)},"
-                               f" probabilities = {probs}, objective = {obj}}}")
-
-def verify_conjunction(calls: List[Callable[[], VerificationResult]]) -> VerificationResult:
-    for call in calls:
-        result = call()
-        if type(result) == Counterexample:
-            return result
-    return Verified()
-
-
 class ProbabilityRegion:
     def __init__(self, lower_bounds: np.ndarray, upper_bounds: np.ndarray, verifier: 'NNetVerifier'):
         assert lower_bounds.shape == upper_bounds.shape
@@ -137,6 +78,69 @@ class ProbabilityRegion:
         upper1[longest_dimension] = lower2[longest_dimension] = split_value
         return (ProbabilityRegion(self.lower_bounds, upper1, self.verifier),
                 ProbabilityRegion(lower2, self.upper_bounds, self.verifier))
+
+
+class VerificationResult(ABC):
+    @staticmethod
+    def from_marabou(marabou_lines: List[str], input_dim: int, output_dim: int):
+        xs = np.zeros(input_dim)  + np.nan
+        ys = np.zeros(output_dim) + np.nan
+        for line in marabou_lines:
+            tokens = re.split(" *= *", line)
+            if len(tokens) == 2:
+                #print(tokens)
+                value = float(tokens[1])
+                index = int(tokens[0][1:])
+                symbol = tokens[0].strip()[0]
+                if symbol == "x":
+                    xs[index] = value
+                elif symbol == "y":
+                    ys[index] = value
+                else:
+                    raise RuntimeError(f"Unexpected assignment {line}.")
+        assert np.isnan(xs).all() == np.isnan(ys).all(), \
+               f"Problems with reading a counterexample (xs={xs}, ys={ys}, lines={lines})!"
+        return Verified() if np.isnan(xs).all() else Counterexample(xs, ys)
+        
+
+class Verified(VerificationResult):
+    def __str__(self):
+        return "Verified"
+        
+
+def marabou_float2str(x: float) -> str:
+    return f"{x:.15f}"
+
+
+class Counterexample(VerificationResult):
+    def __init__(self, xs: np.ndarray, ys: np.ndarray):
+        self.xs = xs
+        self.ys = ys
+        self.probabilities = None
+        self.objective_value = None
+    
+    def add_objective_value(self, probabilities: np.ndarray, objective_value: float):
+        self.probabilities = probabilities
+        self.objective_value = objective_value
+    
+    def belongs_to(self, r: ProbabilityRegion) -> bool:
+        assert self.probabilities is not None
+        return (self.probabilities >= r.lower_bounds).all() and (self.probabilities <= r.upper_bounds).all()
+    
+    def __str__(self):
+        round_list = lambda x: Util.list_round(x, ROUND_DIGITS)
+        probs = "?" if self.probabilities   is None else f"{round_list(self.probabilities)}"
+        obj = "?"   if self.objective_value is None else f"{self.objective_value:.4f}"
+        return (f"Counterexample{{embeddings = {round_list(self.xs)},"
+                               f" Q values = {round_list(self.ys)},"
+                               f" probabilities = {probs}, objective = {obj}}}")
+
+def verify_conjunction(calls: List[Callable[[], VerificationResult]]) -> VerificationResult:
+    for call in calls:
+        result = call()
+        if type(result) == Counterexample:
+            return result
+    return Verified()
 
     
 class NNetVerifier:
@@ -295,11 +299,12 @@ class NNetVerifier:
         self._verified_volume_meter = 0.0
         
         region = ProbabilityRegion.get_initial(len(ma.params), self)
-        return self._verify_cost_delivery_bound(sink, source, ma, input_eps_l_inf, cost_bound, region, 0)
+        return self._verify_cost_delivery_bound(sink, source, ma, input_eps_l_inf, cost_bound, region, 0, None)
     
     def _verify_cost_delivery_bound(self, sink: AgentId, source: AgentId, ma: MarkovAnalyzer,
                                     input_eps_l_inf: float, cost_bound: float,
-                                    region: ProbabilityRegion, depth: int) -> VerificationResult:
+                                    region: ProbabilityRegion, depth: int,
+                                    upper_level_counterexample: Union[Counterexample, None]) -> VerificationResult:
         m = len(ma.params)
         n = self.embedding_packer.number_of_embeddings()
         print(f"    [depth={depth}] Verified probability mass percentage: {self._verified_fraction(m) * 100:.2f}%")
@@ -330,34 +335,41 @@ class NNetVerifier:
         assert type(result) == Counterexample
         
         # 3. If R is reachable, check whether the bound is exceeded for the found example
-        # TODO run the network on the found point
-        with torch.no_grad():
-            xs = Util.conditional_to_cuda(torch.DoubleTensor(result.xs))
-            ys = Util.conditional_to_cuda(torch.DoubleTensor(result.ys))
-            embedding_dict = self.embedding_packer.unpack(xs)
-            objective_value, ps = self.embedding_packer.compute_objective(
-                embedding_dict, ma.nontrivial_diverters, self.lambdified_objective,
-                self.softmax_temperature, self.probability_smoothing)
-            objective_value = objective_value.item()
-            executed_ps = [p.item() for p in ps]
-            counterexample_ps = [Util.q_values_to_first_probability(ys[(2 * i):(2 * i+2)], self.softmax_temperature,
-                                                                    self.probability_smoothing).item()
-                                 for i in range(m)]
-        print(f"    [depth={depth}] Checking candidate counterexample with"
-              f" ys={Util.list_round(counterexample_ps, ROUND_DIGITS)}"
-              f" [cross-check: {Util.list_round(executed_ps, ROUND_DIGITS)}]...")
-        if objective_value >= cost_bound:
+        # 3.1. In the simplest case, we already have a counterexample from a parent call.
+        # We may produce a new one, but let's save a verification call.
+        if upper_level_counterexample is not None and upper_level_counterexample.belongs_to(region):
+            print(f"    [depth={depth}] Not attempting to compute a new counterexample.")
+            result = upper_level_counterexample
+        else:
+            # 3.2. Otherwise, make a verification call.
+            with torch.no_grad():
+                xs = Util.conditional_to_cuda(torch.DoubleTensor(result.xs))
+                ys = Util.conditional_to_cuda(torch.DoubleTensor(result.ys))
+                embedding_dict = self.embedding_packer.unpack(xs)
+                objective_value, ps = self.embedding_packer.compute_objective(
+                    embedding_dict, ma.nontrivial_diverters, self.lambdified_objective,
+                    self.softmax_temperature, self.probability_smoothing)
+                objective_value = objective_value.item()
+                executed_ps = [p.item() for p in ps]
+                counterexample_ps = [
+                    Util.q_values_to_first_probability(ys[(2 * i):(2 * i + 2)],
+                                                       self.softmax_temperature,
+                                                       self.probability_smoothing).item() for i in range(m)
+                ]
+            print(f"    [depth={depth}] Checking candidate counterexample with"
+                  f" ys={Util.list_round(counterexample_ps, ROUND_DIGITS)}"
+                  f" [cross-check: {Util.list_round(executed_ps, ROUND_DIGITS)}]...")
             result.add_objective_value(np.array(counterexample_ps), objective_value)
-            print(f"    [depth={depth}] True counterexample found!")
-            return result
-        
+            if objective_value >= cost_bound:
+                print(f"    [depth={depth}] True counterexample found!")
+                return result
+
         # 4. If no conclusion can be made, split R and try recursively
         print(f"    [depth={depth}] No conclusion, trying recursively...")
         r1, r2 = region.split()
         calls = [lambda: self._verify_cost_delivery_bound(
-            sink, source, ma, input_eps_l_inf, cost_bound, r, depth + 1) for r in [r1, r2]]
-        result = verify_conjunction(calls)
-        return result
+            sink, source, ma, input_eps_l_inf, cost_bound, r, depth + 1, result) for r in [r1, r2]]
+        return verify_conjunction(calls)
         
     def verify_adv_robustness(self, net: torch.nn.Module, weights: List[torch.Tensor],
                               biases: List[torch.Tensor], input_center: torch.Tensor, input_eps: float,
