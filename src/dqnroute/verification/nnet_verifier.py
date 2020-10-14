@@ -201,6 +201,8 @@ class NNetVerifier:
     @torch.no_grad()
     def create_large_blocks(self, probability_dimension: int):
         self.A_large = Util.make_block_diagonal(self.A_new, probability_dimension)
+        # this is a product of block diagonal matrices, so it can be implemented faster,
+        # but this is done only once:
         self.A_large = self.A_large @ self.emb_conversion
                                   
         self.B_large, self.C_large = [Util.make_block_diagonal(x, probability_dimension)

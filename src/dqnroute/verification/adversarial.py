@@ -2,7 +2,6 @@ import numpy as np
 import torch
 from typing import *
 from abc import ABC, abstractmethod
-import contextlib
 
 from .ml_util import Util
 
@@ -100,71 +99,69 @@ class PGDAdversary(Adversary):
     
     def perturb(self, initial_vector: torch.Tensor,
                 get_gradient: Callable[[torch.Tensor], Tuple[torch.Tensor, float, object]]) -> torch.Tensor:
-        #with torch.autograd.detect_anomaly():
-        with contextlib.nullcontext():
-            best_perturbation = None
-            best_perturbation_norm = np.infty
-            # rho may potentially shrink with repeat_mode == "min":
-            rho = self.rho
-            random_start = self.random_start
-            for run_n in range(self.n_repeat):
-                x1 = initial_vector * 1
-                perturbation = x1 * 0
+        best_perturbation = None
+        best_perturbation_norm = np.infty
+        # rho may potentially shrink with repeat_mode == "min":
+        rho = self.rho
+        random_start = self.random_start
+        for run_n in range(self.n_repeat):
+            x1 = initial_vector * 1
+            perturbation = x1 * 0
 
-                if random_start:
-                    # random vector within the rho-ball
-                    if self.inf_norm:
-                        # uniform
-                        perturbation = (torch.rand(1, x1.numel(), dtype=self.dtype) - 0.5) * 2 * rho
-                        # possibly reduce radius to encourage search of vectors with smaller norms
-                        perturbation *= np.random.rand()
-                    else:
-                        # uniform radius, random direction
-                        # note that this distribution is not uniform in terms of R^n!
-                        perturbation = torch.randn(1, x1.numel(), dtype=self.dtype)
-                        perturbation /= self.norm_(perturbation) / rho
-                        perturbation *= np.random.rand()
-                    perturbation = Util.conditional_to_cuda(perturbation)
+            if random_start:
+                # random vector within the rho-ball
+                if self.inf_norm:
+                    # uniform
+                    perturbation = (torch.rand(1, x1.numel(), dtype=self.dtype) - 0.5) * 2 * rho
+                    # possibly reduce radius to encourage search of vectors with smaller norms
+                    perturbation *= np.random.rand()
+                else:
+                    # uniform radius, random direction
+                    # note that this distribution is not uniform in terms of R^n!
+                    perturbation = torch.randn(1, x1.numel(), dtype=self.dtype)
+                    perturbation /= self.norm_(perturbation) / rho
+                    perturbation *= np.random.rand()
+                perturbation = Util.conditional_to_cuda(perturbation)
 
+            if self.verbose > 0:
+                print(f">> #run = {run_n}, ║x1║ = {self.norm_(x1):.5f}, ρ = {rho:.5f}")
+
+            found = False
+            for i in range(self.steps):
+                #assert not torch.isnan(perturbation).any()
+                perturbed_vector = x1 + perturbation
+                classification_gradient, classification_loss, aux_info = get_gradient(perturbed_vector)
                 if self.verbose > 0:
-                    print(f">> #run = {run_n}, ║x1║ = {self.norm_(x1):.5f}, ρ = {rho:.5f}")
+                    if classification_loss > self.stop_loss or i == self.steps - 1 or i % 5 == 0 and self.verbose > 1:
+                        print(f"step {i:3d}: objective = {classification_loss:7f}, "
+                                f"║Δx║ = {self.norm_(perturbation):.5f}, ║x║ = {self.norm_(perturbed_vector):.5f}, {aux_info}")
+                if classification_loss > self.stop_loss:
+                    found = True
+                    break
+                # learning step
+                perturbation_step = rho * self.step_size * self.normalize_gradient_(classification_gradient)
+                if perturbation_step.norm() == 0:
+                    print(f"zero gradient, stopping")
+                    break
+                perturbation += perturbation_step
+                # projecting on rho-ball around x1
+                if self.norm_(perturbation) > rho:
+                    perturbation = self.project_(perturbation, rho)
 
-                found = False
-                for i in range(self.steps):
-                    #assert not torch.isnan(perturbation).any()
-                    perturbed_vector = x1 + perturbation
-                    classification_gradient, classification_loss, aux_info = get_gradient(perturbed_vector)
-                    if self.verbose > 0:
-                        if classification_loss > self.stop_loss or i == self.steps - 1 or i % 5 == 0 and self.verbose > 1:
-                            print(f"step {i:3d}: objective = {classification_loss:7f}, "
-                                  f"║Δx║ = {self.norm_(perturbation):.5f}, ║x║ = {self.norm_(perturbed_vector):.5f}, {aux_info}")
-                    if classification_loss > self.stop_loss:
-                        found = True
-                        break
-                    # learning step
-                    perturbation_step = rho * self.step_size * self.normalize_gradient_(classification_gradient)
-                    if perturbation_step.norm() == 0:
-                        print(f"zero gradient, stopping")
-                        break
-                    perturbation += perturbation_step
-                    # projecting on rho-ball around x1
-                    if self.norm_(perturbation) > rho:
-                        perturbation = self.project_(perturbation, rho)
-
-                # end of run
-                if found:
-                    if self.shrinking_repeats:
-                        if self.norm_(perturbation) < best_perturbation_norm:
-                            best_perturbation_norm = self.norm_(perturbation)
-                            best_perturbation = perturbation
-                            rho = best_perturbation_norm
-                    else: # regular repeats
-                        # return immediately
-                        return self.optional_normalize_(x1 + perturbation)
-                if best_perturbation is None:
-                    best_perturbation = perturbation
-                if self.shrinking_repeats and run_n == self.n_repeat - 1:
-                    # heuristic: the last run is always from the center
-                    random_start = False
-            return x1 + best_perturbation
+            # end of run
+            if found:
+                if self.shrinking_repeats:
+                    if self.norm_(perturbation) < best_perturbation_norm:
+                        best_perturbation_norm = self.norm_(perturbation)
+                        best_perturbation = perturbation
+                        rho = best_perturbation_norm
+                else: # regular repeats
+                    # return immediately
+                    return self.optional_normalize_(x1 + perturbation)
+            if best_perturbation is None:
+                best_perturbation = perturbation
+            if self.shrinking_repeats and run_n == self.n_repeat - 1:
+                # heuristic: the last run is always from the center
+                random_start = False
+        return x1 + best_perturbation
 

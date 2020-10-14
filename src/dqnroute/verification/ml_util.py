@@ -4,8 +4,6 @@ import random
 from typing import *
 from abc import ABC, abstractmethod
 
-import matplotlib
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
@@ -147,5 +145,4 @@ class Util(ABC):
     def list_round(x, digits: int) -> list:
         if issubclass(type(x), torch.Tensor):
             x = Util.to_numpy(x)
-        #print(x)
         return [round(y, digits) for y in x]

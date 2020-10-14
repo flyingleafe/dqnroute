@@ -26,29 +26,50 @@ NETWORK_FILENAME = "../network.nnet"
 PROPERTY_FILENAME = "../property.txt"
 
 parser = argparse.ArgumentParser(description="Verifier of baggage routing neural networks.")
+
+# general parameters
 parser.add_argument("--command", type=str, required=True,
                     help=("one of compare, deterministic_test, embedding_adversarial_search, "
                           "embedding_adversarial_verification, embedding_adversarial_full_verification, "
                           "compute_expected_cost, q_adversarial, q_adversarial_lipschitz"))
 parser.add_argument("--config_file", type=str, required=True,
                     help="YAML config file with the topology graph and other configuration info")
-parser.add_argument("--probability_smoothing", type=float, default=0.01,
-                    help="smoothing (0..1) of probabilities during learning and verification (defaut: 0.01)")
 parser.add_argument("--random_seed", type=int, default=42,
                     help="random seed for pretraining and training (default: 42)")
+parser.add_argument("--pretrain_num_episodes", type=int, default=10000,
+                    help="number of episodes for supervised pretraining (default: 10000)")
 parser.add_argument("--force_pretrain", action="store_true",
                     help="whether not to load previously saved pretrained models and force recomputation")
 parser.add_argument("--force_train", action="store_true",
                     help="whether not to load previously saved trained models and force recomputation")
-parser.add_argument("--simple_path_cost", action="store_true",
-                    help="use the number of transitions instead of the total conveyor length as path cost")
 parser.add_argument("--skip_graphviz", action="store_true",
                     help="do not visualize graphs")
+
+# parameters that alter both learning and verifications
+parser.add_argument("--probability_smoothing", type=float, default=0.01,
+                    help="smoothing (0..1) of probabilities during learning and verification (defaut: 0.01)")
 parser.add_argument("--softmax_temperature", type=float, default=1.5,
                     help=("custom softmax temperature (higher temperature means larger entropy in routing "
                           "decisions; default: 1.5)"))
+
+# common verification / adversarial search parameters
 parser.add_argument("--cost_bound", type=float, default=100.0,
-                    help="upper bound on delivery cost to verify (default: 100)")
+                    help="upper bound on expected delivery cost to verify (default: 100)")
+parser.add_argument("--simple_path_cost", action="store_true",
+                    help="use the number of transitions instead of the total conveyor length as path cost")
+parser.add_argument("--input_eps_l_inf", type=float, default=0.1,
+                    help="maximum L_∞ discrepancy of input embeddings in adversarial robustness "
+                         "verification or search (default: 0.1)")
+
+# parameters specific to adversarial search with PGD (embedding_adversarial_search)
+parser.add_argument("--input_eps_l_2", type=float, default=1.5,
+                    help="maximum (scaled by dimension) L_2 discrepancy of input embeddings in "
+                         "adversarial search (default: 1.5)")
+parser.add_argument("--adversarial_search_use_l_2", action="store_true",
+                    help="use L_2 norm (scaled by dimension) instead of L_∞ norm during adversarial search")
+
+# parameters specific to learning step verification
+# (q_adversarial, q_adversarial_lipschitz)
 parser.add_argument("--verification_lr", type=float, default=0.001,
                     help="learning rate in learning step verification (default: 0.001)")
 parser.add_argument("--input_max_delta_q", type=float, default=10.0,
@@ -56,26 +77,19 @@ parser.add_argument("--input_max_delta_q", type=float, default=10.0,
 parser.add_argument("--q_adversarial_no_points", type=int, default=351,
                     help="number of points used to create plots in command q_adversarial")
 
-# commands for verification with Marabou
+# parameters specific to verification with Marabou
+# (embedding_adversarial_verification, embedding_adversarial_full_verification)
 parser.add_argument("--marabou_path", type=str, default=None,
-                    help="path to the Marabou executable (for command embedding_adversarial_verification)")
-parser.add_argument("--input_eps_l_inf", type=float, default=0.1,
-                    help="maximum L-infty not discrepancy of input embeddings in adversarial robustness verification (default: 0.1)")
+                    help="path to the Marabou executable")
 parser.add_argument("--output_max_delta_q", type=float, default=10.0,
                     help="maximum ΔQ in adversarial robustness verification (default: 10.0)")
 parser.add_argument("--output_max_delta_p", type=float, default=0.1,
                     help="maximum Δp in adversarial robustness verification (default: 0.1)")
 
-parser.add_argument("--pretrain_num_episodes", type=int, default=10000,
-                    help="pretrain_num_episodes (default: 10000)")
-
 args = parser.parse_args()
 
 for dirname in ["../logs", "../img"]:
-    try:
-        os.mkdir(dirname)
-    except FileExistsError:
-        pass
+    os.makedirs(dirname, exist_ok=True)
 
 os.environ["IGOR_OVERRDIDDED_SOFTMAX_TEMPERATURE"] = str(args.softmax_temperature)
 
@@ -221,6 +235,7 @@ else:
 # 3. train
 
 # FIXME?? random seed does not work in tranining!
+# TODO check whether this is fixed after making embeddings deterministic
 
 def run_single(file: str, router_type: str, random_seed: int, **kwargs):
     job_id = mk_job_id(router_type, random_seed)
@@ -345,16 +360,20 @@ if args.command == "deterministic_test":
                 else:
                     raise AssertionError()
 elif args.command == "embedding_adversarial_search":
-    adv = PGDAdversary(rho=1.5, steps=100, step_size=0.02, random_start=True, stop_loss=1e5, verbose=2,
-                       norm="scaled_l_2", n_repeat=2, repeat_mode="min", dtype=torch.float64)
+    if args.adversarial_search_use_l_2:
+        norm, norm_bound = "scaled_l_2", args.input_eps_l_2
+    else:
+        norm, norm_bound = "l_inf", args.input_eps_l_inf
+    adv = PGDAdversary(rho=norm_bound, steps=100, step_size=0.02, random_start=True, stop_loss=args.cost_bound,
+                       verbose=2, norm=norm, n_repeat=2, repeat_mode="min", dtype=torch.float64)
+    print(f"Trying to falsify ({norm}_norm(Δembedding) ≤ {norm_bound}) => (E(cost) < {args.cost_bound}).")
     for sink in g.sinks:
-        print(f"Measuring adversarial robustness of delivery to {sink}...")
+        print(f"Searching for adversarial examples for delivery to {sink}...")
         ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
         sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
         
         # gather all embeddings that we need to compute the objective
         embedding_packer = EmbeddingPacker(g, sink, sink_embedding, ma.reachable_nodes)
-        initial_vector = embedding_packer.initial_vector()
 
         for source in ma.reachable_sources:
             print(f"  Measuring adversarial robustness of delivery from {source} to {sink}...")
@@ -376,7 +395,13 @@ elif args.command == "embedding_adversarial_search":
                                       for param, value in zip(ma.params, objective_inputs)])
                 return x.grad, objective_value.item(), f"[{aux_info}]"
             
-            adv.perturb(initial_vector, get_gradient)
+            best_embedding = adv.perturb(embedding_packer.initial_vector(), get_gradient)
+            _, objective, aux_info = get_gradient(best_embedding)
+            print("Found counterexample!" if objective >= args.cost_bound else "Verified.")
+            print(f"Best perturbed vector: {Util.to_numpy(best_embedding).round(3).flatten().tolist()}"
+                  f" {aux_info}")
+
+            
 elif args.command == "embedding_adversarial_full_verification":
     nv = get_nnet_verifier()
     for sink in g.sinks:
