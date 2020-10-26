@@ -324,15 +324,20 @@ def get_nnet_verifier() -> NNetVerifier:
     return NNetVerifier(g, args.marabou_path, NETWORK_FILENAME, PROPERTY_FILENAME,
                         args.probability_smoothing, args.softmax_temperature, emb_dim)
 
+def get_sinks(ma_verbose: bool = True):
+    for sink in g.sinks:
+        ma = MarkovAnalyzer(g, sink, args.simple_path_cost, verbose=ma_verbose)
+        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
+        yield sink, sink_embedding, ma
+
 
 print(f"Running command {args.command}...")
 if args.command == "deterministic_test":
     for source in g.sources:
-        for sink in g.sinks:
+        for sink, sink_embedding, _ in get_sinks():
             print(f"Testing delivery from {source} to {sink}...")
             current_node = source
             visited_nodes = set()
-            sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
             while True:
                 if current_node in visited_nodes:
                     print("    FAIL due to cycle")
@@ -367,10 +372,8 @@ elif args.command == "embedding_adversarial_search":
     adv = PGDAdversary(rho=norm_bound, steps=100, step_size=0.02, random_start=True, stop_loss=args.cost_bound,
                        verbose=2, norm=norm, n_repeat=2, repeat_mode="min", dtype=torch.float64)
     print(f"Trying to falsify ({norm}_norm(Δembedding) ≤ {norm_bound}) => (E(cost) < {args.cost_bound}).")
-    for sink in g.sinks:
+    for sink, sink_embedding, ma in get_sinks():
         print(f"Searching for adversarial examples for delivery to {sink}...")
-        ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
-        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
         
         # gather all embeddings that we need to compute the objective
         embedding_packer = EmbeddingPacker(g, sink, sink_embedding, ma.reachable_nodes)
@@ -400,23 +403,17 @@ elif args.command == "embedding_adversarial_search":
             print("Found counterexample!" if objective >= args.cost_bound else "Verified.")
             print(f"Best perturbed vector: {Util.to_numpy(best_embedding).round(3).flatten().tolist()}"
                   f" {aux_info}")
-
-            
 elif args.command == "embedding_adversarial_full_verification":
     nv = get_nnet_verifier()
-    for sink in g.sinks:
+    for sink, _, ma in get_sinks():
         print(f"Verifying adversarial robustness of delivery to {sink}...")
-        ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
         for source in ma.reachable_sources:
             print(f"  Verifying adversarial robustness of delivery from {source} to {sink}...")
             result = nv.verify_cost_delivery_bound(sink, source, ma, args.input_eps_l_inf, args.cost_bound)
             print(f"    {result}")
 elif args.command == "embedding_adversarial_verification":
     nv = get_nnet_verifier()
-    for sink in g.sinks:
-        ma = MarkovAnalyzer(g, sink, args.simple_path_cost, verbose=False)
-        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
-        
+    for sink, sink_embedding, ma in get_sinks(False):
         # for each node from which the sink is reachable, verify q value stability
         for node in ma.reachable_nodes:
             if node[0] == "sink":
@@ -481,9 +478,7 @@ elif args.command == "embedding_adversarial_verification":
             print(f"  Verification result: {result}")
 elif args.command == "compute_expected_cost":
     sa = get_symbolic_analyzer()
-    for sink in g.sinks:
-        ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
-        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
+    for sink, sink_embedding, ma in get_sinks():
         sink_embeddings = sink_embedding.repeat(2, 1)
         for source in ma.reachable_sources:
             print(f"Delivery from {source} to {sink})...")
@@ -495,10 +490,8 @@ elif args.command == "compute_expected_cost":
 elif args.command == "q_adversarial":
     sa = get_symbolic_analyzer()
     plot_index = 0
-    for sink in g.sinks:
+    for sink, sink_embedding, ma in get_sinks():
         print(f"Measuring robustness of delivery to {sink}...")
-        ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
-        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
         sink_embeddings = sink_embedding.repeat(2, 1)
 
         for source in ma.reachable_sources:
@@ -515,15 +508,15 @@ elif args.command == "q_adversarial":
                                                        neighbor_embedding).flatten().item()
                     actual_qs = reference_q + np.linspace(-sa.delta_q_max, sa.delta_q_max,
                                                           args.q_adversarial_no_points)
-                    kappa = sa.get_transformed_cost(ma, objective, args.cost_bound)
-                    lambdified_kappa = sympy.lambdify(ma.params, kappa)
+                    kappa, lambdified_kappa = sa.get_transformed_cost(ma, objective, args.cost_bound)
                     objective_values = torch.empty(len(actual_qs))
                     kappa_values     = torch.empty(len(actual_qs))
                     for i, actual_q in enumerate(actual_qs):
                         ps = sa.compute_ps(ma, diverter, sink, sink_embeddings, reference_q, actual_q)
                         objective_values[i] = lambdified_objective(*ps)
                         kappa_values[i]     = lambdified_kappa(*ps)
-
+                    #print(((objective_values > args.cost_bound) != (kappa_values > 0)).sum()) 
+                        
                     # plot
                     fig, axes = plt.subplots(2, 1, figsize=(13, 6))
                     plt.subplots_adjust(hspace=0.3)
@@ -553,12 +546,9 @@ elif args.command == "q_adversarial_lipschitz":
     print(sa.net)
     sa.load_matrices()
     
-    for sink in g.sinks:
+    for sink, sink_embedding, ma in get_sinks():
         print(f"Measuring robustness of delivery to {sink}...")
-        ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
-        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
         sink_embeddings = sink_embedding.repeat(2, 1)
-        
         ps_function_names = [f"p{i}" for i in range(len(ma.params))]
         function_ps = [sympy.Function(name) for name in ps_function_names]
         evaluated_function_ps = [f(sa.beta) for f in function_ps]
@@ -606,8 +596,7 @@ elif args.command == "q_adversarial_lipschitz":
                         sa.E = sa.E[:,    :dim]; sa.E_hat = sa.E_hat[:,    :dim]
 
                     print(f"      τ(p) = {objective}, τ(p) < {args.cost_bound}?")
-                    kappa_of_p = sa.get_transformed_cost(ma, objective, args.cost_bound)
-                    lambdified_kappa = sympy.lambdify(ma.params, kappa_of_p)
+                    kappa_of_p, lambdified_kappa = sa.get_transformed_cost(ma, objective, args.cost_bound)
                     print(f"      κ(p) = {kappa_of_p}, κ(p) < 0?")
                     kappa_of_beta = kappa_of_p.subs(list(zip(ma.params, evaluated_function_ps)))
                     print(f"      κ(β) = {kappa_of_beta}, κ(β) < 0?")

@@ -229,16 +229,23 @@ class SymbolicAnalyzer:
         assert x.shape == (1, 1)
         return x[0, 0]
     
-    def get_transformed_cost(self, ma: MarkovAnalyzer, cost: sympy.Expr, cost_bound: float) -> sympy.Expr:
-        assert type(cost) == sympy.Mul
+    def get_transformed_cost(self, ma: MarkovAnalyzer, cost: sympy.Expr,
+                             cost_bound: float) -> Tuple[sympy.Expr, Callable]:
+        """
+        :param ma: MarkovAnalyzer.
+        :param cost: original expected delivery cost (τ) expression.
+        :param cost_bound: bound in cost to be verified.
+        :return: (transformed cost (κ) expression, its lambdified version).
+        """
+        nominator = sympy.Integer(1)
+        denominator = sympy.Integer(1)
         # walk through the product
         # if this is pow(something, -1), something is the denominator
         # the rest goes to the numerator
-        nominator = 1
-        for arg in cost.args:
+        for arg in cost.args if type(cost) == sympy.Mul else [cost]:
             if type(arg) == sympy.Pow:
                 assert type(arg.args[1]) == sympy.numbers.NegativeOne, type(arg.args[1])
-                denominator = arg.args[0]
+                denominator *= arg.args[0]
             else:
                 nominator *= arg            
         print(f"      nominator(p) = {nominator}")
@@ -247,13 +254,11 @@ class SymbolicAnalyzer:
         # compute the sign of v, then ensure that it is "+"
         # the values to subsitute are arbitrary within (0, 1)
         denominator_value = denominator.subs([(param, 0.5) for param in ma.params]).simplify()
-        print(f"      denominator(0.5) = {denominator_value:.4f}")
+        print(f"      denominator(0.5) = {float(denominator_value):.4f}")
         if denominator_value < 0:
             nominator *= -1
             denominator *= -1
         kappa = nominator - cost_bound * denominator
-        # Added later by Igor: Hmm, changing the signs looks stupid.
-        # I assume that just returning -kappa would suffice.
-        return kappa
+        return kappa, sympy.lambdify(ma.params, kappa)
                     
         
