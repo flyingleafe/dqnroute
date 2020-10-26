@@ -87,19 +87,6 @@ class Util(ABC):
         norm_vector = (np.sqrt(x.shape[1]) / torch.norm(x, dim=1)).unsqueeze(0)
         norm_vector = norm_vector.expand(x.shape[0], norm_vector.shape[1])
         return norm_vector @ x
-
-    @staticmethod
-    def smooth(p, alpha: float):
-        # smoothing to get rid of 0 and 1 probabilities that lead to saturated gradients
-        return (1 - alpha) * p + alpha / 2
-    
-    @staticmethod
-    def unsmooth(p, alpha: float):
-        return (p - alpha / 2) / (1 - alpha)
-
-    @staticmethod
-    def q_values_to_first_probability(qs: torch.Tensor, temperature: float, alpha: float) -> torch.Tensor:
-        return Util.smooth((qs / temperature).softmax(dim=0)[0], alpha)
     
     @staticmethod
     def to_numpy(x: torch.Tensor) -> np.ndarray:
@@ -146,3 +133,25 @@ class Util(ABC):
         if issubclass(type(x), torch.Tensor):
             x = Util.to_numpy(x)
         return [round(y, digits) for y in x]
+    
+    ### DQNroute-specific:
+    
+    @staticmethod
+    def smooth(p, alpha: float):
+        # smoothing to get rid of 0 and 1 probabilities that lead to saturated gradients
+        return (1 - alpha) * p + alpha / 2
+    
+    @staticmethod
+    def unsmooth(p, alpha: float):
+        return (p - alpha / 2) / (1 - alpha)
+
+    @staticmethod
+    def q_values_to_first_probability(qs: torch.Tensor, temperature: float, alpha: float) -> torch.Tensor:
+        return Util.smooth((qs / temperature).softmax(dim=0)[0], alpha)
+    
+    @staticmethod
+    def transform_embeddings(sink_embedding    : torch.Tensor,
+                             current_embedding : torch.Tensor,
+                             neighbor_embedding: torch.Tensor) -> torch.Tensor:
+        return torch.cat((sink_embedding     - current_embedding,
+                          neighbor_embedding - current_embedding), dim=1)
