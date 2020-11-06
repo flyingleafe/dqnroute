@@ -1,0 +1,117 @@
+configuration:
+  sinks: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
+  sources:
+    0: { upstream_conv: 0 }
+    1: { upstream_conv: 1 }
+    2: { upstream_conv: 2 }
+    3: { upstream_conv: 3 }
+  conveyors:
+    0:
+      length: 10
+      upstream: { type: 'conveyor', idx: 5, pos: 0 }
+    1:
+      length: 10
+      upstream: { type: 'conveyor', idx: 6, pos: 0 }
+    2:
+      length: 10
+      upstream: { type: 'conveyor', idx: 7, pos: 0 }
+    3:
+      length: 10
+      upstream: { type: 'conveyor', idx: 4, pos: 0 }
+    4:
+      length: 40
+      upstream: { type: 'conveyor', idx: 5, pos: 0 }
+    5:
+      length: 40
+      upstream: { type: 'conveyor', idx: 6, pos: 0 }
+    6:
+      length: 40
+      upstream: { type: 'conveyor', idx: 7, pos: 0 }
+    7:
+      length: 40
+      upstream: { type: 'conveyor', idx: 4, pos: 0 }
+    8:
+      length: 20
+      upstream: { type: 'sink', idx: 1 }
+    9:
+      length: 10
+      upstream: { type: 'sink', idx: 0 }
+    10:
+      length: 10
+      upstream: { type: 'conveyor', idx: 5, pos: 0 }
+    11:
+      length: 20
+      upstream: { type: 'sink', idx: 3 }
+    12:
+      length: 10
+      upstream: { type: 'sink', idx: 2 }
+    13:
+      length: 10
+      upstream: { type: 'conveyor', idx: 6, pos: 0 }
+    14:
+      length: 20
+      upstream: { type: 'sink', idx: 5 }
+    15:
+      length: 10
+      upstream: { type: 'sink', idx: 4 }
+    16:
+      length: 10
+      upstream: { type: 'conveyor', idx: 7, pos: 0 }
+    17:
+      length: 20
+      upstream: { type: 'sink', idx: 7 }
+    18:
+      length: 10
+      upstream: { type: 'sink', idx: 6 }
+    19:
+      length: 10
+      upstream: { type: 'conveyor', idx: 4, pos: 0 }
+  diverters:
+    0:
+      conveyor: 5
+      pos: 5
+      upstream_conv: 8
+    1:
+      conveyor: 8
+      pos: 10
+      upstream_conv: 9
+    2:
+      conveyor: 9
+      pos: 5
+      upstream_conv: 10
+    3:
+      conveyor: 6
+      pos: 5
+      upstream_conv: 11
+    4:
+      conveyor: 11
+      pos: 10
+      upstream_conv: 12
+    5:
+      conveyor: 12
+      pos: 5
+      upstream_conv: 13
+    6:
+      conveyor: 7
+      pos: 5
+      upstream_conv: 14
+    7:
+      conveyor: 14
+      pos: 10
+      upstream_conv: 15
+    8:
+      conveyor: 15
+      pos: 5
+      upstream_conv: 16
+    9:
+      conveyor: 4
+      pos: 5
+      upstream_conv: 17
+    10:
+      conveyor: 17
+      pos: 10
+      upstream_conv: 18
+    11:
+      conveyor: 18
+      pos: 5
+      upstream_conv: 19
