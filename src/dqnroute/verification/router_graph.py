@@ -186,7 +186,12 @@ class RouterGraph:
                 # compute the conveyor of the edge as the only node forming the intersection
                 # of the nodes of the edge
                 intersection = list(self._node_to_conveyor_ids[from_node].intersection(self._node_to_conveyor_ids[to_node]))
-                assert len(intersection) == 1, f"{from_node} at {self._node_to_conveyor_ids[from_node]}, {to_node} at {self._node_to_conveyor_ids[to_node]}"
+                if len(intersection) > 1:
+                    input(f"WARNING: during visualization, labeling of the edge {from_node} -> {to_node}"
+                          f" with a conveyor may be incorrect. This is likely due the existence of a conveyor"
+                          f" that starts at and leads to the same other conveyor. Correct handing of this"
+                          f" case have not yet been implemented. Press Enter to continue.")
+                #assert len(intersection) == 1, f"{from_node} at {self._node_to_conveyor_ids[from_node]}, {to_node} at {self._node_to_conveyor_ids[to_node]}"
                 e.attr["label"] = f"{self.get_edge_length(from_node, to_node)} [c{intersection[0]}]"
         
         return gv_graph

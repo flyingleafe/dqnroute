@@ -7,82 +7,67 @@ configuration:
     3: {upstream_conv: 3}
   conveyors:
     0:
-      length: 50
-      upstream: {type: 'conveyor', idx: 4, pos: 0}
+      length: 850
+      upstream: {type: 'sink', idx: 0}
     1:
-      length: 55
-      upstream: {type: 'conveyor', idx: 4, pos: 5}
+      length: 50
+      upstream: {type: 'conveyor', idx: 0, pos: 50}
     2:
       length: 50
-      upstream: {type: 'conveyor', idx: 5, pos: 0}
+      upstream: {type: 'conveyor', idx: 3, pos: 50}
     3:
-      length: 55
-      upstream: {type: 'conveyor', idx: 5, pos: 5}
-    4:
-      length: 800
-      upstream: {type: 'sink', idx: 0}
-    5:
-      length: 800
+      length: 850
       upstream: {type: 'sink', idx: 1}
+    4:
+      length: 260
+      upstream: {type: 'conveyor', idx: 3, pos: 350}
+    5:
+      length: 100
+      upstream: {type: 'conveyor', idx: 4, pos: 100}
     6:
-      length: 100
-      upstream: {type: 'conveyor', idx: 8, pos: 0}
+      length: 155
+      upstream: {type: 'conveyor', idx: 0, pos: 350}
     7:
-      length: 105
-      upstream: {type: 'conveyor', idx: 8, pos: 5}
+      length: 50
+      upstream: {type: 'conveyor', idx: 4, pos: 200}
     8:
-      length: 100
-      upstream: {type: 'conveyor', idx: 10, pos: 0}
+      length: 50
+      upstream: {type: 'conveyor', idx: 6, pos: 95}
     9:
-      length: 90
-      upstream: {type: 'conveyor', idx: 11, pos: 0}
+      length: 150
+      upstream: {type: 'conveyor', idx: 3, pos: 750}
     10:
-      length: 60
-      upstream: {type: 'conveyor', idx: 4, pos: 300}
-    11:
-      length: 60
-      upstream: {type: 'conveyor', idx: 5, pos: 300}
-    12:
-      length: 45
-      upstream: {type: 'conveyor', idx: 10, pos: 5}
-    13:
-      length: 45
-      upstream: {type: 'conveyor', idx: 11, pos: 5}
-    14:
-      length: 140
-      upstream: {type: 'conveyor', idx: 5, pos: 700}
-    15:
-      length: 140
-      upstream: {type: 'conveyor', idx: 4, pos: 700}
+      length: 150
+      upstream: {type: 'conveyor', idx: 0, pos: 750}
   diverters:
     0:
-      conveyor: 4
-      pos: 10
-      upstream_conv: 6
+      conveyor: 0
+      pos: 55
+      upstream_conv: 4
     1:
-      conveyor: 5
-      pos: 10
-      upstream_conv: 7
+      conveyor: 3
+      pos: 55
+      upstream_conv: 5
     2:
-      conveyor: 8
-      pos: 10
-      upstream_conv: 9
-    3:
-      conveyor: 10
-      pos: 10
-      upstream_conv: 13
-    4:
-      conveyor: 11
-      pos: 10
-      upstream_conv: 12
-    5:
       conveyor: 4
-      pos: 710
-      upstream_conv: 14
+      pos: 105
+      upstream_conv: 6
+    3:
+      conveyor: 6
+      pos: 100
+      upstream_conv: 7
+    4:
+      conveyor: 4
+      pos: 205
+      upstream_conv: 8
+    5:
+      conveyor: 0
+      pos: 755
+      upstream_conv: 9
     6:
-      conveyor: 5
-      pos: 710
-      upstream_conv: 15
+      conveyor: 3
+      pos: 755
+      upstream_conv: 10
 
 settings:
   bags_distr:
