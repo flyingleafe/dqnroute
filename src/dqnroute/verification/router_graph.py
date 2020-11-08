@@ -174,7 +174,7 @@ class RouterGraph:
                 n.attr[k] = v
         
         #for from_node in self.node_keys:
-        #    print(f"{from_node} -> {self.get_out_nodes(from_node)}")
+        #    print(f"{from_node} → {self.get_out_nodes(from_node)}")
         
         for from_node in self.node_keys:
             i1 = self.node_keys_to_indices[from_node]
@@ -187,7 +187,7 @@ class RouterGraph:
                 # of the nodes of the edge
                 intersection = list(self._node_to_conveyor_ids[from_node].intersection(self._node_to_conveyor_ids[to_node]))
                 if len(intersection) > 1:
-                    input(f"WARNING: during visualization, labeling of the edge {from_node} -> {to_node}"
+                    input(f"WARNING: during visualization, labeling of the edge {from_node} → {to_node}"
                           f" with a conveyor may be incorrect. This is likely due the existence of a conveyor"
                           f" that starts at and leads to the same other conveyor. Correct handing of this"
                           f" case have not yet been implemented. Press Enter to continue.")

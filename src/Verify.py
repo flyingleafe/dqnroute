@@ -251,7 +251,6 @@ def train(args, dir_with_models: str, pretrain_filename: str, train_filename: st
     # Igor: I did not see an easy way to change the code in a clean way
     os.environ["IGOR_OVERRIDDEN_DQN_LOAD_FILENAME"] = pretrain_filename
     os.environ["IGOR_TRAIN_PROBABILITY_SMOOTHING"] = str(args.probability_smoothing)
-    
     if retrain:
         if "IGOR_OMIT_TRAINING" in os.environ:
             del os.environ["IGOR_OMIT_TRAINING"]
@@ -260,7 +259,6 @@ def train(args, dir_with_models: str, pretrain_filename: str, train_filename: st
     
     event_series, runner = run_single(file=scenario, router_type=router_type, progress_step=500,
                                       ignore_saved=[True], random_seed=args.random_seed)
-    
     if router_type == "dqn_emb":
         world = runner.world
         net = next(iter(next(iter(world.handlers.values())).routers.values())).brain
@@ -273,7 +271,6 @@ def train(args, dir_with_models: str, pretrain_filename: str, train_filename: st
                 net.restore()
     else:
         world = None
-    
     return event_series, world
     
 
@@ -345,13 +342,12 @@ if args.command == "deterministic_test":
                     assert len(out_nodes) == 1
                     current_node = out_nodes[0]
                 elif current_node[0] == "diverter":
-                    current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(current_node,
-                                                                                             sink)
+                    current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(current_node, sink)
                     q_values = []
                     for neighbor, neighbor_embedding in zip(neighbors, neighbor_embeddings):
                         with torch.no_grad():
                             q = g.q_forward(current_embedding, sink_embedding, neighbor_embedding).item()
-                        print(f"        Q({current_node} -> {neighbor} | sink = {sink}) = {q:.4f}")
+                        print(f"        Q({current_node} → {neighbor} | sink = {sink}) = {q:.4f}")
                         q_values += [q]
                     best_neighbor_index = np.argmax(np.array(q_values))
                     current_node = neighbors[best_neighbor_index]
@@ -364,7 +360,7 @@ elif args.command == "embedding_adversarial_search":
         norm, norm_bound = "l_inf", args.input_eps_l_inf
     adv = PGDAdversary(rho=norm_bound, steps=100, step_size=0.02, random_start=True, stop_loss=args.cost_bound,
                        verbose=2, norm=norm, n_repeat=2, repeat_mode="min", dtype=torch.float64)
-    print(f"Trying to falsify ({norm}_norm(Δembedding) ≤ {norm_bound}) => (E(cost) < {args.cost_bound}).")
+    print(f"Trying to falsify ({norm}_norm(Δembedding) ≤ {norm_bound}) ⇒ (E(cost) < {args.cost_bound}).")
     for sink, sink_embedding, ma in get_sinks():
         print(f"Searching for adversarial examples for delivery to {sink}...")
         
@@ -460,7 +456,7 @@ elif args.command == "embedding_adversarial_verification":
             # the format is essential, Marabou does not support the exponential format
             cases_to_check = ([f"+y0 -y1 <= {marabou_float2str(q_diff_min)}"] if q_diff_min != -np.infty else []) \
                            + ([f"+y0 -y1 >= {marabou_float2str(q_diff_max)}"] if q_diff_max !=  np.infty else [])
-            print(f"  cases to check: {cases_to_check}")
+            print(f"  Cases to check: {cases_to_check}")
             
             result = nv.verify_adv_robustness(
                 nv.net_new, [nv.A_new, nv.B_new, nv.C_new], [nv.a_new, nv.b_new, nv.c_new],
@@ -542,7 +538,7 @@ elif args.command == "q_adversarial_lipschitz":
             for node_key in g.node_keys:
                 current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
                 for neighbor_key, neighbor_embedding in zip(neighbors, neighbor_embeddings):
-                    print(f"    Considering learning step {node_key} -> {neighbor_key}...")
+                    print(f"    Considering learning step {node_key} → {neighbor_key}...")
                     lbc = LipschitzBoundComputer(sa, ma, objective, sink, current_embedding, sink_embedding,
                                                  neighbor_embedding, args.cost_bound)
                     if lbc.prove_bound():
@@ -560,11 +556,11 @@ elif args.command == "compare":
         }
     }
     _targets = {'time': 'avg', 'energy': 'sum', 'collisions': 'sum'}
-    _ylabels = {
-        'time': 'Mean delivery time', 'energy': 'Total energy consumption', 'collisions': 'Cargo collisions'
-    }
+    _ylabels = {'time': 'Mean delivery time', 'energy': 'Total energy consumption',
+                'collisions': 'Cargo collisions'}
     
-    router_types = ["dqn_emb", "link_state", "simple_q"]
+    # dqn_emb = DQNroute-LE, centralized_simple = BSR
+    router_types = ["dqn_emb", "centralized_simple", "link_state", "simple_q"]
     # reuse the log for dqn_emb:
     series = [dqn_log.getSeries(add_avg=True)]
     for router_type in router_types[1:]:
@@ -594,7 +590,6 @@ elif args.command == "compare":
                     print('Number of collisions:')
                     print_sums(df)
                     continue
-
                 xlim = kwargs.get(tag + '_xlim', xlim)
                 ylim = kwargs.get(tag + '_ylim', ylim)
                 save_path = kwargs.get(tag + '_save_path', save_path)
@@ -626,10 +621,10 @@ elif args.command == "compare":
         ax.set_ylabel(ylabel, fontsize=font_size)
 
         if save_path is not None:
-            fig.savefig(f'../img/' + save_path, bbox_inches='tight')
+            fig.savefig(f"../img/{save_path}", bbox_inches='tight')
     
     plot_data(dfs, figsize=(14, 8), font_size=22,
-              time_save_path='conveyors-break-1-time.pdf', energy_save_path='conveyors-break-1-energy.pdf')
+              time_save_path="time-plot.pdf", energy_save_path="energy-plot.pdf")
 
 else:
     raise RuntimeError(f"Unknown command {args.command}.")

@@ -11,13 +11,13 @@ config = ("acyclic_conveyor_energy_test.yaml", 1.5, 43.0)   # Mukhutdinov
 #config = ("johnstone2010.yaml", 3.0, 100000)                  # Almost real graph from the literature
 
 #command, command_args = "deterministic_test", ""
-#command, command_args = "embedding_adversarial_search", ""
+#command, command_args = "embedding_adversarial_search", "--input_eps_l_inf 0.1"
 #command, command_args = "embedding_adversarial_verification", "--output_max_delta_q 3.6 --input_eps_l_inf 0.1 --output_max_delta_p 0.00001"
 #command, command_args = "embedding_adversarial_full_verification", "--input_eps_l_inf 0.001"
-command, command_args = "q_adversarial", ""
+#command, command_args = "q_adversarial", ""
 #command, command_args = "compute_expected_cost", ""
 #command, command_args = "q_adversarial_lipschitz", ""
-#command, command_args = "compare", ""
+command, command_args = "compare", ""
 
 if command_args != "":
     command_args += " "
