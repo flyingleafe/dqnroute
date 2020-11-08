@@ -57,7 +57,15 @@ class HOPEEmbedding(Embedding):
 
         S = np.dot(np.linalg.inv(M_g), M_l)
 
-        u, s, vt = sp.linalg.svds(S, k=self.dim // 2)
+        # (Changed by Igor):
+        # Added v0 parameter, the "starting vector for iteration".
+        # Otherwise, the operation behaves nondeterministically, and as a result
+        # different nodes may learn different embeddings. I am not speaking about
+        # minor floating point errors, the problem was worse.
+
+        #u, s, vt = sp.linalg.svds(S, k=self.dim // 2)
+        u, s, vt = sp.linalg.svds(S, k=self.dim // 2, v0=np.ones(A.shape[0]))
+        
         X1 = np.dot(u, np.diag(np.sqrt(s)))
         X2 = np.dot(vt.T, np.diag(np.sqrt(s)))
         self._W = np.concatenate((X1, X2), axis=1)
