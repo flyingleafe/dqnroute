@@ -58,10 +58,16 @@ class SymbolicAnalyzer:
         result = relu((self.C + self.beta * self.C_hat) @ result + self.d + self.beta * self.d_hat)
         return        (self.E + self.beta * self.E_hat) @ result + self.f + self.beta * self.f_hat
     
-    #@torch.no_grad()
-    #def compute_reference_q(self, curent_embedding: torch.tensor, sink_embedding: torch.tensor,
-    #                        neighbor_embedding: torch.tensor):
-    #    return self.g.q_forward(current_embedding, sink_embedding, neighbor_embedding).flatten().item()
+    def mock_matrices(self, dim: int):
+        """
+        To be used during testing. Reduce the internal shapes of matrices to the given dimension.
+        This will make computations faster but also incorrect.
+        """
+        self.A = self.A[:dim, :];    self.A_hat = self.A_hat[:dim, :]
+        self.b = self.b[:dim, :];    self.b_hat = self.b_hat[:dim, :]
+        self.C = self.C[:dim, :dim]; self.C_hat = self.C_hat[:dim, :dim]
+        self.d = self.b[:dim, :];    self.d_hat = self.d_hat[:dim, :]
+        self.E = self.E[:,    :dim]; self.E_hat = self.E_hat[:,    :dim]
     
     def compute_gradients(self, curent_embedding: torch.Tensor, sink_embedding: torch.Tensor,
                           neighbor_embedding: torch.Tensor) -> torch.Tensor:
@@ -79,7 +85,7 @@ class SymbolicAnalyzer:
                 param -= (-1 if reverse else 1) * self.lr * mse_gradient
     
     @torch.no_grad()
-    def compute_ps(self, ma: MarkovAnalyzer, diverter: AgentId, sink: AgentId, sink_embeddings: torch.Tensor,
+    def compute_ps(self, ma: MarkovAnalyzer, sink: AgentId, sink_embeddings: torch.Tensor,
                    predicted_q: torch.Tensor, actual_q: torch.Tensor) -> List[float]:
         """
         Compute probabilities after a single step of a gradient descent.
@@ -229,16 +235,23 @@ class SymbolicAnalyzer:
         assert x.shape == (1, 1)
         return x[0, 0]
     
-    def get_transformed_cost(self, ma: MarkovAnalyzer, cost: sympy.Expr, cost_bound: float) -> sympy.Expr:
-        assert type(cost) == sympy.Mul
+    def get_transformed_cost(self, ma: MarkovAnalyzer, cost: sympy.Expr,
+                             cost_bound: float) -> Tuple[sympy.Expr, Callable]:
+        """
+        :param ma: MarkovAnalyzer.
+        :param cost: original expected delivery cost (τ) expression.
+        :param cost_bound: bound in cost to be verified.
+        :return: (transformed cost (κ) expression, its lambdified version).
+        """
+        nominator = sympy.Integer(1)
+        denominator = sympy.Integer(1)
         # walk through the product
         # if this is pow(something, -1), something is the denominator
         # the rest goes to the numerator
-        nominator = 1
-        for arg in cost.args:
+        for arg in cost.args if type(cost) == sympy.Mul else [cost]:
             if type(arg) == sympy.Pow:
                 assert type(arg.args[1]) == sympy.numbers.NegativeOne, type(arg.args[1])
-                denominator = arg.args[0]
+                denominator *= arg.args[0]
             else:
                 nominator *= arg            
         print(f"      nominator(p) = {nominator}")
@@ -247,13 +260,143 @@ class SymbolicAnalyzer:
         # compute the sign of v, then ensure that it is "+"
         # the values to subsitute are arbitrary within (0, 1)
         denominator_value = denominator.subs([(param, 0.5) for param in ma.params]).simplify()
-        print(f"      denominator(0.5) = {denominator_value:.4f}")
+        print(f"      denominator(0.5) = {float(denominator_value):.4f}")
         if denominator_value < 0:
             nominator *= -1
             denominator *= -1
         kappa = nominator - cost_bound * denominator
-        # Added later by Igor: Hmm, changing the signs looks stupid.
-        # I assume that just returning -kappa would suffice.
-        return kappa
-                    
+        return kappa, sympy.lambdify(ma.params, kappa)
+
+
+class LipschitzBoundComputer:
+    """
+    Verifies the given cost upper bound for learning step robustness.
+    """
+    
+    def __init__(self, sa: SymbolicAnalyzer, ma: MarkovAnalyzer, objective: sympy.Expr, sink: AgentId,
+                 current_embedding: torch.Tensor, sink_embedding: torch.Tensor, neighbor_embedding: torch.Tensor,
+                 cost_bound: float, mock_matrices: bool = False):
+        self.sa = sa
+        self.ma = ma
+        self.objective = objective
+        self.sink = sink
+        self.sink_embedding = sink_embedding
         
+        self.sink_embeddings = sink_embedding.repeat(2, 1)
+        self.computed_logits_and_derivatives: Dict[AgentId, Tuple[sympy.Expr, sympy.Expr]] = {}
+
+        self.reference_q = sa.compute_gradients(current_embedding, sink_embedding,
+                                                neighbor_embedding).flatten().item()
+        print(f"      Reference Q value = {self.reference_q:.4f}")
+        
+        sa.load_grad_matrices()
+        if mock_matrices:
+            sa.mock_matrices(7)
+            
+        self.ps_function_names = [f"p{i}" for i in range(len(ma.params))]
+        function_ps = [sympy.Function(name) for name in self.ps_function_names]
+        evaluated_function_ps = [f(sa.beta) for f in function_ps]
+            
+        print(f"      τ(p) = {objective}, τ(p) < {cost_bound}?")
+        kappa_of_p, self.lambdified_kappa = sa.get_transformed_cost(ma, objective, cost_bound)
+        print(f"      κ(p) = {kappa_of_p}, κ(p) < 0?")
+        kappa_of_beta = kappa_of_p.subs(list(zip(ma.params, evaluated_function_ps)))
+        print(f"      κ(β) = {kappa_of_beta}, κ(β) < 0?")
+        self.dkappa_dbeta = kappa_of_beta.diff(sa.beta)
+        print(f"      dκ(β)/dβ = {self.dkappa_dbeta}")
+        
+        self.empirical_bound, self.max_depth, self.no_evaluations, self.checked_q_measure = [None] * 4
+    
+    def _compute_logit_and_derivative(self, diverter_key: AgentId) -> Tuple[sympy.Expr, sympy.Expr]:
+        if diverter_key not in self.computed_logits_and_derivatives:
+            diverter_embedding, _, neighbor_embeddings = self.sa.g.node_to_embeddings(diverter_key, self.sink)
+            delta_e = [self.sa.tensor_to_sympy(Util.transform_embeddings(
+                self.sink_embedding, diverter_embedding, neighbor_embeddings[i]).T) for i in range(2)]
+            logit = self.sa.to_scalar(self.sa.sympy_q(delta_e[0]) -
+                                      self.sa.sympy_q(delta_e[1])) / self.sa.softmax_temperature
+            dlogit_dbeta = logit.diff(self.sa.beta)
+            self.computed_logits_and_derivatives[diverter_key] = logit, dlogit_dbeta
+        else:
+            print("      (using cached value)")
+        return self.computed_logits_and_derivatives[diverter_key]
+    
+    def prove_bound(self) -> bool:      
+        #  compute a pool of bounds
+        derivative_bounds = {}
+        for param, diverter_key in zip(self.ma.params, self.ma.nontrivial_diverters):
+            _, current_neighbors, _ = self.sa.g.node_to_embeddings(diverter_key, self.sink)
+            print(f"      Computing the logit and its derivative for {param} ="
+                  f" P({diverter_key} -> {current_neighbors[0]} | sink = {self.sink})....")
+            logit, dlogit_dbeta = self._compute_logit_and_derivative(diverter_key)
+            # surprisingly, the strings are very slow to obtain
+            #print(f"      logit = {sa.expr_to_string(logit)[:500]} ...")
+            #print(f"      dlogit/dβ = {sa.expr_to_string(dlogit_dbeta)[:500]} ...")
+            print(f"      Computing logit bounds...")
+            derivative_bounds[param.name] = self.sa.estimate_upper_bound(dlogit_dbeta)
+
+        print(f"      Computing the final upper bound on dκ(β)/dβ...")
+        top_level_bound = self.sa.estimate_top_level_upper_bound(self.dkappa_dbeta, self.ps_function_names,
+                                                                 derivative_bounds)
+        print(f"      Final upper bound on the Lipschitz constant of κ(β): {top_level_bound}")
+        left_q = -self.sa.delta_q_max + self.reference_q
+        right_q = self.sa.delta_q_max + self.reference_q
+        
+        # for recursive executions:
+        self.empirical_bound = -np.infty
+        self.max_depth = 0
+        self.no_evaluations = 2
+        self.checked_q_measure = 0.0
+        return self._prove_bound(left_q, right_q, self._q_to_kappa(left_q), self._q_to_kappa(right_q), 0)
+    
+    def _q_to_kappa(self, actual_q: float) -> float:
+        ps = self.sa.compute_ps(self.ma, self.sink, self.sink_embeddings, self.reference_q, actual_q)
+        return self.lambdified_kappa(*ps)
+                    
+    def _q_to_beta(self, actual_q: float) -> float:
+        return (actual_q - self.reference_q) * self.sa.lr
+    
+    def _prove_bound(self, left_q: float, right_q: float, left_kappa: float, right_kappa: float,
+                     depth: int) -> bool:
+        mid_q = (left_q + right_q) / 2
+        mid_kappa = self._q_to_kappa(mid_q)
+        actual_qs    = np.array([left_q,     mid_q,     right_q])
+        kappa_values = np.array([left_kappa, mid_kappa, right_kappa])
+        worst_index = kappa_values.argmax()
+        max_kappa = kappa_values[worst_index]
+        # 1. try to find counterexample
+        if max_kappa > 0:
+            worst_q = actual_qs[worst_index]
+            worst_dq = worst_q - reference_q
+            print(f"        Counterexample found: q = {worst_q:.6f}, Δq = {worst_dq:.6f},"
+                  f" β = {self._q_to_beta(worst_q):.6f}, κ = {max_kappa:.6f}")
+            return False
+            
+        # 2. try to find proof on [left, right]
+        kappa_upper_bound = -np.infty
+        max_on_interval = np.empty(2)
+        for i, (q_interval, kappa_interval) in enumerate(zip(self.sa.to_intervals(actual_qs),
+                                                             self.sa.to_intervals(kappa_values))):
+            left_beta, right_beta = self._q_to_beta(q_interval[0]), self._q_to_beta(q_interval[1])
+            max_on_interval[i] = (top_level_bound * (right_beta - left_beta) + sum(kappa_interval)) / 2
+        if max_on_interval.max() < 0:
+            self.checked_q_measure += right_q - left_q
+            return True
+        
+        # logging
+        self.no_evaluations += 1
+        self.max_depth = max(self.max_depth, depth)
+        self.empirical_bound = max(self.empirical_bound, max_kappa)
+        if self.no_evaluations % 100 == 0:
+            percentage = self.checked_q_measure / self.sa.delta_q_max / 2 * 100
+            print(f"      Status: {self.no_evaluations} evaluations, empirical bound is"
+                  f" {self.empirical_bound:.6f}, maximum depth is {self.max_depth}, checked Δq"
+                  f" percentage: {percentage:.2f}")
+        
+        # 3. otherwise, try recursively
+        calls = [(lambda: self._prove_bound(left_q, mid_q,   left_kappa, mid_kappa,   depth + 1)),
+                 (lambda: self._prove_bound(mid_q,  right_q, mid_kappa,  right_kappa, depth + 1))]
+        # to produce counetrexamples faster,
+        # start from the most empirically dangerous subinterval
+        if max_on_interval.argmax() == 1:
+            calls = calls[::-1]
+        return calls[0]() and calls[1]()

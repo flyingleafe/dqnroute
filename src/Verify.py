@@ -18,7 +18,7 @@ from dqnroute.verification.router_graph import RouterGraph
 from dqnroute.verification.adversarial import PGDAdversary
 from dqnroute.verification.ml_util import Util
 from dqnroute.verification.markov_analyzer import MarkovAnalyzer
-from dqnroute.verification.symbolic_analyzer import SymbolicAnalyzer
+from dqnroute.verification.symbolic_analyzer import SymbolicAnalyzer, LipschitzBoundComputer
 from dqnroute.verification.nnet_verifier import NNetVerifier, marabou_float2str
 from dqnroute.verification.embedding_packer import EmbeddingPacker
 
@@ -307,12 +307,6 @@ def visualize(g: RouterGraph):
 if not args.skip_graphviz:
     visualize(g)
 
-def transform_embeddings(sink_embedding    : torch.Tensor,
-                         current_embedding : torch.Tensor,
-                         neighbor_embedding: torch.Tensor) -> torch.Tensor:
-    return torch.cat((sink_embedding     - current_embedding,
-                      neighbor_embedding - current_embedding), dim=1)
-
 def get_symbolic_analyzer() -> SymbolicAnalyzer:
     return SymbolicAnalyzer(g, args.softmax_temperature, args.probability_smoothing,
                             args.verification_lr, delta_q_max=args.input_max_delta_q)
@@ -324,15 +318,19 @@ def get_nnet_verifier() -> NNetVerifier:
     return NNetVerifier(g, args.marabou_path, NETWORK_FILENAME, PROPERTY_FILENAME,
                         args.probability_smoothing, args.softmax_temperature, emb_dim)
 
+def get_sinks(ma_verbose: bool = True) -> Generator[Tuple[AgentId, torch.Tensor, MarkovAnalyzer], None, None]:
+    for sink in g.sinks:
+        ma = MarkovAnalyzer(g, sink, args.simple_path_cost, verbose=ma_verbose)
+        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
+        yield sink, sink_embedding, ma
 
 print(f"Running command {args.command}...")
 if args.command == "deterministic_test":
     for source in g.sources:
-        for sink in g.sinks:
+        for sink, sink_embedding, _ in get_sinks():
             print(f"Testing delivery from {source} to {sink}...")
             current_node = source
             visited_nodes = set()
-            sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
             while True:
                 if current_node in visited_nodes:
                     print("    FAIL due to cycle")
@@ -367,10 +365,8 @@ elif args.command == "embedding_adversarial_search":
     adv = PGDAdversary(rho=norm_bound, steps=100, step_size=0.02, random_start=True, stop_loss=args.cost_bound,
                        verbose=2, norm=norm, n_repeat=2, repeat_mode="min", dtype=torch.float64)
     print(f"Trying to falsify ({norm}_norm(Δembedding) ≤ {norm_bound}) => (E(cost) < {args.cost_bound}).")
-    for sink in g.sinks:
+    for sink, sink_embedding, ma in get_sinks():
         print(f"Searching for adversarial examples for delivery to {sink}...")
-        ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
-        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
         
         # gather all embeddings that we need to compute the objective
         embedding_packer = EmbeddingPacker(g, sink, sink_embedding, ma.reachable_nodes)
@@ -400,23 +396,17 @@ elif args.command == "embedding_adversarial_search":
             print("Found counterexample!" if objective >= args.cost_bound else "Verified.")
             print(f"Best perturbed vector: {Util.to_numpy(best_embedding).round(3).flatten().tolist()}"
                   f" {aux_info}")
-
-            
 elif args.command == "embedding_adversarial_full_verification":
     nv = get_nnet_verifier()
-    for sink in g.sinks:
+    for sink, _, ma in get_sinks():
         print(f"Verifying adversarial robustness of delivery to {sink}...")
-        ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
         for source in ma.reachable_sources:
             print(f"  Verifying adversarial robustness of delivery from {source} to {sink}...")
             result = nv.verify_cost_delivery_bound(sink, source, ma, args.input_eps_l_inf, args.cost_bound)
             print(f"    {result}")
 elif args.command == "embedding_adversarial_verification":
     nv = get_nnet_verifier()
-    for sink in g.sinks:
-        ma = MarkovAnalyzer(g, sink, args.simple_path_cost, verbose=False)
-        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
-        
+    for sink, sink_embedding, ma in get_sinks(False):
         # for each node from which the sink is reachable, verify q value stability
         for node in ma.reachable_nodes:
             if node[0] == "sink":
@@ -426,7 +416,7 @@ elif args.command == "embedding_adversarial_verification":
             current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node, sink)
             # for each neighbor
             for neighbor, neighbor_embedding in zip(neighbors, neighbor_embeddings):
-                emb_center = transform_embeddings(sink_embedding, current_embedding, neighbor_embedding)
+                emb_center = Util.transform_embeddings(sink_embedding, current_embedding, neighbor_embedding)
                 with torch.no_grad():
                     actual_output = nv.net(emb_center).item()
                 ROUND_DIGITS = 3
@@ -451,7 +441,7 @@ elif args.command == "embedding_adversarial_verification":
             print(f"Verifying the stability of routing probability for node={diverter} and sink={sink}...")
             current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(diverter, sink)
             # the first halves of these vectors are equal:
-            embs_center = [transform_embeddings(sink_embedding, current_embedding, neighbor_embedding)
+            embs_center = [Util.transform_embeddings(sink_embedding, current_embedding, neighbor_embedding)
                            for neighbor_embedding in neighbor_embeddings]
             #print(embs_center[1] - embs_center[0])
             emb_center = torch.cat((embs_center[0], embs_center[1][:, emb_dim:]), dim=1)
@@ -461,9 +451,7 @@ elif args.command == "embedding_adversarial_verification":
                                    torch.cat(neighbor_embeddings)).flatten()
             p = Util.q_values_to_first_probability(q_values, args.softmax_temperature,
                                                    args.probability_smoothing).item()
-            q_diff_min = nv.probability_to_q_diff(p - args.output_max_delta_p)
-            q_diff_max = nv.probability_to_q_diff(p + args.output_max_delta_p)
-            
+            q_diff_min, q_diff_max = [nv.probability_to_q_diff(p + i * args.output_max_delta_p) for i in [-1, 1]]
             print(f"  Q values: {Util.to_numpy(q_values)}")
             print(f"  p on real embedding: {p}")
             print(f"  Checking whether p is ins [{p - args.output_max_delta_p}, {p + args.output_max_delta_p}].")
@@ -481,24 +469,20 @@ elif args.command == "embedding_adversarial_verification":
             print(f"  Verification result: {result}")
 elif args.command == "compute_expected_cost":
     sa = get_symbolic_analyzer()
-    for sink in g.sinks:
-        ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
-        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
+    for sink, sink_embedding, ma in get_sinks():
         sink_embeddings = sink_embedding.repeat(2, 1)
         for source in ma.reachable_sources:
             print(f"Delivery from {source} to {sink})...")
             _, lambdified_objective = ma.get_objective(source)
-            ps = sa.compute_ps(ma, diverter, sink, sink_embeddings, 0, 0)
+            ps = sa.compute_ps(ma, sink, sink_embeddings, 0, 0)
             objective_value = lambdified_objective(*ps)
             print(f"    Computed probabilities: {Util.list_round(ps, 6)}")
             print(f"    E(delivery cost from {source} to {sink}) = {objective_value}")
 elif args.command == "q_adversarial":
     sa = get_symbolic_analyzer()
     plot_index = 0
-    for sink in g.sinks:
+    for sink, sink_embedding, ma in get_sinks():
         print(f"Measuring robustness of delivery to {sink}...")
-        ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
-        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
         sink_embeddings = sink_embedding.repeat(2, 1)
 
         for source in ma.reachable_sources:
@@ -515,22 +499,20 @@ elif args.command == "q_adversarial":
                                                        neighbor_embedding).flatten().item()
                     actual_qs = reference_q + np.linspace(-sa.delta_q_max, sa.delta_q_max,
                                                           args.q_adversarial_no_points)
-                    kappa = sa.get_transformed_cost(ma, objective, args.cost_bound)
-                    lambdified_kappa = sympy.lambdify(ma.params, kappa)
-                    objective_values = torch.empty(len(actual_qs))
-                    kappa_values     = torch.empty(len(actual_qs))
+                    kappa, lambdified_kappa = sa.get_transformed_cost(ma, objective, args.cost_bound)
+                    objective_values, kappa_values = [torch.empty(len(actual_qs)) for _ in range(2)]
                     for i, actual_q in enumerate(actual_qs):
-                        ps = sa.compute_ps(ma, diverter, sink, sink_embeddings, reference_q, actual_q)
+                        ps = sa.compute_ps(ma, sink, sink_embeddings, reference_q, actual_q)
                         objective_values[i] = lambdified_objective(*ps)
                         kappa_values[i]     = lambdified_kappa(*ps)
-
+                    #print(((objective_values > args.cost_bound) != (kappa_values > 0)).sum()) 
+                        
                     # plot
                     fig, axes = plt.subplots(2, 1, figsize=(13, 6))
                     plt.subplots_adjust(hspace=0.3)
                     caption_starts = "Delivery cost (τ)", "Transformed delivery cost (κ)"
                     axes[0].set_yscale("log")
-                    for ax, caption_start, values in zip(axes, caption_starts,
-                                                         (objective_values, kappa_values)):
+                    for ax, caption_start, values in zip(axes, caption_starts, (objective_values, kappa_values)):
                         label = (f"{caption_start} from {source} to {sink} when making optimization"
                                  f" step with current={node_key}, neighbor={neighbor_key}")
                         print(f"{label}...")
@@ -552,152 +534,18 @@ elif args.command == "q_adversarial_lipschitz":
     sa = get_symbolic_analyzer()
     print(sa.net)
     sa.load_matrices()
-    
-    for sink in g.sinks:
+    for sink, sink_embedding, ma in get_sinks():
         print(f"Measuring robustness of delivery to {sink}...")
-        ma = MarkovAnalyzer(g, sink, args.simple_path_cost)
-        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
-        sink_embeddings = sink_embedding.repeat(2, 1)
-        
-        ps_function_names = [f"p{i}" for i in range(len(ma.params))]
-        function_ps = [sympy.Function(name) for name in ps_function_names]
-        evaluated_function_ps = [f(sa.beta) for f in function_ps]
-        
-        # cached values
-        computed_logits_and_derivatives: Dict[AgentId, Tuple[sympy.Expr, sympy.Expr]] = {}
-        
-        def compute_logit_and_derivative(sa: SymbolicAnalyzer, diverter_key: AgentId) -> Tuple[sympy.Expr, sympy.Expr]:
-            if diverter_key not in computed_logits_and_derivatives:
-                diverter_embedding, _, neighbor_embeddings = g.node_to_embeddings(diverter_key, sink)
-                delta_e = [sa.tensor_to_sympy(transform_embeddings(sink_embedding,
-                                                                   diverter_embedding,
-                                                                   neighbor_embeddings[i]).T)
-                           for i in range(2)]
-                logit = sa.to_scalar(sa.sympy_q(delta_e[0]) -
-                                     sa.sympy_q(delta_e[1])) / args.softmax_temperature
-                dlogit_dbeta = logit.diff(sa.beta)
-                computed_logits_and_derivatives[diverter_key] = logit, dlogit_dbeta
-            else:
-                print("      (using cached value)")
-            return computed_logits_and_derivatives[diverter_key]
-        
         for source in ma.reachable_sources:
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
-            objective, lambdified_objective = ma.get_objective(source)
-        
+            objective, _ = ma.get_objective(source)
             for node_key in g.node_keys:
                 current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
-
                 for neighbor_key, neighbor_embedding in zip(neighbors, neighbor_embeddings):
                     print(f"    Considering learning step {node_key} -> {neighbor_key}...")
-                    reference_q = sa.compute_gradients(current_embedding, sink_embedding,
-                                                       neighbor_embedding).flatten().item()
-                    print(f"      Reference Q value = {reference_q:.4f}")
-                    sa.load_grad_matrices()
-                    
-                    MOCK = False
-                    if MOCK:
-                        dim = 7
-                        #print(A.shape, b.shape, C.shape, d.shape, E.shape, f.shape)
-                        sa.A = sa.A[:dim, :];    sa.A_hat = sa.A_hat[:dim, :]
-                        sa.b = sa.b[:dim, :];    sa.b_hat = sa.b_hat[:dim, :]
-                        sa.C = sa.C[:dim, :dim]; sa.C_hat = sa.C_hat[:dim, :dim]
-                        sa.d = sa.b[:dim, :];    sa.d_hat = sa.d_hat[:dim, :]
-                        sa.E = sa.E[:,    :dim]; sa.E_hat = sa.E_hat[:,    :dim]
-
-                    print(f"      τ(p) = {objective}, τ(p) < {args.cost_bound}?")
-                    kappa_of_p = sa.get_transformed_cost(ma, objective, args.cost_bound)
-                    lambdified_kappa = sympy.lambdify(ma.params, kappa_of_p)
-                    print(f"      κ(p) = {kappa_of_p}, κ(p) < 0?")
-                    kappa_of_beta = kappa_of_p.subs(list(zip(ma.params, evaluated_function_ps)))
-                    print(f"      κ(β) = {kappa_of_beta}, κ(β) < 0?")
-                    dkappa_dbeta = kappa_of_beta.diff(sa.beta)
-                    print(f"      dκ(β)/dβ = {dkappa_dbeta}")
-                    
-                    #  compute a pool of bounds
-                    derivative_bounds = {}
-                    for param, diverter_key in zip(ma.params, ma.nontrivial_diverters):
-                        _, current_neighbors, _ = g.node_to_embeddings(diverter_key, sink)
-                        print(f"      Computing the logit and its derivative for {param} ="
-                              f" P({diverter_key} -> {current_neighbors[0]} | sink = {sink})....")
-                        logit, dlogit_dbeta = compute_logit_and_derivative(sa, diverter_key)
-                        
-                        # surprisingly, the strings are very slow to obtain
-                        if False:
-                            print(f"      logit = {sa.expr_to_string(logit)[:500]} ...")
-                            print(f"      dlogit/dβ = {sa.expr_to_string(dlogit_dbeta)[:500]} ...")
-                            
-                        print(f"      Computing logit bounds...")
-                        derivative_bounds[param.name] = sa.estimate_upper_bound(dlogit_dbeta)
-
-                    print(f"      Computing the final upper bound on dκ(β)/dβ...")
-                    top_level_bound = sa.estimate_top_level_upper_bound(dkappa_dbeta, ps_function_names,
-                                                                        derivative_bounds)
-                    print(f"      Final upper bound on the Lipschitz constant of κ(β): {top_level_bound}")
-                    
-                    def q_to_kappa(actual_q: float) -> float:
-                        ps = sa.compute_ps(ma, diverter, sink, sink_embeddings, reference_q, actual_q)
-                        return lambdified_kappa(*ps)
-                    
-                    def q_to_beta(actual_q: float) -> float:
-                        return (actual_q - reference_q) * sa.lr
-                    
-                    empirical_bound = -np.infty
-                    max_depth = 0
-                    no_evaluations = 2
-                    checked_q_measure = 0.0
-                    
-                    def prove_bound(left_q: float, right_q: float,
-                                    left_kappa: float, right_kappa: float, depth: int) -> bool:
-                        global empirical_bound, no_evaluations, max_depth, checked_q_measure
-                        mid_q = (left_q + right_q) / 2
-                        mid_kappa = q_to_kappa(mid_q)
-                        actual_qs = np.array([left_q, mid_q, right_q])
-                        kappa_values = np.array([left_kappa, mid_kappa, right_kappa])
-                        worst_index = kappa_values.argmax()
-                        max_kappa = kappa_values[worst_index]
-                        # 1. try to find counterexample
-                        if max_kappa > 0:
-                            worst_q = actual_qs[worst_index]
-                            worst_dq = worst_q - reference_q
-                            print(f"        Counterexample found: q = {worst_q:.6f}, Δq = {worst_dq:.6f},"
-                                  f" β = {q_to_beta(worst_q):.6f}, κ = {max_kappa:.6f}")
-                            return False
-                            
-                        # 2. try to find proof on [left, right]
-                        kappa_upper_bound = -np.infty
-                        max_on_interval = np.empty(2)
-                        for i, (q_interval, kappa_interval) in enumerate(zip(sa.to_intervals(actual_qs),
-                                                                             sa.to_intervals(kappa_values))):
-                            left_beta, right_beta = q_to_beta(q_interval[0]), q_to_beta(q_interval[1])
-                            max_on_interval[i] = (top_level_bound * (right_beta - left_beta) +
-                                                  sum(kappa_interval)) / 2
-                        if max_on_interval.max() < 0:
-                            checked_q_measure += right_q - left_q
-                            return True
-                        
-                        # logging
-                        no_evaluations += 1
-                        max_depth = max(max_depth, depth)
-                        empirical_bound = max(empirical_bound, max_kappa)
-                        if no_evaluations % 100 == 0:
-                            percentage = checked_q_measure / sa.delta_q_max / 2 * 100
-                            print(f"      Status: {no_evaluations} evaluations, empirical bound is"
-                                  f" {empirical_bound:.6f}, maximum depth is {max_depth}, checked Δq"
-                                  f" percentage: {percentage:.2f}")
-                        
-                        # 3. otherwise, try recursively
-                        calls = [(lambda: prove_bound(left_q, mid_q,  left_kappa, mid_kappa,   depth + 1)),
-                                 (lambda: prove_bound(mid_q,  right_q, mid_kappa, right_kappa, depth + 1))]
-                        # to produce counetrexamples faster,
-                        # start from the most empirically dangerous subinterval
-                        if max_on_interval.argmax() == 1:
-                            calls = calls[::-1]
-                        return calls[0]() and calls[1]()
-                    
-                    left_q = -sa.delta_q_max + reference_q
-                    right_q = sa.delta_q_max + reference_q
-                    if prove_bound(left_q, right_q, q_to_kappa(left_q), q_to_kappa(right_q), 0):
+                    lbc = LipschitzBoundComputer(sa, ma, objective, sink, current_embedding, sink_embedding,
+                                                 neighbor_embedding, args.cost_bound)
+                    if lbc.prove_bound():
                         print("      Proof found!")
 elif args.command == "compare":
     _legend_txt_replace = {
@@ -747,9 +595,9 @@ elif args.command == "compare":
                     print_sums(df)
                     continue
 
-                xlim = kwargs.get(tag+'_xlim', xlim)
-                ylim = kwargs.get(tag+'_ylim', ylim)
-                save_path = kwargs.get(tag+'_save_path', save_path)
+                xlim = kwargs.get(tag + '_xlim', xlim)
+                ylim = kwargs.get(tag + '_ylim', ylim)
+                save_path = kwargs.get(tag + '_save_path', save_path)
                 plot_data(df, meaning=tag, figsize=figsize, xlim=xlim, ylim=ylim,
                           xlabel=xlabel, ylabel=ylabel, font_size=font_size,
                           title=title, save_path=save_path, context='conveyors')
@@ -765,7 +613,6 @@ elif args.command == "compare":
         handles, labels = ax.get_legend_handles_labels()
         new_labels = list(map(lambda l: _legend_txt_replace[context].get(l, l), labels[1:]))
         ax.legend(handles=handles[1:], labels=new_labels, fontsize=font_size)
-
         ax.tick_params(axis='both', which='both', labelsize=int(font_size*0.75))
 
         if xlim is not None:
