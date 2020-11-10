@@ -19,17 +19,17 @@ configuration:
       length: 850
       upstream: {type: 'sink', idx: 1}
     4:
-      length: 260
+      length: 660
       upstream: {type: 'conveyor', idx: 3, pos: 350}
     5:
       length: 100
-      upstream: {type: 'conveyor', idx: 4, pos: 100}
+      upstream: {type: 'conveyor', idx: 4, pos: 300}
     6:
       length: 155
       upstream: {type: 'conveyor', idx: 0, pos: 350}
     7:
       length: 50
-      upstream: {type: 'conveyor', idx: 4, pos: 200}
+      upstream: {type: 'conveyor', idx: 4, pos: 400}
     8:
       length: 50
       upstream: {type: 'conveyor', idx: 6, pos: 95}
@@ -37,7 +37,7 @@ configuration:
       length: 150
       upstream: {type: 'conveyor', idx: 3, pos: 750}
     10:
-      length: 150
+      length: 450
       upstream: {type: 'conveyor', idx: 0, pos: 750}
   diverters:
     0:
@@ -50,7 +50,7 @@ configuration:
       upstream_conv: 5
     2:
       conveyor: 4
-      pos: 105
+      pos: 305
       upstream_conv: 6
     3:
       conveyor: 6
@@ -58,7 +58,7 @@ configuration:
       upstream_conv: 7
     4:
       conveyor: 4
-      pos: 205
+      pos: 405
       upstream_conv: 8
     5:
       conveyor: 0
@@ -74,11 +74,11 @@ settings:
     sequence:
       - {bags_number: 200, delta: 20, sinks: [0]}
       - {bags_number: 200, delta: 20}
-      - {bags_number: 200, delta: 20, sinks: [0]} 
+      - {bags_number: 200, delta: 20, sinks: [1]} 
       - {bags_number: 200, delta: 20}
       - {bags_number: 200, delta: 20, sinks: [0]} 
       - {bags_number: 200, delta: 20}
-      - {bags_number: 200, delta: 20, sinks: [0]} 
+      - {bags_number: 200, delta: 20, sinks: [1]} 
   conveyor_env:
     speed: 1
     energy_consumption: 1
