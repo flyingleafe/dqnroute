@@ -1,0 +1,114 @@
+configuration:
+  sinks: [0, 1]
+  sources:
+    0: {upstream_conv: 11}
+    1: {upstream_conv: 1}
+    2: {upstream_conv: 2}
+    3: {upstream_conv: 3}
+  conveyors:
+    11:
+      length: 25
+      upstream: {type: 'conveyor', idx: 0, pos: 0}
+    0:
+      length: 825
+      upstream: {type: 'sink', idx: 0}
+    
+    1:
+      length: 50
+      upstream: {type: 'conveyor', idx: 0, pos: 25}
+    2:
+      length: 50
+      upstream: {type: 'conveyor', idx: 3, pos: 50}
+    3:
+      length: 850
+      upstream: {type: 'sink', idx: 1}
+    4:
+      length: 260
+      upstream: {type: 'conveyor', idx: 3, pos: 350}
+    5:
+      length: 100
+      upstream: {type: 'conveyor', idx: 4, pos: 100}
+    6:
+      length: 155
+      upstream: {type: 'conveyor', idx: 0, pos: 325}
+    7:
+      length: 50
+      upstream: {type: 'conveyor', idx: 4, pos: 200}
+    8:
+      length: 50
+      upstream: {type: 'conveyor', idx: 6, pos: 95}
+    9:
+      length: 150
+      upstream: {type: 'conveyor', idx: 3, pos: 750}
+    10:
+      length: 150
+      upstream: {type: 'conveyor', idx: 0, pos: 725}
+  diverters:
+    0:
+      conveyor: 0
+      pos: 30
+      upstream_conv: 4
+    1:
+      conveyor: 3
+      pos: 55
+      upstream_conv: 5
+    2:
+      conveyor: 4
+      pos: 105
+      upstream_conv: 6
+    3:
+      conveyor: 6
+      pos: 100
+      upstream_conv: 7
+    4:
+      conveyor: 4
+      pos: 205
+      upstream_conv: 8
+    5:
+      conveyor: 0
+      pos: 730
+      upstream_conv: 9
+    6:
+      conveyor: 3
+      pos: 755
+      upstream_conv: 10
+
+settings:
+  bags_distr:
+    sequence:
+      - {bags_number: 200, delta: 20, sinks: [0]}
+      - {bags_number: 200, delta: 20}
+      - {bags_number: 200, delta: 20, sinks: [0]} 
+      - {bags_number: 200, delta: 20}
+      - {bags_number: 200, delta: 20, sinks: [0]} 
+      - {bags_number: 200, delta: 20}
+      - {bags_number: 200, delta: 20, sinks: [0]} 
+  conveyor_env:
+    speed: 1
+    energy_consumption: 1
+  conveyor:
+    stop_delay: 40
+    slowdown_delay: 1
+  router:
+    simple_q:
+      energy_reward_weight: 0.4 # * 0.0002
+      learning_rate: 0.5
+    dqn: &dqn
+      energy_reward_weight: 1
+      optimizer: 'rmsprop'
+      scope: 'conveyor_test_ng'
+      activation: 'relu'
+      layers: [64, 64]
+      additional_inputs:
+        - tag: 'amatrix'
+      batch_size: 1
+      mem_capacity: 1
+    dqn_oneout:
+      <<: *dqn
+    dqn_emb:
+      <<: *dqn
+      energy_reward_weight: 0.5
+      additional_inputs: []
+      embedding:
+        alg: 'lap'
+        dim: 8

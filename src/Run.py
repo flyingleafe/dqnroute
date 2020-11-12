@@ -9,14 +9,18 @@ from typing import *
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import pandas as pd
 import torch
-import sympy
 
-from dqnroute import *
-from dqnroute.networks import *
+from dqnroute.constants import TORCH_MODELS_DIR
+from dqnroute.utils import AgentId
+from dqnroute.simulation.common import mk_job_id, add_cols, DummyProgressbarQueue
+from dqnroute.simulation.conveyors import ConveyorsRunner
+from dqnroute.event_series import split_dataframe
+
+from dqnroute.verification.ml_util import Util
 from dqnroute.verification.router_graph import RouterGraph
 from dqnroute.verification.adversarial import PGDAdversary
-from dqnroute.verification.ml_util import Util
 from dqnroute.verification.markov_analyzer import MarkovAnalyzer
 from dqnroute.verification.symbolic_analyzer import SymbolicAnalyzer, LipschitzBoundComputer
 from dqnroute.verification.nnet_verifier import NNetVerifier, marabou_float2str
@@ -25,11 +29,11 @@ from dqnroute.verification.embedding_packer import EmbeddingPacker
 NETWORK_FILENAME = "../network.nnet"
 PROPERTY_FILENAME = "../property.txt"
 
-parser = argparse.ArgumentParser(description="Verifier of baggage routing neural networks.")
+parser = argparse.ArgumentParser(description="Script to train, simulate and verify baggage routing neural networks.")
 
 # general parameters
-parser.add_argument("--command", type=str, required=True,
-                    help=("one of compare, deterministic_test, embedding_adversarial_search, "
+parser.add_argument("--command", type=str, default="run",
+                    help=("one of run (default), compare, deterministic_test, embedding_adversarial_search, "
                           "embedding_adversarial_verification, embedding_adversarial_full_verification, "
                           "compute_expected_cost, q_adversarial, q_adversarial_lipschitz"))
 parser.add_argument("--config_file", type=str, required=True,
@@ -114,7 +118,7 @@ print(f"Embedding dimension: {emb_dim}, graph size: {graph_size}")
 # 2. pretrain
 
 def pretrain(args, dir_with_models: str, pretrain_filename: str):
-    """ ALMOST COPIED FROM THE PRETRAINING NOTEBOOK """
+    """ Almost copied from the pretraining notebook. """
     
     def gen_episodes_progress(num_episodes, **kwargs):
         with tqdm(total=num_episodes) as bar:
@@ -234,8 +238,7 @@ else:
 
 # 3. train
 
-# FIXME?? random seed does not work in tranining!
-# TODO check whether this is fixed after making embeddings deterministic
+# TODO check whether setting a random seed makes training deterministic
 
 def run_single(file: str, router_type: str, random_seed: int, **kwargs):
     job_id = mk_job_id(router_type, random_seed)
@@ -276,7 +279,7 @@ def train(args, dir_with_models: str, pretrain_filename: str, train_filename: st
 
 train_filename = f"igor_trained{filename_suffix}"
 train_path = Path(TORCH_MODELS_DIR) / dir_with_models / train_filename
-do_train = args.force_train or not train_path.exists() or args.command == "compare" or do_pretrain
+do_train = args.force_train or not train_path.exists() or args.command in ["run", "compare"] or do_pretrain
 if do_train:
     print(f"Training {train_path}...")
 else:
@@ -322,7 +325,93 @@ def get_sinks(ma_verbose: bool = True) -> Generator[Tuple[AgentId, torch.Tensor,
         yield sink, sink_embedding, ma
 
 print(f"Running command {args.command}...")
-if args.command == "deterministic_test":
+
+# Simulate and make plots
+if args.command in ["run", "compare"]:
+    _legend_txt_replace = {
+        'networks': {
+            'link_state': 'Shortest paths', 'simple_q': 'Q-routing', 'pred_q': 'PQ-routing',
+            'glob_dyn': 'Global-dynamic', 'dqn': 'DQN', 'dqn_oneout': 'DQN (1-out)',
+            'dqn_emb': 'DQN-LE', 'centralized_simple': 'Centralized control'
+        }, 'conveyors': {
+            'link_state': 'Vyatkin-Black', 'simple_q': 'Q-routing', 'pred_q': 'PQ-routing',
+            'glob_dyn': 'Global-dynamic', 'dqn': 'DQN', 'dqn_oneout': 'DQN (1-out)',
+            'dqn_emb': 'DQN-LE', 'centralized_simple': 'BSR'
+        }
+    }
+    _targets = {'time': 'avg', 'energy': 'sum', 'collisions': 'sum'}
+    _ylabels = {'time': 'Mean delivery time', 'energy': 'Total energy consumption',
+                'collisions': 'Cargo collisions'}
+    
+    # dqn_emb = DQNroute-LE, centralized_simple = BSR
+    router_types = ["dqn_emb"]
+    if args.command == "compare":
+        router_types += ["centralized_simple", "link_state", "simple_q"]
+        
+    # reuse the log for dqn_emb:
+    series = [dqn_log.getSeries(add_avg=True)]
+    for router_type in router_types[1:]:
+        s, _ = train(args, dir_with_models, pretrain_filename, train_filename, router_type, True, False)
+        series += [s.getSeries(add_avg=True)]
+    
+    dfs = []
+    for router_type, s in zip(router_types, series):
+        df = s.copy()
+        add_cols(df, router_type=router_type, seed=args.random_seed)
+        dfs.append(df)
+    dfs = pd.concat(dfs, axis=0)
+    
+    def print_sums(df):
+        for tp in router_types:
+            x = df.loc[df['router_type'] == tp, 'count'].sum()
+            txt = _legend_txt_replace.get(tp, tp)
+            print(f'  {txt}: {x}')
+    
+    def plot_data(data, meaning='time', figsize=(15,5), xlim=None, ylim=None,
+              xlabel='Simulation time', ylabel=None, font_size=14, title=None, save_path=None,
+              draw_collisions=False, context='networks', **kwargs):
+        if 'time' not in data.columns:
+            datas = split_dataframe(data, preserved_cols=['router_type', 'seed'])
+            for tag, df in datas:
+                if tag == 'collisions' and not draw_collisions:
+                    print('Number of collisions:')
+                    print_sums(df)
+                    continue
+                xlim = kwargs.get(tag + '_xlim', xlim)
+                ylim = kwargs.get(tag + '_ylim', ylim)
+                save_path = kwargs.get(tag + '_save_path', save_path)
+                plot_data(df, meaning=tag, figsize=figsize, xlim=xlim, ylim=ylim,
+                          xlabel=xlabel, ylabel=ylabel, font_size=font_size,
+                          title=title, save_path=save_path, context='conveyors')
+            return
+
+        target = _targets[meaning]
+        if ylabel is None:
+            ylabel = _ylabels[meaning]
+
+        fig = plt.figure(figsize=figsize)
+        ax = sns.lineplot(x='time', y=target, hue='router_type', data=data, err_kws={'alpha': 0.1})
+        handles, labels = ax.get_legend_handles_labels()
+        new_labels = list(map(lambda l: _legend_txt_replace[context].get(l, l), labels[1:]))
+        ax.legend(handles=handles[1:], labels=new_labels, fontsize=font_size)
+        ax.tick_params(axis='both', which='both', labelsize=int(font_size*0.75))
+        if xlim is not None:
+            ax.set_xlim(xlim)
+        if ylim is not None:
+            ax.set_ylim(ylim)
+        if title is not None:
+            ax.set_title(title)
+        ax.set_xlabel(xlabel, fontsize=font_size)
+        ax.set_ylabel(ylabel, fontsize=font_size)
+
+        if save_path is not None:
+            fig.savefig(f"../img/{save_path}", bbox_inches='tight')
+    
+    plot_data(dfs, figsize=(14, 8), font_size=22,
+              time_save_path="time-plot.pdf", energy_save_path="energy-plot.pdf")
+
+# Test package delivery with argmax choices (delivery may fail under this assumption)
+elif args.command == "deterministic_test":
     for source in g.sources:
         for sink, sink_embedding, _ in get_sinks():
             print(f"Testing delivery from {source} to {sink}...")
@@ -353,6 +442,8 @@ if args.command == "deterministic_test":
                     current_node = neighbors[best_neighbor_index]
                 else:
                     raise AssertionError()
+
+# Search for adversarial examples w.r.t. input embeddings
 elif args.command == "embedding_adversarial_search":
     if args.adversarial_search_use_l_2:
         norm, norm_bound = "scaled_l_2", args.input_eps_l_2
@@ -392,6 +483,8 @@ elif args.command == "embedding_adversarial_search":
             print("Found counterexample!" if objective >= args.cost_bound else "Verified.")
             print(f"Best perturbed vector: {Util.to_numpy(best_embedding).round(3).flatten().tolist()}"
                   f" {aux_info}")
+
+# Formally verify the expected cost bound w.r.t. input embeddings
 elif args.command == "embedding_adversarial_full_verification":
     nv = get_nnet_verifier()
     for sink, _, ma in get_sinks():
@@ -400,6 +493,8 @@ elif args.command == "embedding_adversarial_full_verification":
             print(f"  Verifying adversarial robustness of delivery from {source} to {sink}...")
             result = nv.verify_cost_delivery_bound(sink, source, ma, args.input_eps_l_inf, args.cost_bound)
             print(f"    {result}")
+
+# Formally verify Q value stability w.r.t. input embeddings         
 elif args.command == "embedding_adversarial_verification":
     nv = get_nnet_verifier()
     for sink, sink_embedding, ma in get_sinks(False):
@@ -463,6 +558,8 @@ elif args.command == "embedding_adversarial_verification":
                 emb_center.flatten(), args.input_eps_l_inf, cases_to_check, check_or=True
             )
             print(f"  Verification result: {result}")
+
+# Compute the expression of the expected delivery cost and evaluate it
 elif args.command == "compute_expected_cost":
     sa = get_symbolic_analyzer()
     for sink, sink_embedding, ma in get_sinks():
@@ -474,27 +571,26 @@ elif args.command == "compute_expected_cost":
             objective_value = lambdified_objective(*ps)
             print(f"    Computed probabilities: {Util.list_round(ps, 6)}")
             print(f"    E(delivery cost from {source} to {sink}) = {objective_value}")
+
+# Evaluate the expected delivery cost assuming a change in NN parameters and make plots            
 elif args.command == "q_adversarial":
     sa = get_symbolic_analyzer()
     plot_index = 0
     for sink, sink_embedding, ma in get_sinks():
         print(f"Measuring robustness of delivery to {sink}...")
         sink_embeddings = sink_embedding.repeat(2, 1)
-
         for source in ma.reachable_sources:
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
             objective, lambdified_objective = ma.get_objective(source)
-
             for node_key in g.node_keys:
                 current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
-
                 for neighbor_key, neighbor_embedding in zip(neighbors, neighbor_embeddings):
                     # compute
                     # we assume a linear change of parameters
                     reference_q = sa.compute_gradients(current_embedding, sink_embedding,
                                                        neighbor_embedding).flatten().item()
-                    actual_qs = reference_q + np.linspace(-sa.delta_q_max, sa.delta_q_max,
-                                                          args.q_adversarial_no_points)
+                    actual_qs = np.linspace(-sa.delta_q_max, sa.delta_q_max,
+                                            args.q_adversarial_no_points) + reference_q
                     kappa, lambdified_kappa = sa.get_transformed_cost(ma, objective, args.cost_bound)
                     objective_values, kappa_values = [torch.empty(len(actual_qs)) for _ in range(2)]
                     for i, actual_q in enumerate(actual_qs):
@@ -502,8 +598,6 @@ elif args.command == "q_adversarial":
                         objective_values[i] = lambdified_objective(*ps)
                         kappa_values[i]     = lambdified_kappa(*ps)
                     #print(((objective_values > args.cost_bound) != (kappa_values > 0)).sum()) 
-                        
-                    # plot
                     fig, axes = plt.subplots(2, 1, figsize=(13, 6))
                     plt.subplots_adjust(hspace=0.3)
                     caption_starts = "Delivery cost (τ)", "Transformed delivery cost (κ)"
@@ -526,6 +620,8 @@ elif args.command == "q_adversarial":
                     print(f"Empirically found maximum of τ: {objective_values.max():.6f}")
                     print(f"Empirically found maximum of κ: {kappa_values.max():.6f}")
                     plot_index += 1
+
+# Formally verify the bound on the expected delivery cost w.r.t. learning step magnitude  
 elif args.command == "q_adversarial_lipschitz":
     sa = get_symbolic_analyzer()
     print(sa.net)
@@ -543,88 +639,6 @@ elif args.command == "q_adversarial_lipschitz":
                                                  neighbor_embedding, args.cost_bound)
                     if lbc.prove_bound():
                         print("      Proof found!")
-elif args.command == "compare":
-    _legend_txt_replace = {
-        'networks': {
-            'link_state': 'Shortest paths', 'simple_q': 'Q-routing', 'pred_q': 'PQ-routing',
-            'glob_dyn': 'Global-dynamic', 'dqn': 'DQN', 'dqn_oneout': 'DQN (1-out)',
-            'dqn_emb': 'DQN-LE', 'centralized_simple': 'Centralized control'
-        }, 'conveyors': {
-            'link_state': 'Vyatkin-Black', 'simple_q': 'Q-routing', 'pred_q': 'PQ-routing',
-            'glob_dyn': 'Global-dynamic', 'dqn': 'DQN', 'dqn_oneout': 'DQN (1-out)',
-            'dqn_emb': 'DQN-LE', 'centralized_simple': 'BSR'
-        }
-    }
-    _targets = {'time': 'avg', 'energy': 'sum', 'collisions': 'sum'}
-    _ylabels = {'time': 'Mean delivery time', 'energy': 'Total energy consumption',
-                'collisions': 'Cargo collisions'}
-    
-    # dqn_emb = DQNroute-LE, centralized_simple = BSR
-    router_types = ["dqn_emb", "centralized_simple", "link_state", "simple_q"]
-    # reuse the log for dqn_emb:
-    series = [dqn_log.getSeries(add_avg=True)]
-    for router_type in router_types[1:]:
-        s, _ = train(args, dir_with_models, pretrain_filename, train_filename, router_type, True, False)
-        series += [s.getSeries(add_avg=True)]
-    
-    dfs = []
-    for router_type, s in zip(router_types, series):
-        df = s.copy()
-        add_cols(df, router_type=router_type, seed=args.random_seed)
-        dfs.append(df)
-    dfs = pd.concat(dfs, axis=0)
-    
-    def print_sums(df):
-        for tp in router_types:
-            x = df.loc[df['router_type'] == tp, 'count'].sum()
-            txt = _legend_txt_replace.get(tp, tp)
-            print(f'  {txt}: {x}')
-    
-    def plot_data(data, meaning='time', figsize=(15,5), xlim=None, ylim=None,
-              xlabel='Simulation time', ylabel=None, font_size=14, title=None, save_path=None,
-              draw_collisions=False, context='networks', **kwargs):
-        if 'time' not in data.columns:
-            datas = split_dataframe(data, preserved_cols=['router_type', 'seed'])
-            for tag, df in datas:
-                if tag == 'collisions' and not draw_collisions:
-                    print('Number of collisions:')
-                    print_sums(df)
-                    continue
-                xlim = kwargs.get(tag + '_xlim', xlim)
-                ylim = kwargs.get(tag + '_ylim', ylim)
-                save_path = kwargs.get(tag + '_save_path', save_path)
-                plot_data(df, meaning=tag, figsize=figsize, xlim=xlim, ylim=ylim,
-                          xlabel=xlabel, ylabel=ylabel, font_size=font_size,
-                          title=title, save_path=save_path, context='conveyors')
-            return
-
-        target = _targets[meaning]
-        if ylabel is None:
-            ylabel = _ylabels[meaning]
-
-        fig = plt.figure(figsize=figsize)
-        ax = sns.lineplot(x='time', y=target, hue='router_type', data=data, err_kws={'alpha': 0.1})
-
-        handles, labels = ax.get_legend_handles_labels()
-        new_labels = list(map(lambda l: _legend_txt_replace[context].get(l, l), labels[1:]))
-        ax.legend(handles=handles[1:], labels=new_labels, fontsize=font_size)
-        ax.tick_params(axis='both', which='both', labelsize=int(font_size*0.75))
-
-        if xlim is not None:
-            ax.set_xlim(xlim)
-        if ylim is not None:
-            ax.set_ylim(ylim)
-        if title is not None:
-            ax.set_title(title)
-
-        ax.set_xlabel(xlabel, fontsize=font_size)
-        ax.set_ylabel(ylabel, fontsize=font_size)
-
-        if save_path is not None:
-            fig.savefig(f"../img/{save_path}", bbox_inches='tight')
-    
-    plot_data(dfs, figsize=(14, 8), font_size=22,
-              time_save_path="time-plot.pdf", energy_save_path="energy-plot.pdf")
 
 else:
     raise RuntimeError(f"Unknown command {args.command}.")

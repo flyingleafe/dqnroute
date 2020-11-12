@@ -11,18 +11,18 @@ The changes w.r.t. the original dqnroute are:
 
 * Neural network verification methods (work in progress).
 * The decisions of the neural network are altered to exclude routing probabilities that are very close to 0 and 1. This is done similarly to label smoothing. This is needed for the verification methods.
-* A [script](/src/Verify.py) that offers an easier access to the original project by performing both pretraining and training. It also visualizes topology graphs.
+* A [script](/src/Run.py) (use with "--command run" or "--command compare") that offers an easier access to the original project by performing both pretraining and training. It also visualizes topology graphs.
 * [Examples](/launches/igor) of baggage handling topology graphs, in particular with cycles:
     * [Example](/launches/igor/tarau2010.yaml) (and [visualization](/launches/igor/ConveyorGraph-Tarau2010.pdf)) based on [Tarau, Alina N., Bart De Schutter, and Hans Hellendoorn. "Model-based control for route choice in automated baggage handling systems." IEEE Transactions on Systems, Man, and Cybernetics, Part C (Applications and Reviews) 40.3 (2010): 341-351](https://ieeexplore.ieee.org/abstract/document/5382550/).
     * [Example](/launches/igor/johnstone2010.yaml) (and [visualization](/launches/igor/ConveyorGraph-Johnstone2010.pdf)) based on [Johnstone, Michael, Doug Creighton, and Saeid Nahavandi. "Status-based routing in baggage handling systems: Searching verses learning." IEEE Transactions on Systems, Man, and Cybernetics, Part C (Applications and Reviews) 40.2 (2009): 189-200](https://ieeexplore.ieee.org/abstract/document/5357429/).
 * Bugfix: a bag was processed incorrectly if it passed twice along the same conveyor. This is possible only in topology graphs with cycles.
-* Bugfix: Laplacian Eigenmap embeddings were computed nondeterministically (with different random initialization), making different nodes have different embedding matrices. The initialization was replaced to a fixed, deterministic one.
+* Bugfix: Laplacian Eigenmap and HOPE embeddings were computed nondeterministically (with different random initialization), making different nodes have different embedding matrices. The initialization was replaced to a fixed, deterministic one.
 
-Unfortunately, some features are currently implemented with global variables due to Igor's lack of good understanding of the simulation model.
+Unfortunately, some new features are currently implemented with global variables. This may be fixed in the future.
 
 ## RL_Verif: verification of neural networks for baggage routing
 
-The script [Verify.py](/src/Verify.py) and a subpackage [verification](/src/dqnroute/verification) implement several methods of neural network analysis and verification. This is still work in progress and may contain bugs.
+The script [Run.py](/src/Run.py) and a subpackage [verification](/src/dqnroute/verification) implement several methods of neural network analysis and verification. This is still work in progress and may contain bugs.
 
 The implemented features correspond to different commands (--command) of Verify.py:
 
@@ -45,14 +45,14 @@ Refer to [the slides](/rl_verif.pdf) for more information.
    2. Download the wheel file you need from [here](http://www.lfd.uci.edu/~gohlke/pythonlibs/#pygraphviz) (for instance, if you have python **3.7** and  **windows** **x64** platform, then install "pygraphviz‑1.6‑cp37‑cp**37**m‑**win**_amd**64**.whl").
    3. Navigate to the directory to which you downloaded the wheel file.
    4. Run ```pip install <the name of the file you downloaded>```.
-* To use the "embedding_adversarial_verification" and embedding_adversarial_full_verification" commands of Verify.py, you need to install [Marabou](https://github.com/NeuralNetworkVerification/Marabou). Marabou is executed as a process and you need to pass the path to the executable as a command line argument --marabou_path.
+* To use the "embedding_adversarial_verification" and "embedding_adversarial_full_verification" commands of Run.py, you need to install [Marabou](https://github.com/NeuralNetworkVerification/Marabou). Marabou is executed as a process and you need to pass the path to the executable as a command line argument --marabou_path.
 
 ## Running
 
-Option 1. Run an all-in-one verification script [Verify.py](/src/Verify.py). In particular, it contains the "compare" command, which runs simulations without any verification. This command will create delivery time and energy consumption plots. Some examples are given in [VerifyWrapper.py](/src/VerifyWrapper.py). Run the scripts from the "src" directory, e.g.:
+Option 1. Run the multipurpose script [Run.py](/src/Run.py). In particular, it contains the "run" and "compare" command, which runs simulations without any verification ("run": only DQNroute-LE, "compare": also other routing algorithms). This command will create delivery time and energy consumption plots. Some examples are given in [RunWrapper.py](/src/RunWrapper.py). Run the scripts from the "src" directory, e.g.:
 ```console
 cd src
-ipython VerifyWrapper.py
+ipython RunWrapper.py
 ```
 
-Option 2 (without verification). Run notebooks: [new_pretrain.ipynb](/notebooks/new_pretrain.ipynb), then [new_train.ipynb](/notebooks/new_train.ipynb). Running new_train.ipynb requires having a pretrained model generated by new_pretrain.ipynb for the same topology graph and embedding dimension (see scenario, emb_dim, graph_size = ... assignments). Unfortunately, the graph size needs to be entered manually. It is equal to the total number of sources, junctions, diverters and sinks.
+Option 2 (without verification). Run the notebooks: [new_pretrain.ipynb](/notebooks/new_pretrain.ipynb), then [new_train.ipynb](/notebooks/new_train.ipynb). Running new_train.ipynb requires having a pretrained model generated by new_pretrain.ipynb for the same topology graph and embedding dimension (see scenario, emb_dim, graph_size = ... assignments). Unfortunately, the graph size needs to be entered manually. It is equal to the total number of sources, junctions, diverters and sinks.
