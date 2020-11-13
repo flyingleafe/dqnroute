@@ -43,8 +43,8 @@ class DQNRouter(LinkStateRouter, RewardAgent):
             self.probability_smoothing = 0.0
             
         # added by Igor to allow custom temperatures for softmax:
-        if "IGOR_OVERRDIDDED_SOFTMAX_TEMPERATURE" in os.environ:
-            self.min_temp = float(os.environ["IGOR_OVERRDIDDED_SOFTMAX_TEMPERATURE"])
+        if "IGOR_OVERRDIDDEN_SOFTMAX_TEMPERATURE" in os.environ:
+            self.min_temp = float(os.environ["IGOR_OVERRDIDDEN_SOFTMAX_TEMPERATURE"])
         else:
             self.min_temp = MIN_TEMP
 

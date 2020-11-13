@@ -35,7 +35,7 @@ def update_network(router, G):
     router.networkStateChanged()
 
 def _gen_episodes(factory: RouterFactory, num_episodes: int, bar=None,
-                  sinks = None, random_seed = None) -> pd.DataFrame:
+                  sinks=None, random_seed=None) -> pd.DataFrame:
     RouterClass = factory.RouterClass
     if not issubclass(RouterClass, DQNRouter):
         raise Exception('Trying to generate pre-training dataset not for DQN-* router')
@@ -118,7 +118,7 @@ def _gen_episodes(factory: RouterFactory, num_episodes: int, bar=None,
 
     return df
 
-def gen_episodes(num_episodes: int, context: str, one_out=True, sinks = None, bar=None,
+def gen_episodes(num_episodes: int, context: str, one_out=True, sinks=None, bar=None,
                  random_seed = None, router_params={}, save_path=None,
                  ignore_saved=False, **kwargs):
     if save_path is not None:

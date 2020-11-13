@@ -2,6 +2,9 @@ import os
 import argparse
 import yaml
 
+import hashlib
+import base64
+
 from pathlib import Path
 from tqdm import tqdm
 from typing import *
@@ -13,10 +16,14 @@ import pandas as pd
 import torch
 
 from dqnroute.constants import TORCH_MODELS_DIR
-from dqnroute.utils import AgentId
+from dqnroute.event_series import split_dataframe
+from dqnroute.generator import gen_episodes
+from dqnroute.networks.common import get_optimizer
+from dqnroute.networks.embeddings import Embedding, LaplacianEigenmap
+from dqnroute.networks.q_network import QNetwork
 from dqnroute.simulation.common import mk_job_id, add_cols, DummyProgressbarQueue
 from dqnroute.simulation.conveyors import ConveyorsRunner
-from dqnroute.event_series import split_dataframe
+from dqnroute.utils import AgentId, get_amatrix_cols, make_batches, stack_batch
 
 from dqnroute.verification.ml_util import Util
 from dqnroute.verification.router_graph import RouterGraph
@@ -36,8 +43,9 @@ parser.add_argument("--command", type=str, default="run",
                     help=("one of run (default), compare, deterministic_test, embedding_adversarial_search, "
                           "embedding_adversarial_verification, embedding_adversarial_full_verification, "
                           "compute_expected_cost, q_adversarial, q_adversarial_lipschitz"))
-parser.add_argument("--config_file", type=str, required=True,
-                    help="YAML config file with the topology graph and other configuration info")
+parser.add_argument("config_files", type=str, nargs="+",
+                    help="YAML config file(s) with the topology graph and other configuration info "
+                         "(all files will be concatenated into one)")
 parser.add_argument("--random_seed", type=int, default=42,
                     help="random seed for pretraining and training (default: 42)")
 parser.add_argument("--pretrain_num_episodes", type=int, default=10000,
@@ -95,14 +103,19 @@ args = parser.parse_args()
 for dirname in ["../logs", "../img"]:
     os.makedirs(dirname, exist_ok=True)
 
-os.environ["IGOR_OVERRDIDDED_SOFTMAX_TEMPERATURE"] = str(args.softmax_temperature)
+os.environ["IGOR_OVERRDIDDEN_SOFTMAX_TEMPERATURE"] = str(args.softmax_temperature)
 
-# 1. load scenario
-scenario = args.config_file
-print(f"Scenario: {scenario}")
-
-with open(scenario) as file:
-    scenario_loaded = yaml.load(file, Loader=yaml.FullLoader)
+# 1. load scenario from one or more config files
+sc = []
+filename_suffix = []
+for config_filename in args.config_files:
+    filename_suffix += [os.path.split(config_filename)[1]]
+    with open(config_filename, "r") as f:
+        sc += f.readlines()
+sc = "".join(sc)
+#print(sc)
+scenario_loaded = yaml.safe_load(sc)
+print(f"Configuration files: {args.config_files}")
 
 emb_dim = scenario_loaded["settings"]["router"]["dqn_emb"]["embedding"]["dim"]
 
@@ -112,6 +125,8 @@ lengths = [len(scenario_loaded["configuration"][x]) for x in ["sources", "divert
            if c["upstream"]["type"] == "conveyor"])]
 #print(lengths)
 graph_size = sum(lengths)
+filename_suffix = "__".join(filename_suffix)
+filename_suffix = f"_{emb_dim}_{graph_size}_{filename_suffix}.bin"
 print(f"Embedding dimension: {emb_dim}, graph size: {graph_size}")
 
 
@@ -185,7 +200,7 @@ def pretrain(args, dir_with_models: str, pretrain_filename: str):
             yield (addr_inp, dst_inp, nbr_inp) + inputs, output
 
     def qnetwork_pretrain_epoch(net, optimizer, data, **kwargs):
-        loss_func = nn.MSELoss()
+        loss_func = torch.nn.MSELoss()
         for batch, target in qnetwork_batches(net, data, **kwargs):
             optimizer.zero_grad()
             output = net(*batch)
@@ -212,10 +227,11 @@ def pretrain(args, dir_with_models: str, pretrain_filename: str):
     
     data_conv = gen_episodes_progress(ignore_saved=True, context='conveyors',
                                       num_episodes=args.pretrain_num_episodes,
-                                      random_seed=args.random_seed, run_params=scenario,
+                                      random_seed=args.random_seed, run_params=scenario_loaded,
                                       save_path='../logs/data_conveyor1_oneinp_new.csv')
     data_conv.loc[:, 'working'] = 1.0
     conv_emb = CachedEmbedding(LaplacianEigenmap, dim=emb_dim)
+    # FIXME the arguments should be loaded from the scenario!
     args = {'scope': dir_with_models, 'activation': 'relu', 'layers': [64, 64], 'embedding_dim': conv_emb.dim}
     conveyor_network_ng_emb = QNetwork(graph_size, **args)
     conveyor_network_ng_emb_ws = QNetwork(graph_size, additional_inputs=[{'tag': 'working', 'dim': 1}], **args)
@@ -225,7 +241,6 @@ def pretrain(args, dir_with_models: str, pretrain_filename: str):
     #                                                      embedding=conv_emb, save_net=False)
 
 dir_with_models = "conveyor_test_ng"
-filename_suffix = f"_{emb_dim}_{graph_size}_{os.path.split(scenario)[1]}.bin"
 pretrain_filename = f"igor_pretrained{filename_suffix}"
 pretrain_path = Path(TORCH_MODELS_DIR) / dir_with_models / pretrain_filename
 do_pretrain = args.force_pretrain or not pretrain_path.exists()
@@ -260,7 +275,7 @@ def train(args, dir_with_models: str, pretrain_filename: str, train_filename: st
     else:
         os.environ["IGOR_OMIT_TRAINING"] = "True"
     
-    event_series, runner = run_single(file=scenario, router_type=router_type, progress_step=500,
+    event_series, runner = run_single(file=scenario_loaded, router_type=router_type, progress_step=500,
                                       ignore_saved=[True], random_seed=args.random_seed)
     if router_type == "dqn_emb":
         world = runner.world

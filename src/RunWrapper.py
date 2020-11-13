@@ -2,7 +2,7 @@ import os
 import time
 
 def run(command: str, config_file: str, temperature: float, cost_bound: float, more_args: str = ""):
-    os.system(f"ipython Run.py -- --command {command} --config_file ../launches/igor/{config_file} --softmax_temperature {temperature} --cost_bound {cost_bound} --marabou_path ../../Marabou/build/Marabou {more_args}")
+    os.system(f"ipython Run.py -- ../launches/igor/{config_file} --command {command}  --softmax_temperature {temperature} --cost_bound {cost_bound} --marabou_path ../../Marabou/build/Marabou {more_args}")
 
 """ The original example from D. Mukhutdinov. """
 #config = "acyclic_conveyor_energy_test.yaml", 1.5, 43.0 # Energy test
@@ -39,8 +39,8 @@ run(command, config[0], config[1], config[2], more_args=command_args+(
     ""
     #"--skip_graphviz --verification_lr 0.001"
     #"--force_train"
-    "--skip_graphviz"
-    #"--force_pretrain --force_train"
+    #"--skip_graphviz"
+    "--force_pretrain --force_train"
     #"--skip_graphviz --force_pretrain --force_train"
     #"--skip_graphviz --force_train"
 ))
