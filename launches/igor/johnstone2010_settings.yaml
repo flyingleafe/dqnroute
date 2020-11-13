@@ -28,6 +28,8 @@ settings:
         - tag: 'amatrix'
       batch_size: 1
       mem_capacity: 1
+      softmax_temperature: 3.0 # added by Igor
+      probability_smoothing: 0.01 # added by Igor
     dqn_oneout:
       <<: *dqn
     dqn_emb:

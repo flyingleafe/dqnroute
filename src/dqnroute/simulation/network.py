@@ -29,7 +29,7 @@ class RouterFactory(HandlerFactory):
         else:
             self.training_mode = True
             TrainerClass = get_router_class(training_router_type, context)
-            self.router_type = 'training__{}__{}'.format(router_type, training_router_type)
+            self.router_type = f'training__{router_type}__{training_router_type}'
             self.RouterClass = TrainingRouterClass(RouterClass, TrainerClass, **kwargs)
         super().__init__(**kwargs)
 
@@ -83,7 +83,7 @@ class RouterFactory(HandlerFactory):
 
 class NetworkEnvironment(MultiAgentEnv):
     """
-    Class which simulates the behavior of computer network
+    Class which simulates the behavior of computer network.
     """
     def __init__(self, data_series: EventSeries, pkg_process_delay: int = 0, **kwargs):
         self.pkg_process_delay = pkg_process_delay
@@ -105,7 +105,7 @@ class NetworkEnvironment(MultiAgentEnv):
         elif type(network_cfg) == dict:
             return gen_network_graph(network_cfg['generator'])
         else:
-            raise Exception('Invalid network config: {}'.format(network_cfg))
+            raise Exception(f'Invalid network config: {network_cfg}')
 
     def makeHandlerFactory(self, **kwargs):
         return RouterFactory(context='network', **kwargs)
@@ -120,8 +120,7 @@ class NetworkEnvironment(MultiAgentEnv):
             return Event(self.env).succeed()
 
         elif isinstance(action, PkgReceiveAction):
-            logger.debug("Package #{} received at node {} at time {}"
-                         .format(action.pkg.id, from_agent[1], self.env.now))
+            logger.debug(f"Package #{action.pkg.id} received at node {from_agent[1]} at time {self.env.now}")
 
             self.data_series.logEvent(self.env.now, self.env.now - action.pkg.start_time)
             return Event(self.env).succeed()
@@ -137,8 +136,7 @@ class NetworkEnvironment(MultiAgentEnv):
             return super().handleWorldEvent(event)
 
     def _edgeTransfer(self, from_agent: AgentId, to_agent: AgentId, pkg: Package):
-        logger.debug("Package #{} hop: {} -> {}"
-                     .format(pkg.id, from_agent[1], to_agent[1]))
+        logger.debug(f"Package #{pkg.id} hop: {from_agent[1]} -> {to_agent[1]}")
 
         edge_params = self.conn_graph[from_agent][to_agent]
         latency = edge_params['latency']
@@ -249,8 +247,7 @@ class NetworkRunner(SimulationRunner):
                     for src in srcs:
                         dst = random.choice(dests)
                         pkg = Package(pkg_id, DEF_PKG_SIZE, dst, self.env.now, None) # create empty packet
-                        logger.debug("Sending random pkg #{} from {} to {} at time {}"
-                                     .format(pkg_id, src, dst, self.env.now))
+                        logger.debug(f"Sending random pkg #{pkg_id} from {src} to {dst} at time {self.env.now}")
                         yield self.world.handleWorldEvent(PkgEnqueuedEvent(('world', 0), src, pkg))
                         pkg_id += 1
                     yield self.env.timeout(delta)

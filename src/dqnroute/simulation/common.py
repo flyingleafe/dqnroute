@@ -3,7 +3,7 @@ import os
 import yaml
 import pprint
 
-from typing import List, Optional
+from typing import *
 from simpy import Environment, Event, Interrupt
 from ..event_series import EventSeries
 from ..messages import *
@@ -160,7 +160,7 @@ class MultiAgentEnv(HasLog):
         elif self.factory.centralized() and isinstance(self.factory.master_handler, Oracle):
             agent_evs = delayed_first(self.factory.master_handler.handleSlaveEvent(node, event))
         else:
-            raise UnknownAgentError('No such agent: {}'.format(agent))
+            raise UnknownAgentError(f'No such agent: {agent}')
 
         evs = []
         for new_event in agent_evs:
@@ -210,7 +210,7 @@ class SimulationRunner:
     Class which constructs an environment from given settings and runs it.
     """
 
-    def __init__(self, run_params, data_dir: str, params_override = {},
+    def __init__(self, run_params: Union[dict, str], data_dir: str, params_override = {},
                  data_series: Optional[EventSeries] = None, series_period: int = 500,
                  series_funcs: List[str] = ['count', 'sum', 'min', 'max'], **kwargs):
         if type(run_params) == str:
@@ -231,12 +231,12 @@ class SimulationRunner:
 
     def runDataPath(self, random_seed) -> str:
         cfg = self.relevantConfig()
-        return '{}/{}-{}.csv'.format(self.data_dir, data_digest(cfg), self.makeRunId(random_seed))
+        return f'{self.data_dir}/{data_digest(cfg)}-{self.makeRunId(random_seed)}.csv'
 
-    def run(self, random_seed = None, ignore_saved = False,
-            progress_step = None, progress_queue = None, **kwargs) -> EventSeries:
+    def run(self, random_seed=None, ignore_saved=False,
+            progress_step=None, progress_queue=None, **kwargs) -> EventSeries:
         """
-        Runs the environment, optionally reporting the progress to a given queue
+        Runs the environment, optionally reporting the progress to a given queue.
         """
         data_path = self.runDataPath(random_seed)
         run_id = self.makeRunId(random_seed)

@@ -18,17 +18,22 @@ from ...memory import *
 from ...utils import *
 from ...networks import *
 
-MIN_TEMP = 1.5
-
 logger = logging.getLogger(DQNROUTE_LOGGER)
 
 class DQNRouter(LinkStateRouter, RewardAgent):
     """
-    A router which implements DQN-routing algorithm
+    A router which implements the DQN-routing algorithm.
     """
     def __init__(self, batch_size: int, mem_capacity: int, nodes: List[AgentId],
                  optimizer='rmsprop', brain=None, random_init=False, max_act_time=None,
-                 additional_inputs=[], **kwargs):
+                 additional_inputs=[], softmax_temperature: float = 1.5,
+                 probability_smoothing: float = 0.0, **kwargs):
+        """
+        Parameters added by Igor:
+        :param softmax_temperature: larger temperature means larger entropy of routing decisions.
+        :param probability_smoothing (from 0.0 to 1.0): if greater than 0, then routing probabilities will
+            be separated from zero.
+        """
         super().__init__(**kwargs)
         self.batch_size = batch_size
         self.memory = Memory(mem_capacity)
@@ -36,18 +41,11 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         self.nodes = nodes
         self.max_act_time = max_act_time
         
-        # added by Igor to add probability smoothing support:
-        if "IGOR_TRAIN_PROBABILITY_SMOOTHING" in os.environ:
-            self.probability_smoothing = float(os.environ["IGOR_TRAIN_PROBABILITY_SMOOTHING"])
-        else:
-            self.probability_smoothing = 0.0
-            
-        # added by Igor to allow custom temperatures for softmax:
-        if "IGOR_OVERRDIDDEN_SOFTMAX_TEMPERATURE" in os.environ:
-            self.min_temp = float(os.environ["IGOR_OVERRDIDDEN_SOFTMAX_TEMPERATURE"])
-        else:
-            self.min_temp = MIN_TEMP
-
+        # changed by Igor: custom temperatures for softmax:
+        self.min_temp = softmax_temperature
+        # added by Igor: probability smoothing (0 means no smoothing):
+        self.probability_smoothing = probability_smoothing
+        
         if brain is None:
             self.brain = self._makeBrain(additional_inputs=additional_inputs, **kwargs)
             if random_init:
@@ -59,7 +57,6 @@ class DQNRouter(LinkStateRouter, RewardAgent):
                 
                 self.brain.restore()
                 self.log(f'Restored model {self.brain._label}')
-
         else:
             self.brain = brain
 
@@ -143,7 +140,7 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     def _sampleMemStacked(self):
         """
         Samples a batch of episodes from memory and stacks
-        states, actions and values from a batch together
+        states, actions and values from a batch together.
         """
         i_batch = self.memory.sample(self.batch_size)
         batch = [b[1] for b in i_batch]
@@ -156,7 +153,7 @@ class DQNRouter(LinkStateRouter, RewardAgent):
 
     def _replay(self):
         """
-        Fetches a batch of samples from the memory and fits against them
+        Fetches a batch of samples from the memory and fits against them.
         """
         states, actions, values = self._sampleMemStacked()
         preds = self._predict(states)
@@ -170,7 +167,7 @@ class DQNRouter(LinkStateRouter, RewardAgent):
 
 class DQNRouterOO(DQNRouter):
     """
-    Variant of DQN router which uses Q-network with scalar output
+    Variant of DQN router which uses Q-network with scalar output.
     """
     def _makeBrain(self, additional_inputs=[], **kwargs):
         return QNetwork(len(self.nodes), additional_inputs=additional_inputs,
@@ -182,10 +179,7 @@ class DQNRouterOO(DQNRouter):
         distr = softmax(prediction, self.min_temp)
         
         # Igor: probability smoothing
-        if len(distr) == 2:
-            #print(distr)
-            distr = (1 - self.probability_smoothing) * distr + self.probability_smoothing / 2
-            #print(distr)
+        distr = (1 - self.probability_smoothing) * distr + self.probability_smoothing / len(distr)
         
         to_idx = sample_distr(distr)
         estimate = -np.dot(prediction, distr)
@@ -208,8 +202,7 @@ class DQNRouterOO(DQNRouter):
         get_add_inputs = lambda nbr: [self._getAddInput(inp['tag'], nbr)
                                       for inp in self.additional_inputs]
 
-        input = [[addr, dst, self._nodeRepr(v[1])] + get_add_inputs(v)
-                 for v in nbrs]
+        input = [[addr, dst, self._nodeRepr(v[1])] + get_add_inputs(v) for v in nbrs]
         return stack_batch(input)
 
     def _replay(self):

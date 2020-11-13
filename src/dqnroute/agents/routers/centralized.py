@@ -29,7 +29,7 @@ class CentralizedRouter(MasterHandler):
                 return [PkgReceiveAction(pkg)]
             else:
                 to_nbr = self.routeFrom(sender, slave_id, pkg)
-                logger.debug('Routing pkg #{} on router {} to router {}'.format(pkg.id, slave_id[1], to_nbr[1]))
+                logger.debug(f'Routing pkg #{pkg.id} on router {slave_id[1]} to router {to_nbr[1]}')
                 return [PkgRouteAction(to_nbr, pkg)]
 
         elif isinstance(event, LinkUpdateEvent):

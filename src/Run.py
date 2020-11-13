@@ -57,13 +57,6 @@ parser.add_argument("--force_train", action="store_true",
 parser.add_argument("--skip_graphviz", action="store_true",
                     help="do not visualize graphs")
 
-# parameters that alter both learning and verifications
-parser.add_argument("--probability_smoothing", type=float, default=0.01,
-                    help="smoothing (0..1) of probabilities during learning and verification (defaut: 0.01)")
-parser.add_argument("--softmax_temperature", type=float, default=1.5,
-                    help=("custom softmax temperature (higher temperature means larger entropy in routing "
-                          "decisions; default: 1.5)"))
-
 # common verification / adversarial search parameters
 parser.add_argument("--cost_bound", type=float, default=100.0,
                     help="upper bound on expected delivery cost to verify (default: 100)")
@@ -103,25 +96,25 @@ args = parser.parse_args()
 for dirname in ["../logs", "../img"]:
     os.makedirs(dirname, exist_ok=True)
 
-os.environ["IGOR_OVERRDIDDEN_SOFTMAX_TEMPERATURE"] = str(args.softmax_temperature)
-
 # 1. load scenario from one or more config files
-sc = []
-filename_suffix = []
+string_scenario, filename_suffix = [], []
 for config_filename in args.config_files:
     filename_suffix += [os.path.split(config_filename)[1].replace(".yaml", "")]
     with open(config_filename, "r") as f:
-        sc += f.readlines()
-sc = "".join(sc)
+        string_scenario += f.readlines()
+string_scenario = "".join(string_scenario)
 #print(sc)
-scenario_loaded = yaml.safe_load(sc)
+scenario = yaml.safe_load(string_scenario)
 print(f"Configuration files: {args.config_files}")
 
-emb_dim = scenario_loaded["settings"]["router"]["dqn_emb"]["embedding"]["dim"]
+router_settings = scenario["settings"]["router"]
+emb_dim = router_settings["dqn_emb"]["embedding"]["dim"]
+softmax_temperature = router_settings["dqn"]["softmax_temperature"]
+probability_smoothing = router_settings["dqn"]["probability_smoothing"]
 
 # graphs size = #sources + #diverters + #sinks + #(conveyors leading to other conveyors)
-lengths = [len(scenario_loaded["configuration"][x]) for x in ["sources", "diverters", "sinks"]] \
-    + [len([c for c in scenario_loaded["configuration"]["conveyors"].values()
+lengths = [len(scenario["configuration"][x]) for x in ["sources", "diverters", "sinks"]] \
+    + [len([c for c in scenario["configuration"]["conveyors"].values()
            if c["upstream"]["type"] == "conveyor"])]
 #print(lengths)
 graph_size = sum(lengths)
@@ -227,7 +220,7 @@ def pretrain(args, dir_with_models: str, pretrain_filename: str):
     
     data_conv = gen_episodes_progress(ignore_saved=True, context='conveyors',
                                       num_episodes=args.pretrain_num_episodes,
-                                      random_seed=args.random_seed, run_params=scenario_loaded,
+                                      random_seed=args.random_seed, run_params=scenario,
                                       save_path='../logs/data_conveyor1_oneinp_new.csv')
     data_conv.loc[:, 'working'] = 1.0
     conv_emb = CachedEmbedding(LaplacianEigenmap, dim=emb_dim)
@@ -255,27 +248,26 @@ else:
 
 # TODO check whether setting a random seed makes training deterministic
 
-def run_single(file: str, router_type: str, random_seed: int, **kwargs):
+def run_single(run_params: dict, router_type: str, random_seed: int, **kwargs):
     job_id = mk_job_id(router_type, random_seed)
     with tqdm(desc=job_id) as bar:
         queue = DummyProgressbarQueue(bar)
-        runner = ConveyorsRunner(run_params=file, router_type=router_type, random_seed=random_seed,
+        runner = ConveyorsRunner(run_params=run_params, router_type=router_type, random_seed=random_seed,
                                  progress_queue=queue, **kwargs)
         event_series = runner.run(**kwargs)
     return event_series, runner
 
 def train(args, dir_with_models: str, pretrain_filename: str, train_filename: str,
           router_type: str, retrain: bool, work_with_files: bool):
-    # Igor: I did not see an easy way to change the code in a clean way
+    # added by Igor (TODO implement in a proper way):
     os.environ["IGOR_OVERRIDDEN_DQN_LOAD_FILENAME"] = pretrain_filename
-    os.environ["IGOR_TRAIN_PROBABILITY_SMOOTHING"] = str(args.probability_smoothing)
     if retrain:
         if "IGOR_OMIT_TRAINING" in os.environ:
             del os.environ["IGOR_OMIT_TRAINING"]
     else:
         os.environ["IGOR_OMIT_TRAINING"] = "True"
     
-    event_series, runner = run_single(file=scenario_loaded, router_type=router_type, progress_step=500,
+    event_series, runner = run_single(run_params=scenario, router_type=router_type, progress_step=500,
                                       ignore_saved=[True], random_seed=args.random_seed)
     if router_type == "dqn_emb":
         world = runner.world
@@ -323,7 +315,7 @@ if not args.skip_graphviz:
     visualize(g)
 
 def get_symbolic_analyzer() -> SymbolicAnalyzer:
-    return SymbolicAnalyzer(g, args.softmax_temperature, args.probability_smoothing,
+    return SymbolicAnalyzer(g, softmax_temperature, probability_smoothing,
                             args.verification_lr, delta_q_max=args.input_max_delta_q)
 
 def get_nnet_verifier() -> NNetVerifier:
@@ -331,7 +323,7 @@ def get_nnet_verifier() -> NNetVerifier:
         "It is mandatory to specify --verification_marabou_path for command "
         "embedding_adversarial_verification.")
     return NNetVerifier(g, args.marabou_path, NETWORK_FILENAME, PROPERTY_FILENAME,
-                        args.probability_smoothing, args.softmax_temperature, emb_dim)
+                        probability_smoothing, softmax_temperature, emb_dim)
 
 def get_sinks(ma_verbose: bool = True) -> Generator[Tuple[AgentId, torch.Tensor, MarkovAnalyzer], None, None]:
     for sink in g.sinks:
@@ -487,7 +479,7 @@ elif args.command == "embedding_adversarial_search":
                 x = Util.optimizable_clone(x.flatten())
                 objective_value, objective_inputs = embedding_packer.compute_objective(
                     embedding_packer.unpack(x), ma.nontrivial_diverters, lambdified_objective,
-                    args.softmax_temperature, args.probability_smoothing)
+                    softmax_temperature, probability_smoothing)
                 objective_value.backward()
                 aux_info = ", ".join([f"{param}={value.detach().cpu().item():.4f}"
                                       for param, value in zip(ma.params, objective_inputs)])
@@ -555,8 +547,7 @@ elif args.command == "embedding_adversarial_verification":
             # get current probability
             q_values = g.q_forward(current_embedding, sink_embedding.repeat(2, 1),
                                    torch.cat(neighbor_embeddings)).flatten()
-            p = Util.q_values_to_first_probability(q_values, args.softmax_temperature,
-                                                   args.probability_smoothing).item()
+            p = Util.q_values_to_first_probability(q_values, softmax_temperature, probability_smoothing).item()
             q_diff_min, q_diff_max = [nv.probability_to_q_diff(p + i * args.output_max_delta_p) for i in [-1, 1]]
             print(f"  Q values: {Util.to_numpy(q_values)}")
             print(f"  p on real embedding: {p}")
