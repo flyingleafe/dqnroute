@@ -109,7 +109,7 @@ os.environ["IGOR_OVERRDIDDEN_SOFTMAX_TEMPERATURE"] = str(args.softmax_temperatur
 sc = []
 filename_suffix = []
 for config_filename in args.config_files:
-    filename_suffix += [os.path.split(config_filename)[1]]
+    filename_suffix += [os.path.split(config_filename)[1].replace(".yaml", "")]
     with open(config_filename, "r") as f:
         sc += f.readlines()
 sc = "".join(sc)

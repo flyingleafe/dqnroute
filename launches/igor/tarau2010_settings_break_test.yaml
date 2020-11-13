@@ -1,0 +1,42 @@
+settings:
+  bags_distr:
+    sequence:
+      - {bags_number: 200, delta: 20, sinks: [0, 1]}
+      - {bags_number: 200, delta: 20}
+      - {action: 'conv_break', conv_idx: 9, pause: 100}
+      - {bags_number: 200, delta: 20}
+      - {action: 'conv_restore', conv_idx: 9, pause: 100}
+      - {bags_number: 200, delta: 20}
+      - {action: 'conv_break', conv_idx: 5, pause: 100}
+      - {bags_number: 200, delta: 20}
+      - {action: 'conv_restore', conv_idx: 5, pause: 100}
+      - {bags_number: 200, delta: 20} 
+  conveyor_env:
+    speed: 1
+    energy_consumption: 1
+  conveyor:
+    stop_delay: 40
+    slowdown_delay: 1
+  router:
+    simple_q:
+      energy_reward_weight: 0.4 # * 0.0002
+      learning_rate: 0.5
+    dqn: &dqn
+      energy_reward_weight: 1
+      optimizer: 'rmsprop'
+      scope: 'conveyor_test_ng'
+      activation: 'relu'
+      layers: [64, 64]
+      additional_inputs:
+        - tag: 'amatrix'
+      batch_size: 1
+      mem_capacity: 1
+    dqn_oneout:
+      <<: *dqn
+    dqn_emb:
+      <<: *dqn
+      energy_reward_weight: 0.5
+      additional_inputs: []
+      embedding:
+        alg: 'lap'
+        dim: 8

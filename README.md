@@ -1,30 +1,30 @@
-## Preface: dqnroutre
+## Preface: DQNroutre
 
-The original project [dqnroute](https://github.com/flyingleafe/dqnroute) comprises a simulation models for package delivery in computer networks, a simulation model for baggage delivery, and a reinforcement learning approach to learn a single neural network that controls routing in a distributed way. This approach is described in [Mukhutdinov, D., Filchenkov, A., Shalyto, A., & Vyatkin, V. (2019). Multi-agent deep learning for simultaneous optimization for time and energy in distributed routing system. Future Generation Computer Systems, 94, 587-600](https://www.sciencedirect.com/science/article/pii/S0167739X18309087?casa_token=3O7gKwF4KRAAAAAA:Ia9qKHkdtgvekRjrCL_M7U5jBFpIYCVPMUagJTf88lWfjJrv6D7zNkaJyYIPj9mculdSsbLXYhI). Beyond this publication, dqnroute is enhanced by using Laplacian embeddings of nodes to be adaptive to the changes in network topology.
+The original project [DQNroute](https://github.com/flyingleafe/dqnroute) comprises a simulation models for package delivery in computer networks, a simulation model for baggage delivery, and a reinforcement learning approach to learn a single neural network that controls routing in a distributed way. This approach is described in [Mukhutdinov, D., Filchenkov, A., Shalyto, A., & Vyatkin, V. (2019). Multi-agent deep learning for simultaneous optimization for time and energy in distributed routing system. Future Generation Computer Systems, 94, 587-600](https://www.sciencedirect.com/science/article/pii/S0167739X18309087?casa_token=3O7gKwF4KRAAAAAA:Ia9qKHkdtgvekRjrCL_M7U5jBFpIYCVPMUagJTf88lWfjJrv6D7zNkaJyYIPj9mculdSsbLXYhI). Beyond this publication, DQNroute is enhanced by using Laplacian Eigenmap embeddings of nodes to be adaptive to the changes in network topology.
 
 ## Introduction
 
-This project enhances [dqnroute](https://github.com/flyingleafe/dqnroute) in several ways.
+This project enhances [DQNroute](https://github.com/flyingleafe/dqnroute) in several ways.
 The modifications concern only the baggage handling capabilities of the original project, but may potentially be adapted to the domain of computer networks.
 
-The changes w.r.t. the original dqnroute are:
+The changes w.r.t. the original DQNroute are:
 
-* Neural network verification methods (work in progress).
+* Neural network verification methods (work in progress). See the section below.
 * The decisions of the neural network are altered to exclude routing probabilities that are very close to 0 and 1. This is done similarly to label smoothing. This is needed for the verification methods.
 * A [script](/src/Run.py) (use with "--command run" or "--command compare") that offers an easier access to the original project by performing both pretraining and training. It also visualizes topology graphs.
 * [Examples](/launches/igor) of baggage handling topology graphs, in particular with cycles:
-    * [Example](/launches/igor/tarau2010.yaml) (and [visualization](/launches/igor/ConveyorGraph-Tarau2010.pdf)) based on [Tarau, Alina N., Bart De Schutter, and Hans Hellendoorn. "Model-based control for route choice in automated baggage handling systems." IEEE Transactions on Systems, Man, and Cybernetics, Part C (Applications and Reviews) 40.3 (2010): 341-351](https://ieeexplore.ieee.org/abstract/document/5382550/).
-    * [Example](/launches/igor/johnstone2010.yaml) (and [visualization](/launches/igor/ConveyorGraph-Johnstone2010.pdf)) based on [Johnstone, Michael, Doug Creighton, and Saeid Nahavandi. "Status-based routing in baggage handling systems: Searching verses learning." IEEE Transactions on Systems, Man, and Cybernetics, Part C (Applications and Reviews) 40.2 (2009): 189-200](https://ieeexplore.ieee.org/abstract/document/5357429/).
+    * [Example](/launches/igor/tarau2010_graph_original.yaml) (and [visualization](/launches/igor/ConveyorGraph-Tarau2010.pdf)) based on [Tarau, Alina N., Bart De Schutter, and Hans Hellendoorn. "Model-based control for route choice in automated baggage handling systems." IEEE Transactions on Systems, Man, and Cybernetics, Part C (Applications and Reviews) 40.3 (2010): 341-351](https://ieeexplore.ieee.org/abstract/document/5382550/).
+    * [Example](/launches/igor/johnstone2010_graph.yaml) (and [visualization](/launches/igor/ConveyorGraph-Johnstone2010.pdf)) based on [Johnstone, Michael, Doug Creighton, and Saeid Nahavandi. "Status-based routing in baggage handling systems: Searching verses learning." IEEE Transactions on Systems, Man, and Cybernetics, Part C (Applications and Reviews) 40.2 (2009): 189-200](https://ieeexplore.ieee.org/abstract/document/5357429/).
 * Bugfix: a bag was processed incorrectly if it passed twice along the same conveyor. This is possible only in topology graphs with cycles.
-* Bugfix: Laplacian Eigenmap and HOPE embeddings were computed nondeterministically (with different random initialization), making different nodes have different embedding matrices. The initialization was replaced to a fixed, deterministic one.
+* Bugfix: Laplacian Eigenmap and HOPE embeddings were computed nondeterministically (with different random initialization), making different nodes have different embedding matrices. The initialization was replaced by a fixed, deterministic one.
 
 Unfortunately, some new features are currently implemented with global variables. This may be fixed in the future.
 
-## RL_Verif: verification of neural networks for baggage routing
+## RL_Verif: formal verification of neural networks for baggage routing
 
 The script [Run.py](/src/Run.py) and a subpackage [verification](/src/dqnroute/verification) implement several methods of neural network analysis and verification. This is still work in progress and may contain bugs.
 
-The implemented features correspond to different commands (--command) of Verify.py:
+The implemented features correspond to different commands (--command ...) of Run.py:
 
 * "compute_expected_cost": computes the expected bag delivery time (EBDT), assuming that the network is frozen (not learning) during the delivery. This assumption is also used below unless specified otherwise.
 * "embedding_adversarial_search": searches for adversarial examples that maximize the EBDT with respect to input node embeddings. The search is implemented with projected gradient descent (PGD).
