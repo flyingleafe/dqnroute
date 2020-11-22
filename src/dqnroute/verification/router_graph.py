@@ -10,6 +10,10 @@ from ..simulation.conveyors import ConveyorsEnvironment
 from .ml_util import Util
 
 class RouterGraph:
+    """
+    Clear graph representation of the conveyor network.
+    """
+    
     def __init__(self, world: ConveyorsEnvironment):
         # 1. explore
         self.world = world
@@ -52,16 +56,13 @@ class RouterGraph:
         self.node_keys_to_indices = {key: i for i, key in enumerate(self.node_keys)}
         self.indices_to_node_keys = {i: key for i, key in enumerate(self.node_keys)}
         
-        # 3. compute reachability matrix
-        self.reachable = self._compute_reachability_matrix()
-        
-        # 4. list of nodes of particulat types
+        # 3. list of nodes of particular types
         nodes_of_type = lambda s: [node_key for node_key in self.node_keys if node_key[0] == s]
         self.sources = nodes_of_type("source")
         self.sinks = nodes_of_type("sink")
         self.diverters = nodes_of_type("diverter")
         
-        # 5. find edge lengths from junctions and diverter-routers 
+        # 4. find edge lengths from junctions and diverter-routers 
         self.conveyor_models: dict = world.conveyor_models
         self._agent_id_to_edge_lengths = {}
         self._node_to_conveyor_ids = {node_key: set() for node_key in self.node_keys}
@@ -133,12 +134,20 @@ class RouterGraph:
                 self._node_to_conveyor_ids[junction].add(conveyor_index)
         
         # check that our node->router mapping does not violate the (reliable) networkx network
-        our_router_edges = sorted([(self.node_to_router[from_node], self.node_to_router[to_node])
-                            for from_node in self.node_keys for to_node in self.get_out_nodes(from_node)])
+        our_router_edges = sorted([
+            (self.node_to_router[from_node], self.node_to_router[to_node])
+            for from_node in self.node_keys for to_node in self.get_out_nodes(from_node)
+        ])
         assert our_router_edges == sorted(nw.edges()), f"{our_router_edges} != {sorted(nw.edges())}"
         #print("Edges between routers:", nw.edges())
         
+        # 5. compute reachability matrix
+        self.reachable = self._compute_reachability_matrix()
+        
     def check_embeddings(self):
+        """
+        Check that the embeddings are consistent between nodes.
+        """
         no_routers = sum([len(r.routers) for _, r in self.routers.items()])
         embeddings = []
         for _, router_keeper in self.routers.items():
@@ -155,9 +164,23 @@ class RouterGraph:
                     raise RuntimeError("Embeddings are inconsistent between nodes! This may be caused "
                                        "by the nondeterminism in computing embeddings.")
     
-    def to_graphviz(self):
+    def get_conveyor_of_edge(self, from_node: AgentId, to_node: AgentId) -> int:
+        c_from = self._node_to_conveyor_ids[from_node]
+        c_to = self._node_to_conveyor_ids[to_node]
+        intersection = list(c_from.intersection(c_to))
+        assert len(intersection) > 0
+        assert len(intersection) == 1, \
+            (f"It appears that there are two nodes {from_node} and {to_node} that are connected "
+             f"by more than one conveyor section. Such situations may be possible when there is "
+             f"a conveyor that starts and ends at the same other conveyor, but these situation "
+             f"are not supported. A possible way to proceed is to split that diverging/converging "
+             f"conveyor into two with an artificial single-input junction.")
+        return intersection[0]
+            
+    def to_graphviz(self) -> pgv.AGraph:
         gv_graph = pgv.AGraph(directed=True)
-
+        fill_colors = {"source": "#8888FF", "sink": "#88FF88", "diverter": "#FF9999", "junction": "#EEEEEE"}
+        
         for i, node_key in self.indices_to_node_keys.items():
             gv_graph.add_node(i)
             n = gv_graph.get_node(i)
@@ -168,9 +191,8 @@ class RouterGraph:
             conveyor_ids = ", ".join(sorted([f"c{i}" for i in conveyor_ids]))
             label = f"{label}\n[{conveyor_ids}]"
 
-            fill_colors = {"source": "#8888FF", "sink": "#88FF88", "diverter": "#FF9999", "junction": "#EEEEEE"}
-            for k, v in {"shape": "box", "style": "filled", "fixedsize": "true", "width": "0.9", "height": "0.7",
-                         "fillcolor": fill_colors[node_key[0]], "label": label}.items():
+            for k, v in {"shape": "box", "style": "filled", "fixedsize": "true", "width": "0.9",
+                         "height": "0.7", "fillcolor": fill_colors[node_key[0]], "label": label}.items():
                 n.attr[k] = v
         
         #for from_node in self.node_keys:
@@ -182,18 +204,8 @@ class RouterGraph:
                 i2 = self.node_keys_to_indices[to_node]
                 gv_graph.add_edge(i1, i2)
                 e = gv_graph.get_edge(i1, i2)
-                
-                # compute the conveyor of the edge as the only node forming the intersection
-                # of the nodes of the edge
-                intersection = list(self._node_to_conveyor_ids[from_node].intersection(self._node_to_conveyor_ids[to_node]))
-                if len(intersection) > 1:
-                    input(f"WARNING: during visualization, labeling of the edge {from_node} → {to_node}"
-                          f" with a conveyor may be incorrect. This is likely due the existence of a conveyor"
-                          f" that starts at and leads to the same other conveyor. Correct handing of this"
-                          f" case have not yet been implemented. Press Enter to continue.")
-                #assert len(intersection) == 1, f"{from_node} at {self._node_to_conveyor_ids[from_node]}, {to_node} at {self._node_to_conveyor_ids[to_node]}"
-                e.attr["label"] = f"{self.get_edge_length(from_node, to_node)} [c{intersection[0]}]"
-        
+                c = self.get_conveyor_of_edge(from_node, to_node)
+                e.attr["label"] = f"{self.get_edge_length(from_node, to_node)} [c{c}]"
         return gv_graph
     
     def q_forward(self, current_embedding, sink_embedding, neighbor_embedding):
@@ -214,6 +226,7 @@ class RouterGraph:
         return reachable
     
     def get_edge_length(self, from_node_key: AgentId, to_node_key: AgentId) -> float:
+        # Igor: the implementation of this method is not very clear.
         node_key = from_node_key
         if from_node_key[0] == "diverter":
             upstream_conv = self.world.layout["diverters"][from_node_key[1]]["upstream_conv"]
@@ -223,10 +236,21 @@ class RouterGraph:
         #print(from_node_key, to_node_key, "->", node_key)
         return self._agent_id_to_edge_lengths[node_key]
         
-    def get_out_nodes(self, node_key: AgentId) -> list:
-        return sorted([e[1] for e in self.graph.out_edges(node_key)])
-    
-    def get_out_node_indices(self, node_index: int) -> list:
+    def get_out_nodes(self, node_key: AgentId) -> List[AgentId]:
+        """
+        :return the list of successor nodes of node_key. If node_key is a diverter,
+          then the successor nodes will be returned in the following order:
+          [0] the next node along the same conveyor;
+          [1] the next node along the different conveyor. 
+        """
+        e = sorted([e[1] for e in self.graph.out_edges(node_key)])
+        if len(e) == 2:
+            current_conv = self.world.layout["diverters"][node_key[1]]["conveyor"]
+            if self.get_conveyor_of_edge(node_key, e[0]) != current_conv:
+                e = e[::-1]
+        return e
+            
+    def get_out_node_indices(self, node_index: int) -> List[int]:
         return [self.node_keys_to_indices[key]
                 for key in self.get_out_nodes(self.indices_to_node_keys[node_index])]
     
