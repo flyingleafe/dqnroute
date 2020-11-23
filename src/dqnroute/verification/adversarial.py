@@ -157,7 +157,7 @@ class PGDAdversary(Adversary):
                         rho = best_perturbation_norm
                 else: # regular repeats
                     # return immediately
-                    return self.optional_normalize_(x1 + perturbation)
+                    return x1 + perturbation
             if best_perturbation is None:
                 best_perturbation = perturbation
             if self.shrinking_repeats and run_n == self.n_repeat - 1:

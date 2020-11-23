@@ -479,8 +479,8 @@ elif args.command == "embedding_adversarial_search":
     else:
         norm, norm_bound = "l_inf", args.input_eps_l_inf
     adv = PGDAdversary(rho=norm_bound, steps=100, step_size=0.02, random_start=True, stop_loss=args.cost_bound,
-                       verbose=2, norm=norm, n_repeat=2, repeat_mode="min", dtype=torch.float64)
-    print(f"Trying to falsify ({norm}_norm(Δembedding) ≤ {norm_bound}) ⇒ (E(cost) < {args.cost_bound}).")
+                       verbose=2, norm=norm, n_repeat=2, repeat_mode="any", dtype=torch.float64)
+    print(f"Trying to falsify ({norm}_norm(Δembedding) ≤ {norm_bound}) => (E(cost) < {args.cost_bound}).")
     for sink, sink_embedding, ma in get_sinks():
         print(f"Searching for adversarial examples for delivery to {sink}...")
         
