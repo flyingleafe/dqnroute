@@ -65,6 +65,12 @@ parser.add_argument("--simple_path_cost", action="store_true",
 parser.add_argument("--input_eps_l_inf", type=float, default=0.1,
                     help="maximum L_∞ discrepancy of input embeddings in adversarial robustness "
                          "verification or search (default: 0.1)")
+parser.add_argument("--single_source", type=int, default=None,
+                    help="index of the single source to consider (if not specified, all sources will "
+                         "be considered)")
+parser.add_argument("--single_sink", type=int, default=None,
+                    help="index of the single sink to consider (if not specified, all sinks will "
+                         "be considered)")
 
 # parameters specific to adversarial search with PGD (embedding_adversarial_search)
 parser.add_argument("--input_eps_l_2", type=float, default=1.5,
@@ -325,8 +331,24 @@ def get_nnet_verifier() -> NNetVerifier:
     return NNetVerifier(g, args.marabou_path, NETWORK_FILENAME, PROPERTY_FILENAME,
                         probability_smoothing, softmax_temperature, emb_dim)
 
+def get_sources(ma: MarkovAnalyzer) -> Generator[AgentId, None, None]:
+    """
+    Return reachable sources. If a single source was specified in command line arguments, only
+    this source will be returned.
+    """
+    for source in ma.reachable_sources:
+        if args.single_source is not None and source[1] != args.single_source:
+            continue
+        yield source
+
 def get_sinks(ma_verbose: bool = True) -> Generator[Tuple[AgentId, torch.Tensor, MarkovAnalyzer], None, None]:
+    """
+    Return all sinks. If a single sink was specified in command line arguments, only
+    this sink will be returned.
+    """
     for sink in g.sinks:
+        if args.single_sink is not None and sink[1] != args.single_sink:
+            continue
         ma = MarkovAnalyzer(g, sink, args.simple_path_cost, verbose=ma_verbose)
         sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
         yield sink, sink_embedding, ma
@@ -465,7 +487,7 @@ elif args.command == "embedding_adversarial_search":
         # gather all embeddings that we need to compute the objective
         embedding_packer = EmbeddingPacker(g, sink, sink_embedding, ma.reachable_nodes)
 
-        for source in ma.reachable_sources:
+        for source in get_sources(ma):
             print(f"  Measuring adversarial robustness of delivery from {source} to {sink}...")
             _, lambdified_objective = ma.get_objective(source)
 
@@ -496,7 +518,7 @@ elif args.command == "embedding_adversarial_full_verification":
     nv = get_nnet_verifier()
     for sink, _, ma in get_sinks():
         print(f"Verifying adversarial robustness of delivery to {sink}...")
-        for source in ma.reachable_sources:
+        for source in get_sources(ma):
             print(f"  Verifying adversarial robustness of delivery from {source} to {sink}...")
             result = nv.verify_cost_delivery_bound(sink, source, ma, args.input_eps_l_inf, args.cost_bound)
             print(f"    {result}")
@@ -570,7 +592,7 @@ elif args.command == "compute_expected_cost":
     sa = get_symbolic_analyzer()
     for sink, sink_embedding, ma in get_sinks():
         sink_embeddings = sink_embedding.repeat(2, 1)
-        for source in ma.reachable_sources:
+        for source in get_sources(ma):
             print(f"Delivery from {source} to {sink})...")
             _, lambdified_objective = ma.get_objective(source)
             ps = sa.compute_ps(ma, sink, sink_embeddings, 0, 0)
@@ -585,7 +607,7 @@ elif args.command == "q_adversarial":
     for sink, sink_embedding, ma in get_sinks():
         print(f"Measuring robustness of delivery to {sink}...")
         sink_embeddings = sink_embedding.repeat(2, 1)
-        for source in ma.reachable_sources:
+        for source in get_sources(ma):
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
             objective, lambdified_objective = ma.get_objective(source)
             for node_key in g.node_keys:
@@ -634,7 +656,7 @@ elif args.command == "q_adversarial_lipschitz":
     sa.load_matrices()
     for sink, sink_embedding, ma in get_sinks():
         print(f"Measuring robustness of delivery to {sink}...")
-        for source in ma.reachable_sources:
+        for source in get_sources(ma):
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
             objective, _ = ma.get_objective(source)
             for node_key in g.node_keys:
