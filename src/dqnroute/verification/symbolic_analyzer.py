@@ -204,7 +204,8 @@ class SymbolicAnalyzer:
                                      if refined_interval[0] < p < refined_interval[1]]
                 all_points = [refined_interval[0]] + additional_points + [refined_interval[1]]
                 all_values.update([np.abs(float(refined_e.subs(self.beta, p).simplify())) for p in all_points])
-                print(f"        {self.interval_to_string(refined_interval)}: κ'(β) = {self.expr_to_string(refined_e)}; stationary points: {additional_points}")
+                print(f"        {self.interval_to_string(refined_interval)}: κ'(β) = {self.expr_to_string(refined_e)};"
+                      f" stationary points: {additional_points}")
         return max(all_values)
     
     def estimate_top_level_upper_bound(self, expr: sympy.Expr, ps_function_names: List[str],

@@ -626,14 +626,15 @@ elif args.command == "q_adversarial":
                         objective_values[i] = lambdified_objective(*ps)
                         kappa_values[i]     = lambdified_kappa(*ps)
                     #print(((objective_values > args.cost_bound) != (kappa_values > 0)).sum()) 
-                    fig, axes = plt.subplots(2, 1, figsize=(13, 6))
-                    plt.subplots_adjust(hspace=0.3)
-                    caption_starts = "Delivery cost (τ)", "Transformed delivery cost (κ)"
+                    fig, axes = plt.subplots(3, 1, figsize=(10, 10))
+                    plt.subplots_adjust(hspace=0.4)
+                    caption_starts = *(["Delivery cost (τ)"] * 2), "Transformed delivery cost (κ)"
+                    values         = *([objective_values   ] * 2), kappa_values
                     axes[0].set_yscale("log")
-                    for ax, caption_start, values in zip(axes, caption_starts, (objective_values, kappa_values)):
-                        label = (f"{caption_start} from {source} to {sink} when making optimization"
+                    for ax, caption_start, values in zip(axes, caption_starts, values):
+                        label = (f"{caption_start} from {source} to {sink} when making\n optimization"
                                  f" step with current={node_key}, neighbor={neighbor_key}")
-                        print(f"{label}...")
+                        print(f"Plotting: {label}...")
                         ax.set_title(label)
                         ax.plot(actual_qs, values)
                         y_delta = 0 if np.ptp(values) > 0 else 5
@@ -641,9 +642,10 @@ elif args.command == "q_adversarial":
                         ax.vlines(reference_q, min(values) - y_delta, max(values) + y_delta)
                         ax.hlines(values[len(values) // 2], min(actual_qs), max(actual_qs))
                     # show the verification bound:
-                    axes[0].hlines(args.cost_bound, min(actual_qs), max(actual_qs))
-                    axes[1].hlines(0, min(actual_qs), max(actual_qs))
-                    plt.savefig(f"../img/{filename_suffix}_{plot_index}.pdf")
+                    for i in range(2):
+                        axes[i].hlines(args.cost_bound, min(actual_qs), max(actual_qs))
+                    axes[2].hlines(0, min(actual_qs), max(actual_qs))
+                    plt.savefig(f"../img/{filename_suffix}_{plot_index}.pdf", bbox_inches = "tight")
                     plt.close()
                     print(f"Empirically found maximum of τ: {objective_values.max():.6f}")
                     print(f"Empirically found maximum of κ: {kappa_values.max():.6f}")
