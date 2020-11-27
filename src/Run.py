@@ -71,6 +71,9 @@ parser.add_argument("--single_source", type=int, default=None,
 parser.add_argument("--single_sink", type=int, default=None,
                     help="index of the single sink to consider (if not specified, all sinks will "
                          "be considered)")
+parser.add_argument("--learning_step_indices", type=str, default=None,
+                    help="in learning step verification, consider only learning steps with these indices "
+                         "comma-separated list without spaces; all steps will be considered if not specified)")
 
 # parameters specific to adversarial search with PGD (embedding_adversarial_search)
 parser.add_argument("--input_eps_l_2", type=float, default=1.5,
@@ -352,6 +355,11 @@ def get_sinks(ma_verbose: bool = True) -> Generator[Tuple[AgentId, torch.Tensor,
         ma = MarkovAnalyzer(g, sink, args.simple_path_cost, verbose=ma_verbose)
         sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
         yield sink, sink_embedding, ma
+        
+def get_learning_step_indices() -> Union[Set[int], None]:
+    result = [int(s) for s in args.learning_step_indices.split(",")]
+    return set(result) if len(result) > 0 else None
+
 
 print(f"Running command {args.command}...")
 
@@ -603,7 +611,8 @@ elif args.command == "compute_expected_cost":
 # Evaluate the expected delivery cost assuming a change in NN parameters and make plots            
 elif args.command == "q_adversarial":
     sa = get_symbolic_analyzer()
-    plot_index = 0
+    learning_step_index = -1
+    requested_indices = get_learning_step_indices()
     for sink, sink_embedding, ma in get_sinks():
         print(f"Measuring robustness of delivery to {sink}...")
         sink_embeddings = sink_embedding.repeat(2, 1)
@@ -613,6 +622,9 @@ elif args.command == "q_adversarial":
             for node_key in g.node_keys:
                 current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
                 for neighbor_key, neighbor_embedding in zip(neighbors, neighbor_embeddings):
+                    learning_step_index += 1
+                    if requested_indices is not None and learning_step_index not in requested_indices:
+                        continue
                     # compute
                     # we assume a linear change of parameters
                     reference_q = sa.compute_gradients(current_embedding, sink_embedding,
@@ -645,17 +657,18 @@ elif args.command == "q_adversarial":
                     for i in range(2):
                         axes[i].hlines(args.cost_bound, min(actual_qs), max(actual_qs))
                     axes[2].hlines(0, min(actual_qs), max(actual_qs))
-                    plt.savefig(f"../img/{filename_suffix}_{plot_index}.pdf", bbox_inches = "tight")
+                    plt.savefig(f"../img/{filename_suffix}_{learning_step_index}.pdf", bbox_inches = "tight")
                     plt.close()
                     print(f"Empirically found maximum of τ: {objective_values.max():.6f}")
                     print(f"Empirically found maximum of κ: {kappa_values.max():.6f}")
-                    plot_index += 1
 
 # Formally verify the bound on the expected delivery cost w.r.t. learning step magnitude  
 elif args.command == "q_adversarial_lipschitz":
     sa = get_symbolic_analyzer()
     print(sa.net)
     sa.load_matrices()
+    learning_step_index = -1
+    requested_indices = get_learning_step_indices()
     for sink, sink_embedding, ma in get_sinks():
         print(f"Measuring robustness of delivery to {sink}...")
         for source in get_sources(ma):
@@ -664,6 +677,9 @@ elif args.command == "q_adversarial_lipschitz":
             for node_key in g.node_keys:
                 current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
                 for neighbor_key, neighbor_embedding in zip(neighbors, neighbor_embeddings):
+                    learning_step_index += 1
+                    if requested_indices is not None and learning_step_index not in requested_indices:
+                        continue
                     print(f"    Considering learning step {node_key} → {neighbor_key}...")
                     lbc = LipschitzBoundComputer(sa, ma, objective, sink, current_embedding, sink_embedding,
                                                  neighbor_embedding, args.cost_bound)

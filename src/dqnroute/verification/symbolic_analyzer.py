@@ -19,6 +19,7 @@ class relu(sympy.Function):
     def _eval_is_real(self):
         return True
 
+
 class SymbolicAnalyzer:
     def __init__(self, g: RouterGraph, softmax_temperature: float, probability_smoothing: float,
                  lr: float, delta_q_max: float):
@@ -327,7 +328,7 @@ class LipschitzBoundComputer:
         for param, diverter_key in zip(self.ma.params, self.ma.nontrivial_diverters):
             _, current_neighbors, _ = self.sa.g.node_to_embeddings(diverter_key, self.sink)
             print(f"      Computing the logit and its derivative for {param} ="
-                  f" P({diverter_key} -> {current_neighbors[0]} | sink = {self.sink})....")
+                  f" P({diverter_key} → {current_neighbors[0]} | sink = {self.sink})....")
             logit, dlogit_dbeta = self._compute_logit_and_derivative(diverter_key)
             # surprisingly, the strings are very slow to obtain
             #print(f"      logit = {sa.expr_to_string(logit)[:500]} ...")
@@ -339,15 +340,15 @@ class LipschitzBoundComputer:
         top_level_bound = self.sa.estimate_top_level_upper_bound(self.dkappa_dbeta, self.ps_function_names,
                                                                  derivative_bounds)
         print(f"      Final upper bound on the Lipschitz constant of κ(β): {top_level_bound}")
-        left_q = -self.sa.delta_q_max + self.reference_q
-        right_q = self.sa.delta_q_max + self.reference_q
+        left_q, right_q = np.array([-1, 1]) * self.sa.delta_q_max + self.reference_q
         
         # for recursive executions:
         self.empirical_bound = -np.infty
         self.max_depth = 0
         self.no_evaluations = 2
         self.checked_q_measure = 0.0
-        return self._prove_bound(left_q, right_q, self._q_to_kappa(left_q), self._q_to_kappa(right_q), 0)
+        return self._prove_bound(left_q, right_q, self._q_to_kappa(left_q), self._q_to_kappa(right_q), 0,
+                                 top_level_bound)
     
     def _q_to_kappa(self, actual_q: float) -> float:
         ps = self.sa.compute_ps(self.ma, self.sink, self.sink_embeddings, self.reference_q, actual_q)
@@ -357,7 +358,7 @@ class LipschitzBoundComputer:
         return (actual_q - self.reference_q) * self.sa.lr
     
     def _prove_bound(self, left_q: float, right_q: float, left_kappa: float, right_kappa: float,
-                     depth: int) -> bool:
+                     depth: int, top_level_bound: float) -> bool:
         mid_q = (left_q + right_q) / 2
         mid_kappa = self._q_to_kappa(mid_q)
         actual_qs    = np.array([left_q,     mid_q,     right_q])
@@ -367,8 +368,8 @@ class LipschitzBoundComputer:
         # 1. try to find counterexample
         if max_kappa > 0:
             worst_q = actual_qs[worst_index]
-            worst_dq = worst_q - reference_q
-            print(f"        Counterexample found: q = {worst_q:.6f}, Δq = {worst_dq:.6f},"
+            worst_dq = worst_q - self.reference_q
+            print(f"      Counterexample found: q = {worst_q:.6f}, Δq = {worst_dq:.6f},"
                   f" β = {self._q_to_beta(worst_q):.6f}, κ = {max_kappa:.6f}")
             return False
             
@@ -394,8 +395,8 @@ class LipschitzBoundComputer:
                   f" percentage: {percentage:.2f}")
         
         # 3. otherwise, try recursively
-        calls = [(lambda: self._prove_bound(left_q, mid_q,   left_kappa, mid_kappa,   depth + 1)),
-                 (lambda: self._prove_bound(mid_q,  right_q, mid_kappa,  right_kappa, depth + 1))]
+        calls = [(lambda: self._prove_bound(left_q, mid_q,   left_kappa, mid_kappa,   depth + 1, top_level_bound)),
+                 (lambda: self._prove_bound(mid_q,  right_q, mid_kappa,  right_kappa, depth + 1, top_level_bound))]
         # to produce counetrexamples faster,
         # start from the most empirically dangerous subinterval
         if max_on_interval.argmax() == 1:
