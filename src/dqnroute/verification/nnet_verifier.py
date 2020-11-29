@@ -274,7 +274,7 @@ class NNetVerifier:
     def _verified_fraction(self, probability_dimension: int) -> float:
         return self._verified_volume_meter / (1 - self.probability_smoothing) ** probability_dimension
     
-    def verify_cost_delivery_bound(self, sink: AgentId, source: AgentId, ma: MarkovAnalyzer,
+    def verify_delivery_cost_bound(self, sink: AgentId, source: AgentId, ma: MarkovAnalyzer,
                                    input_eps_l_inf: float, cost_bound: float) -> VerificationResult:
         sink_embedding, _, _ = self.g.node_to_embeddings(sink, sink)
         self.objective, self.lambdified_objective = ma.get_objective(source)
@@ -299,9 +299,9 @@ class NNetVerifier:
         self._verified_volume_meter = 0.0
         
         region = ProbabilityRegion.get_initial(len(ma.params), self)
-        return self._verify_cost_delivery_bound(sink, source, ma, input_eps_l_inf, cost_bound, region, 0, None)
+        return self._verify_delivery_cost_bound(sink, source, ma, input_eps_l_inf, cost_bound, region, 0, None)
     
-    def _verify_cost_delivery_bound(self, sink: AgentId, source: AgentId, ma: MarkovAnalyzer,
+    def _verify_delivery_cost_bound(self, sink: AgentId, source: AgentId, ma: MarkovAnalyzer,
                                     input_eps_l_inf: float, cost_bound: float,
                                     region: ProbabilityRegion, depth: int,
                                     upper_level_counterexample: Union[Counterexample, None]) -> VerificationResult:
@@ -367,7 +367,7 @@ class NNetVerifier:
         # 4. If no conclusion can be made, split R and try recursively
         print(f"    [depth={depth}] No conclusion, trying recursively...")
         r1, r2 = region.split()
-        calls = [lambda: self._verify_cost_delivery_bound(
+        calls = [lambda: self._verify_delivery_cost_bound(
             sink, source, ma, input_eps_l_inf, cost_bound, r, depth + 1, result) for r in [r1, r2]]
         return verify_conjunction(calls)
         

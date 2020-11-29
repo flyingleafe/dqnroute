@@ -322,7 +322,7 @@ class LipschitzBoundComputer:
             print("      (using cached value)")
         return self.computed_logits_and_derivatives[diverter_key]
     
-    def prove_bound(self) -> bool:      
+    def prove_bound(self, no_points_for_presearch: int) -> bool:       
         #  compute a pool of bounds
         derivative_bounds = {}
         for param, diverter_key in zip(self.ma.params, self.ma.nontrivial_diverters):
@@ -345,17 +345,32 @@ class LipschitzBoundComputer:
         # for recursive executions:
         self.empirical_bound = -np.infty
         self.max_depth = 0
-        self.no_evaluations = 2
+        self.no_evaluations = 0
         self.checked_q_measure = 0.0
+        
+        # pre-search: check uniformly positioned points hoping to find a counterexample
+        if no_points_for_presearch > 2:
+            for q in np.linspace(left_q, right_q, no_points_for_presearch):
+                kappa = self._q_to_kappa(q)
+                if kappa >= 0:
+                    self._report_counterexample(q, kappa)
+                    return False
+        
         return self._prove_bound(left_q, right_q, self._q_to_kappa(left_q), self._q_to_kappa(right_q), 0,
                                  top_level_bound)
     
     def _q_to_kappa(self, actual_q: float) -> float:
+        self.no_evaluations += 1
         ps = self.sa.compute_ps(self.ma, self.sink, self.sink_embeddings, self.reference_q, actual_q)
         return self.lambdified_kappa(*ps)
                     
     def _q_to_beta(self, actual_q: float) -> float:
         return (actual_q - self.reference_q) * self.sa.lr
+    
+    def _report_counterexample(q: float, kappa: float):
+        dq = q - self.reference_q
+        beta = self._q_to_beta(q)
+        print(f"      Counterexample found: q = {q:.6f}, Δq = {dq:.6f}, β = {beta:.6f}, κ = {kappa:.6f}")
     
     def _prove_bound(self, left_q: float, right_q: float, left_kappa: float, right_kappa: float,
                      depth: int, top_level_bound: float) -> bool:
@@ -366,11 +381,9 @@ class LipschitzBoundComputer:
         worst_index = kappa_values.argmax()
         max_kappa = kappa_values[worst_index]
         # 1. try to find counterexample
-        if max_kappa > 0:
+        if max_kappa >= 0:
             worst_q = actual_qs[worst_index]
-            worst_dq = worst_q - self.reference_q
-            print(f"      Counterexample found: q = {worst_q:.6f}, Δq = {worst_dq:.6f},"
-                  f" β = {self._q_to_beta(worst_q):.6f}, κ = {max_kappa:.6f}")
+            self._report_counterexample(worst_q, max_kappa)
             return False
             
         # 2. try to find proof on [left, right]
@@ -385,7 +398,6 @@ class LipschitzBoundComputer:
             return True
         
         # logging
-        self.no_evaluations += 1
         self.max_depth = max(self.max_depth, depth)
         self.empirical_bound = max(self.empirical_bound, max_kappa)
         if self.no_evaluations % 100 == 0:

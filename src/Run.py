@@ -90,6 +90,10 @@ parser.add_argument("--input_max_delta_q", type=float, default=10.0,
                     help="maximum ΔQ in learning step verification (default: 10.0)")
 parser.add_argument("--q_adversarial_no_points", type=int, default=351,
                     help="number of points used to create plots in command q_adversarial")
+parser.add_argument("--q_adversarial_verification_no_points", type=int, default=351,
+                    help="number of points to search for counterexamples before estimating the Lipschitz "
+                         "constant in command q_adversarial_lipschitz (setting to less than 2 disables "
+                         "this search)")
 
 # parameters specific to verification with Marabou
 # (embedding_adversarial_verification, embedding_adversarial_full_verification)
@@ -528,7 +532,7 @@ elif args.command == "embedding_adversarial_full_verification":
         print(f"Verifying adversarial robustness of delivery to {sink}...")
         for source in get_sources(ma):
             print(f"  Verifying adversarial robustness of delivery from {source} to {sink}...")
-            result = nv.verify_cost_delivery_bound(sink, source, ma, args.input_eps_l_inf, args.cost_bound)
+            result = nv.verify_delivery_cost_bound(sink, source, ma, args.input_eps_l_inf, args.cost_bound)
             print(f"    {result}")
 
 # Formally verify Q value stability w.r.t. input embeddings         
@@ -683,8 +687,10 @@ elif args.command == "q_adversarial_lipschitz":
                     print(f"    Considering learning step {node_key} → {neighbor_key}...")
                     lbc = LipschitzBoundComputer(sa, ma, objective, sink, current_embedding, sink_embedding,
                                                  neighbor_embedding, args.cost_bound)
-                    if lbc.prove_bound():
+                    if lbc.prove_bound(args.q_adversarial_verification_no_points):
                         print("      Proof found!")
+                    print(f"      Number of evaluations of κ: {lbc.no_evaluations}")
+                    print(f"      Maximum depth reached: {lbc.max_depth}")
 
 else:
     raise RuntimeError(f"Unknown command {args.command}.")
