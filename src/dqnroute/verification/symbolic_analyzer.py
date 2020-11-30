@@ -262,7 +262,7 @@ class SymbolicAnalyzer:
         # compute the sign of v, then ensure that it is "+"
         # the values to subsitute are arbitrary within (0, 1)
         denominator_value = denominator.subs([(param, 0.5) for param in ma.params]).simplify()
-        print(f"      denominator(0.5) = {float(denominator_value):.4f}")
+        print(f"      denominator((0.5, ..., 0.5)) = {float(denominator_value):.4f}")
         if denominator_value < 0:
             nominator *= -1
             denominator *= -1
@@ -323,6 +323,25 @@ class LipschitzBoundComputer:
         return self.computed_logits_and_derivatives[diverter_key]
     
     def prove_bound(self, no_points_for_presearch: int) -> bool:       
+        # for recursive executions:
+        self.empirical_bound = -np.infty
+        self.max_depth = 0
+        self.no_evaluations = 0
+        self.checked_q_measure = 0.0
+
+        left_q, right_q = np.array([-1, 1]) * self.sa.delta_q_max + self.reference_q
+
+        # pre-search: check uniformly positioned points hoping to find a counterexample
+        if no_points_for_presearch > 2:
+            print(f"      Performing pre-search of counterexamples with {no_points_for_presearch} points...")
+            points = np.linspace(left_q, right_q, no_points_for_presearch)
+            for q in sorted(points, key=(lambda x: -np.abs(x - self.reference_q))):
+                kappa = self._q_to_kappa(q)
+                if kappa >= 0:
+                    self._report_counterexample(q, kappa)
+                    return False
+            print(f"      No counterexample found during the pre-search")
+        
         #  compute a pool of bounds
         derivative_bounds = {}
         for param, diverter_key in zip(self.ma.params, self.ma.nontrivial_diverters):
@@ -340,22 +359,6 @@ class LipschitzBoundComputer:
         top_level_bound = self.sa.estimate_top_level_upper_bound(self.dkappa_dbeta, self.ps_function_names,
                                                                  derivative_bounds)
         print(f"      Final upper bound on the Lipschitz constant of κ(β): {top_level_bound}")
-        left_q, right_q = np.array([-1, 1]) * self.sa.delta_q_max + self.reference_q
-        
-        # for recursive executions:
-        self.empirical_bound = -np.infty
-        self.max_depth = 0
-        self.no_evaluations = 0
-        self.checked_q_measure = 0.0
-        
-        # pre-search: check uniformly positioned points hoping to find a counterexample
-        if no_points_for_presearch > 2:
-            for q in np.linspace(left_q, right_q, no_points_for_presearch):
-                kappa = self._q_to_kappa(q)
-                if kappa >= 0:
-                    self._report_counterexample(q, kappa)
-                    return False
-        
         return self._prove_bound(left_q, right_q, self._q_to_kappa(left_q), self._q_to_kappa(right_q), 0,
                                  top_level_bound)
     
@@ -367,7 +370,7 @@ class LipschitzBoundComputer:
     def _q_to_beta(self, actual_q: float) -> float:
         return (actual_q - self.reference_q) * self.sa.lr
     
-    def _report_counterexample(q: float, kappa: float):
+    def _report_counterexample(self, q: float, kappa: float):
         dq = q - self.reference_q
         beta = self._q_to_beta(q)
         print(f"      Counterexample found: q = {q:.6f}, Δq = {dq:.6f}, β = {beta:.6f}, κ = {kappa:.6f}")

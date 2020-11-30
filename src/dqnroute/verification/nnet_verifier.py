@@ -11,6 +11,7 @@ import scipy
 import torch
 import z3
 
+from .exception import MarabouException
 from .ml_util import Util
 from .router_graph import RouterGraph
 from .markov_analyzer import MarkovAnalyzer
@@ -85,7 +86,10 @@ class VerificationResult(ABC):
     def from_marabou(marabou_lines: List[str], input_dim: int, output_dim: int):
         xs = np.zeros(input_dim)  + np.nan
         ys = np.zeros(output_dim) + np.nan
+        unsat_found = False
         for line in marabou_lines:
+            if line == "unsat":
+                unsat_found = True
             tokens = re.split(" *= *", line)
             if len(tokens) == 2:
                 #print(tokens)
@@ -98,8 +102,11 @@ class VerificationResult(ABC):
                     ys[index] = value
                 else:
                     raise RuntimeError(f"Unexpected assignment {line}.")
-        assert np.isnan(xs).all() == np.isnan(ys).all(), \
-               f"Problems with reading a counterexample (xs={xs}, ys={ys}, lines={lines})!"
+        if not unsat_found and np.isnan(xs).any():
+            raise MarabouException("Inconsistent output of Marabou!")
+        if np.isnan(xs).all() != np.isnan(ys).all():
+            raise MarabouException(f"Problems with reading a counterexample "
+                                   f"(xs={xs}, ys={ys}, lines={lines})!")
         return Verified() if np.isnan(xs).all() else Counterexample(xs, ys)
         
 
@@ -145,7 +152,12 @@ def verify_conjunction(calls: List[Callable[[], VerificationResult]]) -> Verific
     
 class NNetVerifier:
     def __init__(self, g: RouterGraph, marabou_path: str, network_filename: str, property_filename: str,
-                 probability_smoothing: float, softmax_temperature: float, emb_dim: int):
+                 probability_smoothing: float, softmax_temperature: float, emb_dim: int,
+                 linux_marabou_memory_limit_mb: Optional[int] = None):
+        """
+        :param linux_marabou_memory_limit_mb: set memory limit for Marabou (Linux only).
+            If None, no memory limit will be set.
+        """
         self.g = g
         self.marabou_path = marabou_path
         self.network_filename = network_filename
@@ -153,6 +165,7 @@ class NNetVerifier:
         self.probability_smoothing = probability_smoothing
         self.softmax_temperature = softmax_temperature
         self.emb_dim = emb_dim
+        self.linux_marabou_memory_limit_mb = linux_marabou_memory_limit_mb
         
         # to be created right now:
         self.net, self.net_new, self.net_large = [None] * 3
@@ -304,7 +317,7 @@ class NNetVerifier:
     def _verify_delivery_cost_bound(self, sink: AgentId, source: AgentId, ma: MarkovAnalyzer,
                                     input_eps_l_inf: float, cost_bound: float,
                                     region: ProbabilityRegion, depth: int,
-                                    upper_level_counterexample: Union[Counterexample, None]) -> VerificationResult:
+                                    upper_level_counterexample: Optional[Counterexample]) -> VerificationResult:
         m = len(ma.params)
         n = self.embedding_packer.number_of_embeddings()
         print(f"    [depth={depth}] Verified probability mass percentage: {self._verified_fraction(m) * 100:.2f}%")
@@ -402,9 +415,24 @@ class NNetVerifier:
         #dnc = ["--dnc", "--num-workers", "2"]#str(multiprocessing.cpu_count())]
         dnc = []
         command = [self.marabou_path, "--verbosity", "0", *dnc, self.network_filename, self.property_filename]
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        
+        # in on Linux, optionally set a memory limit for Marabou
+        if self.linux_marabou_memory_limit_mb is None:
+            def limit_virtual_memory():
+                pass
+        else:
+            MAX_VIRTUAL_MEMORY = self.linux_marabou_memory_limit_mb * 1024 * 1024
+            import resource
+            def limit_virtual_memory():
+                resource.setrlimit(resource.RLIMIT_AS, (MAX_VIRTUAL_MEMORY, resource.RLIM_INFINITY))
+        
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                   preexec_fn=limit_virtual_memory)
         lines = []
-        while process.poll() is None:
+        while True:
+            returncode = process.poll()
+            if returncode is not None:
+                break
             line = process.stdout.readline().decode("utf-8")
             #print(line, end="")
             lines += [line.strip()]
@@ -414,6 +442,8 @@ class NNetVerifier:
             #print(line)
             lines += [line.strip()]
         print("  ".join(lines))
+        if returncode != 0:
+            raise MarabouException(f"Marabou terminated with unexpected exit code {returncode}!")
             
         # construct counterexample
         result = VerificationResult.from_marabou(lines, input_dim, output_dim)

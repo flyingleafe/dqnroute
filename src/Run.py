@@ -103,6 +103,8 @@ parser.add_argument("--output_max_delta_q", type=float, default=10.0,
                     help="maximum ΔQ in adversarial robustness verification (default: 10.0)")
 parser.add_argument("--output_max_delta_p", type=float, default=0.1,
                     help="maximum Δp in adversarial robustness verification (default: 0.1)")
+parser.add_argument("--linux_marabou_memory_limit_mb", type=int, default=None,
+                    help="set a memory limit in MB for Marabou (use only on Linux; default: no limit)")
 
 args = parser.parse_args()
 
@@ -198,11 +200,11 @@ def pretrain(args, dir_with_models: str, pretrain_filename: str):
                     new_nbr = embedding.transform(A, int(nbr_))
                     new_btch.append((new_addr, new_dst, new_nbr))
                 [addr, dst, nbr] = stack_batch(new_btch)
-            addr_inp = torch.tensor(addr, dtype=torch.float)
-            dst_inp = torch.tensor(dst, dtype=torch.float)
-            nbr_inp = torch.tensor(nbr, dtype=torch.float)
-            inputs = tuple(torch.tensor(batch[cols].values, dtype=torch.float) for cols in data_cols)
-            output = torch.tensor(batch['predict'].values, dtype=torch.float)
+            addr_inp = torch.FloatTensor(addr)
+            dst_inp = torch.FloatTensor(dst)
+            nbr_inp = torch.FloatTensor(nbr)
+            inputs = tuple(torch.FloatTensor(batch[cols].values) for cols in data_cols)
+            output = torch.FloatTensor(batch['predict'].values)
             yield (addr_inp, dst_inp, nbr_inp) + inputs, output
 
     def qnetwork_pretrain_epoch(net, optimizer, data, **kwargs):
@@ -332,11 +334,10 @@ def get_symbolic_analyzer() -> SymbolicAnalyzer:
                             args.verification_lr, delta_q_max=args.input_max_delta_q)
 
 def get_nnet_verifier() -> NNetVerifier:
-    assert args.marabou_path is not None, (
-        "It is mandatory to specify --verification_marabou_path for command "
-        "embedding_adversarial_verification.")
-    return NNetVerifier(g, args.marabou_path, NETWORK_FILENAME, PROPERTY_FILENAME,
-                        probability_smoothing, softmax_temperature, emb_dim)
+    assert args.marabou_path is not None,\
+        "You must specify --verification_marabou_path for command embedding_adversarial_verification."
+    return NNetVerifier(g, args.marabou_path, NETWORK_FILENAME, PROPERTY_FILENAME, probability_smoothing,
+                        softmax_temperature, emb_dim, args.linux_marabou_memory_limit_mb)
 
 def get_sources(ma: MarkovAnalyzer) -> Generator[AgentId, None, None]:
     """

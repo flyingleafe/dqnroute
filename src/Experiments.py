@@ -5,6 +5,7 @@ import psutil
 from typing import *
 
 from RunWrapper import run
+from dqnroute.verification.exception import MarabouException
 
 
 def lipschitz_verification_original(bound: float):
@@ -18,19 +19,22 @@ def lipschitz_verification_tarau(bound: float):
         "--learning_step_indices 17,22,23,24")
 
 def embedding_verification_original(bound: float, epsilon: float):
-    run("embedding_adversarial_full_verification", "original_example_graph", "original_example_settings_energy_test",
-        bound, f"--skip_graphviz --single_source 1 --single_sink 3 --input_eps_l_inf {epsilon}")
+    run("embedding_adversarial_full_verification", "original_example_graph",
+        "original_example_settings_energy_test", bound,
+        f"--skip_graphviz --single_source 1 --single_sink 3 --input_eps_l_inf {epsilon} "
+        f"--linux_marabou_memory_limit_mb 12288")
 
 def embedding_verification_tarau(bound: float, epsilon: float):
     run("embedding_adversarial_full_verification", "tarau2010_graph_original", "tarau2010_settings_regular",
-        bound, f"--skip_graphviz --single_source 0 --single_sink 1 --input_eps_l_inf {epsilon}")
+        bound, f"--skip_graphviz --single_source 0 --single_sink 1 --input_eps_l_inf {epsilon} "
+        f"--linux_marabou_memory_limit_mb 12288")
 
 def killall(name: str):
-    print("SCANNING PROCESSES")
+    #print("SCANNING PROCESSES")
     for proc in psutil.process_iter():
         if proc.name() == name:
             proc.kill()
-            print("MARABOU KILLED")
+            #print("MARABOU KILLED")
     
 def run_with_timeout(fun: Callable, args: List, timeout_sec: int):
     print()
@@ -61,12 +65,11 @@ if __name__ == "__main__":
     TIMEOUT = 60 * 120
     #for eps in [0., 0.01, 0.1, 0.2, 0.4, 0.8, 1.6, 3.2, 6.4]:
     #for eps in [0.8, 1.6, 3.2, 6.4]:
-    for eps in [1.6, 0.8, 0.4]:
-        run_with_timeout(embedding_verification_original, [45.00, eps], TIMEOUT)
+    #for eps in [3.2, 6.4]:#[1.6]:
+        #run_with_timeout(embedding_verification_original, [45.0, eps], TIMEOUT)
+        #run_with_timeout(embedding_verification_tarau, [850.0, eps], TIMEOUT)
     
-    #lipschitz_verification_original(50.0)
+    lipschitz_verification_original(50.0)
     #lipschitz_verification_original(70.0)
     #lipschitz_verification_tarau(1200.0)
     #lipschitz_verification_tarau(15000.0)
-    
-    

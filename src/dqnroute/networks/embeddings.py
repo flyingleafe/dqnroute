@@ -9,7 +9,7 @@ from ..utils import agent_idx
 
 class Embedding(object):
     """
-    Abstract class for graph node embeddings
+    Abstract class for graph node embeddings.
     """
     def __init__(self, dim, **kwargs):
         self.dim = dim
