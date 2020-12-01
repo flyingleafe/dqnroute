@@ -380,7 +380,8 @@ class NNetVerifier:
         # 4. If no conclusion can be made, split R and try recursively
         print(f"    [depth={depth}] No conclusion, trying recursively...")
         r1, r2 = region.split()
-        calls = [lambda: self._verify_delivery_cost_bound(
+        # note r=r (https://stackoverflow.com/questions/19837486/python-lambda-in-a-loop)
+        calls = [lambda r=r: self._verify_delivery_cost_bound(
             sink, source, ma, input_eps_l_inf, cost_bound, r, depth + 1, result) for r in [r1, r2]]
         return verify_conjunction(calls)
         

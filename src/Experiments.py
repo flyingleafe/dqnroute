@@ -66,10 +66,16 @@ if __name__ == "__main__":
     #for eps in [0., 0.01, 0.1, 0.2, 0.4, 0.8, 1.6, 3.2, 6.4]:
     #for eps in [0.8, 1.6, 3.2, 6.4]:
     #for eps in [3.2, 6.4]:#[1.6]:
-        #run_with_timeout(embedding_verification_original, [45.0, eps], TIMEOUT)
-        #run_with_timeout(embedding_verification_tarau, [850.0, eps], TIMEOUT)
+    
+    #for eps in [0., 0.01, 0.1, 0.2]:
+    #    for c0 in [45.0, 44.0, 43.5, 43.0, 43.12, 43.1, 43.0, 42.5, 42.0]:
+    #        run_with_timeout(embedding_verification_original, [c0, eps], TIMEOUT)
+            
+    for eps in [0., 0.01, 0.1, 0.2, 0.4, 0.8]:
+        for c0 in [850.0, 840.0, 830.0, 820.1, 820.0]:
+            run_with_timeout(embedding_verification_tarau, [c0, eps], TIMEOUT)
     
     #lipschitz_verification_original(43.563)
     #lipschitz_verification_original(65.616)
     #lipschitz_verification_tarau(62694.8)
-    lipschitz_verification_tarau(67000.0)
+    #lipschitz_verification_tarau(67000.0)
