@@ -12,11 +12,11 @@ def run(command: str, config_file_graph: str, config_file_settings: str, cost_bo
 
 if __name__ == "__main__":
     """ The original example from D. Mukhutdinov. """
-    config = "original_example_graph", "original_example_settings_energy_test", 43.10052
+    #config = "original_example_graph", "original_example_settings_energy_test", 43.10052
     #config = "original_example_graph", "original_example_settings_break_test", 43.0
 
     """ Example from A. Tarau et al. Model-Based Control for Route Choice in Automated Baggage Handling Systems. """
-    #config = "tarau2010_graph_original", "tarau2010_settings_regular", 820.04923  # Original version (adapted)
+    config = "tarau2010_graph_original", "tarau2010_settings_regular", 820.04923  # Original version (adapted)
     #config = "tarau2010_graph_modified", "tarau2010_settings_regular", 972 # Modified version with some conveyor sections extended
     #config = "tarau2010_graph_modified", "tarau2010_settings_break_test", 972 # The same modified graph, conveyor break test
 
@@ -49,6 +49,6 @@ if __name__ == "__main__":
         #"--force_pretrain --force_train"
         #"--skip_graphviz --force_pretrain --force_train"
         #"--skip_graphviz --force_train"
-        "--skip_graphviz --single_source 1 --single_sink 3 --input_max_delta_q 20 --learning_step_indices 1,2,3,8"
-        #"--skip_graphviz --single_source 0 --single_sink 1 --input_max_delta_q 10 --learning_step_indices 17,22,23,24"
+        #"--skip_graphviz --single_source 1 --single_sink 3 --input_max_delta_q 20 --learning_step_indices 1,2,3,8"
+        "--skip_graphviz --single_source 0 --single_sink 1 --input_max_delta_q 10 --learning_step_indices 17,22,23,24"
     ))

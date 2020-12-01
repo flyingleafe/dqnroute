@@ -361,10 +361,10 @@ def get_sinks(ma_verbose: bool = True) -> Generator[Tuple[AgentId, torch.Tensor,
         sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
         yield sink, sink_embedding, ma
         
-def get_learning_step_indices() -> Union[Set[int], None]:
-    result = [int(s) for s in args.learning_step_indices.split(",")]
-    return set(result) if len(result) > 0 else None
-
+def get_learning_step_indices() -> Optional[Set[int]]:
+    if args.learning_step_indices is None:
+        return None
+    return set([int(s) for s in args.learning_step_indices.split(",")])
 
 print(f"Running command {args.command}...")
 

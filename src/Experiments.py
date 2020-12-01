@@ -69,7 +69,7 @@ if __name__ == "__main__":
         #run_with_timeout(embedding_verification_original, [45.0, eps], TIMEOUT)
         #run_with_timeout(embedding_verification_tarau, [850.0, eps], TIMEOUT)
     
-    lipschitz_verification_original(50.0)
-    #lipschitz_verification_original(70.0)
-    #lipschitz_verification_tarau(1200.0)
-    #lipschitz_verification_tarau(15000.0)
+    #lipschitz_verification_original(43.563)
+    #lipschitz_verification_original(65.616)
+    #lipschitz_verification_tarau(62694.8)
+    lipschitz_verification_tarau(67000.0)

@@ -403,7 +403,7 @@ class LipschitzBoundComputer:
         # logging
         self.max_depth = max(self.max_depth, depth)
         self.empirical_bound = max(self.empirical_bound, max_kappa)
-        if self.no_evaluations % 100 == 0:
+        if self.no_evaluations % 1000 == 0:
             percentage = self.checked_q_measure / self.sa.delta_q_max / 2 * 100
             print(f"      Status: {self.no_evaluations} evaluations, empirical bound is"
                   f" {self.empirical_bound:.6f}, maximum depth is {self.max_depth}, checked Δq"
