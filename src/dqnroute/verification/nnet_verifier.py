@@ -10,6 +10,7 @@ import numpy as np
 import scipy
 import torch
 import z3
+import queue
 
 from .exception import MarabouException
 from .ml_util import Util
@@ -311,17 +312,26 @@ class NNetVerifier:
         
         self._verified_volume_meter = 0.0
         
-        region = ProbabilityRegion.get_initial(len(ma.params), self)
-        return self._verify_delivery_cost_bound(sink, source, ma, input_eps_l_inf, cost_bound, region, 0, None)
+        region_queue = queue.Queue()
+        initial_region = ProbabilityRegion.get_initial(len(ma.params), self)
+        region_queue.put((initial_region, 0))
+        while not region_queue.empty():
+            region, depth = region_queue.get()
+            maybe_ce = self._verify_delivery_cost_bound(sink, source, ma, input_eps_l_inf, cost_bound,
+                                                        region, depth, region_queue)
+            if maybe_ce is not None:
+                return maybe_ce
+        # in this case, all the regions were checked:
+        return Verified()
     
     def _verify_delivery_cost_bound(self, sink: AgentId, source: AgentId, ma: MarkovAnalyzer,
                                     input_eps_l_inf: float, cost_bound: float,
                                     region: ProbabilityRegion, depth: int,
-                                    upper_level_counterexample: Optional[Counterexample]) -> VerificationResult:
+                                    region_queue: queue.Queue) -> Optional[Counterexample]:
         m = len(ma.params)
         n = self.embedding_packer.number_of_embeddings()
-        print(f"    [depth={depth}] Verified probability mass percentage: {self._verified_fraction(m) * 100:.2f}%")
-        print(f"    [depth={depth}] Currently verifying: {region}.")
+        print(f"    [depth={depth}] Verified probability mass percentage: {self._verified_fraction(m) * 100:.7f}%")
+        print(f"    [depth={depth}] Currently verifying {region}")
         
         # R is our probability hyperrectange
         
@@ -329,7 +339,10 @@ class NNetVerifier:
         print(f"    [depth={depth}] Calling Z3...")
         if self._prove_bound_for_region(m, cost_bound, region):
             self._verified_volume_meter += region.volume()
-            return Verified()
+            print(f"    [depth={depth}] Z3 proved that the bound cannot be exceeded in"
+                  " this probability region")
+            # verified and nothing more to check here
+            return None
         
         # 2. Find out whether R is reachable (for some allowed embedding)
         print(f"    [depth={depth}] Calling Marabou...")
@@ -341,49 +354,40 @@ class NNetVerifier:
             region.get_reachability_constraints(), check_or=False
         )
         if type(result) == Verified:
-            print(f"    [depth={depth}] SMT verification proved that the bound cannot be exceeded in"
-                  " this probability region.")
+            print(f"    [depth={depth}] Marabou proved that the bound cannot be exceeded in"
+                  " this probability region")
             self._verified_volume_meter += region.volume()
-            return result
+            # verified and nothing more to check here
+            return None
         assert type(result) == Counterexample
         
         # 3. If R is reachable, check whether the bound is exceeded for the found example
-        # 3.1. In the simplest case, we already have a counterexample from a parent call.
-        # We may produce a new one, but let's save a verification call.
-        if upper_level_counterexample is not None and upper_level_counterexample.belongs_to(region):
-            print(f"    [depth={depth}] Not attempting to compute a new counterexample.")
-            result = upper_level_counterexample
-        else:
-            # 3.2. Otherwise, make a verification call.
-            with torch.no_grad():
-                xs = Util.conditional_to_cuda(torch.DoubleTensor(result.xs))
-                ys = Util.conditional_to_cuda(torch.DoubleTensor(result.ys))
-                embedding_dict = self.embedding_packer.unpack(xs)
-                objective_value, ps = self.embedding_packer.compute_objective(
-                    embedding_dict, ma.nontrivial_diverters, self.lambdified_objective,
-                    self.softmax_temperature, self.probability_smoothing)
-                objective_value = objective_value.item()
-                executed_ps = [p.item() for p in ps]
-                counterexample_ps = [
-                    Util.q_values_to_first_probability(ys[(2 * i):(2 * i + 2)],
-                                                       self.softmax_temperature,
-                                                       self.probability_smoothing).item() for i in range(m)
-                ]
-            print(f"    [depth={depth}] Checking candidate counterexample with"
-                  f" ys={Util.list_round(counterexample_ps, ROUND_DIGITS)}"
-                  f" [cross-check: {Util.list_round(executed_ps, ROUND_DIGITS)}]...")
-            result.add_objective_value(np.array(counterexample_ps), objective_value)
-            if objective_value >= cost_bound:
-                print(f"    [depth={depth}] True counterexample found!")
-                return result
+        with torch.no_grad():
+            xs = Util.conditional_to_cuda(torch.DoubleTensor(result.xs))
+            ys = Util.conditional_to_cuda(torch.DoubleTensor(result.ys))
+            embedding_dict = self.embedding_packer.unpack(xs)
+            objective_value, ps = self.embedding_packer.compute_objective(
+                embedding_dict, ma.nontrivial_diverters, self.lambdified_objective,
+                self.softmax_temperature, self.probability_smoothing)
+            objective_value = objective_value.item()
+            executed_ps = [p.item() for p in ps]
+            counterexample_ps = [
+                Util.q_values_to_first_probability(ys[(2 * i):(2 * i + 2)],
+                                                    self.softmax_temperature,
+                                                    self.probability_smoothing).item() for i in range(m)
+            ]
+        print(f"    [depth={depth}] Checking candidate counterexample with"
+                f" ys={Util.list_round(counterexample_ps, ROUND_DIGITS)}"
+                f" [cross-check: {Util.list_round(executed_ps, ROUND_DIGITS)}]...")
+        result.add_objective_value(np.array(counterexample_ps), objective_value)
+        if objective_value >= cost_bound:
+            print(f"    [depth={depth}] True counterexample found!")
+            return result
 
-        # 4. If no conclusion can be made, split R and try recursively
+        # 4. If no conclusion can be made, split R and schedule verification for children
         print(f"    [depth={depth}] No conclusion, trying recursively...")
-        r1, r2 = region.split()
-        # note r=r (https://stackoverflow.com/questions/19837486/python-lambda-in-a-loop)
-        calls = [lambda r=r: self._verify_delivery_cost_bound(
-            sink, source, ma, input_eps_l_inf, cost_bound, r, depth + 1, result) for r in [r1, r2]]
-        return verify_conjunction(calls)
+        for smaller_region in region.split():
+            region_queue.put((smaller_region, depth + 1))
         
     def verify_adv_robustness(self, net: torch.nn.Module, weights: List[torch.Tensor],
                               biases: List[torch.Tensor], input_center: torch.Tensor, input_eps: float,
