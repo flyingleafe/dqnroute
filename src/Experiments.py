@@ -18,15 +18,15 @@ def lipschitz_verification_tarau(bound: float):
         "--skip_graphviz --single_source 0 --single_sink 1 --input_max_delta_q 10 "\
         "--learning_step_indices 17,22,23,24")
 
-def embedding_verification_original(bound: float, epsilon: float):
+def embedding_verification_original(bound: float, epsilon: float, source: int, sink: int):
     run("embedding_adversarial_full_verification", "original_example_graph",
         "original_example_settings_energy_test", bound,
-        f"--skip_graphviz --single_source 1 --single_sink 3 --input_eps_l_inf {epsilon} "
+        f"--skip_graphviz --single_source {source} --single_sink {sink} --input_eps_l_inf {epsilon} "
         f"--linux_marabou_memory_limit_mb 12288")
 
-def embedding_verification_tarau(bound: float, epsilon: float):
+def embedding_verification_tarau(bound: float, epsilon: float, source: int, sink: int):
     run("embedding_adversarial_full_verification", "tarau2010_graph_original", "tarau2010_settings_regular",
-        bound, f"--skip_graphviz --single_source 0 --single_sink 1 --input_eps_l_inf {epsilon} "
+        bound, f"--skip_graphviz --single_source {source} --single_sink {sink} --input_eps_l_inf {epsilon} "
         f"--linux_marabou_memory_limit_mb 12288")
 
 def killall(name: str):
@@ -61,17 +61,34 @@ def run_with_timeout(fun: Callable, args: List, timeout_sec: int):
     
 if __name__ == "__main__":
     TIMEOUT = 60 * 120
-    #for eps in [0., 0.01, 0.1, 0.2, 0.4, 0.8, 1.6, 3.2, 6.4]:
-    #for eps in [0.8, 1.6, 3.2, 6.4]:
-    #for eps in [3.2, 6.4]:#[1.6]:
     
-    for eps in [0., 0.01, 0.1, 0.2, 0.4, 0.8]:
-        for c0 [44.0, 43.5, 43.12, 43.1, 43.0]:
-            run_with_timeout(embedding_verification_original, [c0, eps], TIMEOUT)
-            
-    #for eps in [0., 0.01, 0.1, 0.2, 0.4, 0.8]:
-    #    for c0 in [850.0, 840.0, 830.0, 820.1, 820.0]:
-    #        run_with_timeout(embedding_verification_tarau, [c0, eps], TIMEOUT)
+    # original, 1 -> 3
+    #for eps in [0., 0.01, 0.1, 0.2, 0.4, 0.8, 1.6]:
+    for eps in [6.4]:
+        #for c0 in [81.0, 44.0, 43.5, 43.12, 43.1]:
+        for c0 in [81.0, 44.0, 43.5, 43.12, 43.1]:
+            run_with_timeout(embedding_verification_original, [c0, eps, 1, 3], TIMEOUT)
+    
+    # original, 1 -> 2
+    #for eps in [0., 0.01, 0.1, 0.2, 0.4, 0.8, 1.6]:
+    for eps in [6.4]:
+        #for c0 in [72.8, 54.12, 53.11, 53.1, 53.0]:
+        for c0 in [72.8, 54.12, 53.11, 53.1, 53.0]:
+            run_with_timeout(embedding_verification_original, [c0, eps, 1, 2], TIMEOUT)
+    
+    # tarau, 0 -> 1
+    #for eps in [0., 0.01, 0.1, 0.2, 0.4, 0.8, 1.6]:
+    for eps in [6.4]:
+        #for c0 in [825.0, 820.0, 819.0, 818.6, 818.0]:
+        for c0 in [825.0, 820.0, 819.0, 818.6, 818.0]:
+            run_with_timeout(embedding_verification_tarau, [c0, eps, 0, 1], TIMEOUT)
+    
+    # tarau, 2 -> 0
+    #for eps in [0., 0.01, 0.1, 0.2, 0.4, 0.8, 1.6]:
+    for eps in [6.4]:
+        #for c0 in [830.0, 820.0, 819.0, 818.4, 818.0]:
+        for c0 in [830.0, 820.0, 819.0, 818.4, 818.0]:
+            run_with_timeout(embedding_verification_tarau, [c0, eps, 2, 0], TIMEOUT)
     
     #lipschitz_verification_original(43.563)
     #lipschitz_verification_original(65.616)

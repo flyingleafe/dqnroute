@@ -16,14 +16,26 @@ class EmbeddingPacker:
     
     def __init__(self, g: RouterGraph, sink: AgentId, sink_embedding: torch.Tensor, other_nodes: List[AgentId]):
         self._stored_embeddings = OrderedDict({sink: sink_embedding})
+        
+        other_nodes_set = set(other_nodes)
+        other_nodes_set.add(sink)
+        
         for node_key in other_nodes:
-            self._stored_embeddings[node_key], _, _ = g.node_to_embeddings(node_key, sink)
+            # for each diverter with two reachable successors, add all these nodes
+            if node_key[0] == "diverter":
+                neighbor_keys = g.get_out_nodes(node_key)
+                if neighbor_keys[0] in other_nodes_set and neighbor_keys[1] in other_nodes_set:
+                    for new_node in (node_key, *neighbor_keys):
+                        self._stored_embeddings[new_node], _, _ = g.node_to_embeddings(new_node, sink)
+        
         self._emb_dim = sink_embedding.flatten().shape[0]
         # the indices of all nodes in this embedding storage:
         self._node_key_to_index = {key: i for i, key in enumerate(self._stored_embeddings.keys())}
         assert self._node_key_to_index[sink] == 0
         self._g = g
         self._sink = sink
+        print(f"  Actually used embeddings: {sorted(self._stored_embeddings.keys())}, "
+              f"total number = {len(self._stored_embeddings)}")
 
     def pack(self, embedding_dict: OrderedDict) -> torch.Tensor:
         return torch.cat(tuple(embedding_dict.values())).flatten()

@@ -5,12 +5,12 @@ import re
 
 from typing import *
 from abc import ABC
+from collections import deque
 
 import numpy as np
 import scipy
 import torch
 import z3
-import queue
 
 from .exception import MarabouException
 from .ml_util import Util
@@ -28,7 +28,7 @@ ROUND_DIGITS = 3
 
 
 class ProbabilityRegion:
-    def __init__(self, lower_bounds: np.ndarray, upper_bounds: np.ndarray, verifier: 'NNetVerifier'):
+    def __init__(self, lower_bounds: np.ndarray, upper_bounds: np.ndarray, verifier: "NNetVerifier"):
         assert lower_bounds.shape == upper_bounds.shape
         self.lower_bounds = lower_bounds
         self.upper_bounds = upper_bounds
@@ -45,7 +45,7 @@ class ProbabilityRegion:
                                                                      self.upper_bounds))]) + "}"
     
     @staticmethod
-    def get_initial(size: int, verifier: 'NNetVerifier') -> 'ProbabilityRegion':
+    def get_initial(size: int, verifier: "NNetVerifier") -> "ProbabilityRegion":
         """
         Creates the initial probability cube.
         """
@@ -70,7 +70,7 @@ class ProbabilityRegion:
         #    "omitting verification for the initial, always-reachable probability region.")
         return constraints
     
-    def split(self) -> Tuple['ProbabilityRegion', 'ProbabilityRegion']:
+    def split(self) -> Tuple["ProbabilityRegion", "ProbabilityRegion"]:
         """
         Splits the probability region into two halves using the longest dimension.
         """
@@ -138,19 +138,12 @@ class Counterexample(VerificationResult):
     def __str__(self):
         round_list = lambda x: Util.list_round(x, ROUND_DIGITS)
         probs = "?" if self.probabilities   is None else f"{round_list(self.probabilities)}"
-        obj = "?"   if self.objective_value is None else f"{self.objective_value:.4f}"
+        obj   = "?" if self.objective_value is None else f"{self.objective_value:.4f}"
         return (f"Counterexample{{embeddings = {round_list(self.xs)},"
                                f" Q values = {round_list(self.ys)},"
                                f" probabilities = {probs}, objective = {obj}}}")
 
-def verify_conjunction(calls: List[Callable[[], VerificationResult]]) -> VerificationResult:
-    for call in calls:
-        result = call()
-        if type(result) == Counterexample:
-            return result
-    return Verified()
 
-    
 class NNetVerifier:
     def __init__(self, g: RouterGraph, marabou_path: str, network_filename: str, property_filename: str,
                  probability_smoothing: float, softmax_temperature: float, emb_dim: int,
@@ -185,7 +178,7 @@ class NNetVerifier:
     @torch.no_grad()
     def create_small_blocks(self):
         """
-        During formal verification, emulate computations for two neighbors simultaneously
+        During formal verification, emulate computations for two neighbors simultaneously.
         All embeddings here are assumed to be shifted by the current embedding.
 
         Computation of the first hidden layer for nbr1:
@@ -312,11 +305,9 @@ class NNetVerifier:
         
         self._verified_volume_meter = 0.0
         
-        region_queue = queue.Queue()
-        initial_region = ProbabilityRegion.get_initial(len(ma.params), self)
-        region_queue.put((initial_region, 0))
-        while not region_queue.empty():
-            region, depth = region_queue.get()
+        region_queue = deque([(ProbabilityRegion.get_initial(len(ma.params), self), 0)])
+        while len(region_queue) > 0:
+            region, depth = region_queue.popleft()
             maybe_ce = self._verify_delivery_cost_bound(sink, source, ma, input_eps_l_inf, cost_bound,
                                                         region, depth, region_queue)
             if maybe_ce is not None:
@@ -327,7 +318,7 @@ class NNetVerifier:
     def _verify_delivery_cost_bound(self, sink: AgentId, source: AgentId, ma: MarkovAnalyzer,
                                     input_eps_l_inf: float, cost_bound: float,
                                     region: ProbabilityRegion, depth: int,
-                                    region_queue: queue.Queue) -> Optional[Counterexample]:
+                                    region_queue: deque) -> Optional[Counterexample]:
         m = len(ma.params)
         n = self.embedding_packer.number_of_embeddings()
         print(f"    [depth={depth}] Verified probability mass percentage: {self._verified_fraction(m) * 100:.7f}%")
@@ -387,7 +378,7 @@ class NNetVerifier:
         # 4. If no conclusion can be made, split R and schedule verification for children
         print(f"    [depth={depth}] No conclusion, trying recursively...")
         for smaller_region in region.split():
-            region_queue.put((smaller_region, depth + 1))
+            region_queue.append((smaller_region, depth + 1))
         
     def verify_adv_robustness(self, net: torch.nn.Module, weights: List[torch.Tensor],
                               biases: List[torch.Tensor], input_center: torch.Tensor, input_eps: float,

@@ -104,6 +104,10 @@ class PGDAdversary(Adversary):
         # rho may potentially shrink with repeat_mode == "min":
         rho = self.rho
         random_start = self.random_start
+        
+        # Added specifically for the verification project:
+        best_objective = -float("inf")
+        
         for run_n in range(self.n_repeat):
             x1 = initial_vector * 1
             perturbation = x1 * 0
@@ -130,16 +134,16 @@ class PGDAdversary(Adversary):
             for i in range(self.steps):
                 #assert not torch.isnan(perturbation).any()
                 perturbed_vector = x1 + perturbation
-                classification_gradient, classification_loss, aux_info = get_gradient(perturbed_vector)
+                objective_gradient, objective, aux_info = get_gradient(perturbed_vector)
                 if self.verbose > 0:
-                    if classification_loss > self.stop_loss or i == self.steps - 1 or i % 5 == 0 and self.verbose > 1:
-                        print(f"step {i:3d}: objective = {classification_loss:7f}, "
+                    if objective > self.stop_loss or i == self.steps - 1 or i % 5 == 0 and self.verbose > 1:
+                        print(f"step {i:3d}: objective = {objective:7f}, "
                                 f"║Δx║ = {self._norm(perturbation):.5f}, ║x║ = {self._norm(perturbed_vector):.5f}, {aux_info}")
-                if classification_loss > self.stop_loss:
+                if objective > self.stop_loss:
                     found = True
                     break
                 # learning step
-                perturbation_step = rho * self.step_size * self._normalize_gradient(classification_gradient)
+                perturbation_step = rho * self.step_size * self._normalize_gradient(objective_gradient)
                 if perturbation_step.norm() == 0:
                     print(f"zero gradient, stopping")
                     break
@@ -163,5 +167,11 @@ class PGDAdversary(Adversary):
             if self.shrinking_repeats and run_n == self.n_repeat - 1:
                 # heuristic: the last run is always from the center
                 random_start = False
+                
+            # Added specifically for the verification project:
+            if not found and objective > best_objective:
+                best_objective = objective
+                best_perturbation = perturbation
+                
         return x1 + best_perturbation
 

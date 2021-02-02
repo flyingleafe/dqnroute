@@ -492,7 +492,7 @@ elif args.command == "embedding_adversarial_search":
     else:
         norm, norm_bound = "l_inf", args.input_eps_l_inf
     adv = PGDAdversary(rho=norm_bound, steps=100, step_size=0.02, random_start=True, stop_loss=args.cost_bound,
-                       verbose=2, norm=norm, n_repeat=2, repeat_mode="any", dtype=torch.float64)
+                       verbose=2, norm=norm, n_repeat=10, repeat_mode="any", dtype=torch.float64)
     print(f"Trying to falsify ({norm}_norm(Δembedding) ≤ {norm_bound}) => (E(cost) < {args.cost_bound}).")
     for sink, sink_embedding, ma in get_sinks():
         print(f"Searching for adversarial examples for delivery to {sink}...")
@@ -501,8 +501,9 @@ elif args.command == "embedding_adversarial_search":
         embedding_packer = EmbeddingPacker(g, sink, sink_embedding, ma.reachable_nodes)
 
         for source in get_sources(ma):
+            customized_ma = ma.customize_for_source(source)
             print(f"  Measuring adversarial robustness of delivery from {source} to {sink}...")
-            _, lambdified_objective = ma.get_objective(source)
+            _, lambdified_objective = customized_ma.get_objective(source)
 
             def get_gradient(x: torch.Tensor) -> Tuple[torch.Tensor, float, str]:
                 """
@@ -513,11 +514,11 @@ elif args.command == "embedding_adversarial_search":
                 """
                 x = Util.optimizable_clone(x.flatten())
                 objective_value, objective_inputs = embedding_packer.compute_objective(
-                    embedding_packer.unpack(x), ma.nontrivial_diverters, lambdified_objective,
+                    embedding_packer.unpack(x), customized_ma.nontrivial_diverters, lambdified_objective,
                     softmax_temperature, probability_smoothing)
                 objective_value.backward()
                 aux_info = ", ".join([f"{param}={value.detach().cpu().item():.4f}"
-                                      for param, value in zip(ma.params, objective_inputs)])
+                                      for param, value in zip(customized_ma.params, objective_inputs)])
                 return x.grad, objective_value.item(), f"[{aux_info}]"
             
             best_embedding = adv.perturb(embedding_packer.initial_vector(), get_gradient)
@@ -525,15 +526,18 @@ elif args.command == "embedding_adversarial_search":
             print("Found counterexample!" if objective >= args.cost_bound else "Verified.")
             print(f"Best perturbed vector: {Util.to_numpy(best_embedding).round(3).flatten().tolist()}"
                   f" {aux_info}")
+            print(f"Best objective value: {objective}")
 
 # Formally verify the expected cost bound w.r.t. input embeddings
 elif args.command == "embedding_adversarial_full_verification":
     nv = get_nnet_verifier()
-    for sink, _, ma in get_sinks():
+    for sink, _, ma in get_sinks(False):
         print(f"Verifying adversarial robustness of delivery to {sink}...")
         for source in get_sources(ma):
             print(f"  Verifying adversarial robustness of delivery from {source} to {sink}...")
-            result = nv.verify_delivery_cost_bound(sink, source, ma, args.input_eps_l_inf, args.cost_bound)
+            customized_ma = ma.customize_for_source(source)
+            result = nv.verify_delivery_cost_bound(sink, source, customized_ma,
+                                                   args.input_eps_l_inf, args.cost_bound)
             print(f"    {result}")
 
 # Formally verify Q value stability w.r.t. input embeddings         
@@ -606,9 +610,10 @@ elif args.command == "compute_expected_cost":
     for sink, sink_embedding, ma in get_sinks():
         sink_embeddings = sink_embedding.repeat(2, 1)
         for source in get_sources(ma):
+            customized_ma = ma.customize_for_source(source)
             print(f"Delivery from {source} to {sink})...")
-            _, lambdified_objective = ma.get_objective(source)
-            ps = sa.compute_ps(ma, sink, sink_embeddings, 0, 0)
+            _, lambdified_objective = customized_ma.get_objective(source)
+            ps = sa.compute_ps(customized_ma, sink, sink_embeddings, 0, 0)
             objective_value = lambdified_objective(*ps)
             print(f"    Computed probabilities: {Util.list_round(ps, 6)}")
             print(f"    E(delivery cost from {source} to {sink}) = {objective_value}")
@@ -623,7 +628,7 @@ elif args.command == "q_adversarial":
         sink_embeddings = sink_embedding.repeat(2, 1)
         for source in get_sources(ma):
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
-            objective, lambdified_objective = ma.get_objective(source)
+            objective, lambdified_objective = customized_ma.get_objective(source)
             for node_key in g.node_keys:
                 current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
                 for neighbor_key, neighbor_embedding in zip(neighbors, neighbor_embeddings):

@@ -481,6 +481,19 @@ class ConveyorsRunner(SimulationRunner):
 
         bag_id = 1
         
+        # added by Igor
+        # uncomment to make all NNs share their weights
+        """
+        net = None
+        for h in self.world.handlers.values():
+            if hasattr(h, "routers"):
+                for r in h.routers.values():
+                    if hasattr(r, "brain"):
+                        if net is None:
+                            net = r.brain
+                        r.brain = net
+        """
+        
         # added by Igor to support loading already trained models
         if "IGOR_OMIT_TRAINING" in os.environ:
             return
