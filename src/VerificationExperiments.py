@@ -7,25 +7,28 @@ from typing import *
 from RunWrapper import run
 from dqnroute.verification.exception import MarabouException
 
+GRAPH_MUKHUTDINOV = "conveyor_topology_mukhutdinov/original_example_graph"
+SETTINGS_MUKHUTDINOV = "conveyor_topology_mukhutdinov/original_example_settings_energy_test"
+GRAPH_TARAU = "conveyor_topology_tarau/tarau2010_graph_original"
+SETTINGS_TARAU = "conveyor_topology_tarau/tarau2010_settings_regular"
 
 def lipschitz_verification_original(bound: float):
-    run("q_adversarial_lipschitz", "original_example_graph", "original_example_settings_energy_test", bound,
+    run("q_adversarial_lipschitz", GRAPH_MUKHUTDINOV, SETTINGS_MUKHUTDINOV, bound,
         "--skip_graphviz --single_source 1 --single_sink 3 --input_max_delta_q 20 "\
         "--learning_step_indices 1,2,3,8")
 
 def lipschitz_verification_tarau(bound: float):
-    run("q_adversarial_lipschitz", "tarau2010_graph_original", "tarau2010_settings_regular", bound,
+    run("q_adversarial_lipschitz", GRAPH_TARAU, SETTINGS_TARAU, bound,
         "--skip_graphviz --single_source 0 --single_sink 1 --input_max_delta_q 10 "\
         "--learning_step_indices 17,22,23,24")
 
 def embedding_verification_original(bound: float, epsilon: float, source: int, sink: int):
-    run("embedding_adversarial_full_verification", "original_example_graph",
-        "original_example_settings_energy_test", bound,
+    run("embedding_adversarial_full_verification", GRAPH_MUKHUTDINOV, SETTINGS_MUKHUTDINOV, bound,
         f"--skip_graphviz --single_source {source} --single_sink {sink} --input_eps_l_inf {epsilon} "
         f"--linux_marabou_memory_limit_mb 12288")
 
 def embedding_verification_tarau(bound: float, epsilon: float, source: int, sink: int):
-    run("embedding_adversarial_full_verification", "tarau2010_graph_original", "tarau2010_settings_regular",
+    run("embedding_adversarial_full_verification", GRAPH_TARAU, SETTINGS_TARAU,
         bound, f"--skip_graphviz --single_source {source} --single_sink {sink} --input_eps_l_inf {epsilon} "
         f"--linux_marabou_memory_limit_mb 12288")
 

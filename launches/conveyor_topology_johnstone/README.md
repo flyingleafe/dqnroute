@@ -1,0 +1,3 @@
+This conveyor network is based on the work [Johnstone, Michael, Doug Creighton, and Saeid Nahavandi. "Status-based routing in baggage handling systems: Searching verses  learning." IEEE Transactions on Systems, Man, and Cybernetics, Part C (Applications and Reviews) 40.2 (2009): 189-200]. Two conveyor sections were ignored (shown as "cannot add section" in the PDF file) as they were only needed to send bags to intermediate checkpoints, which are not supported in our project. Concrete lengths were assigned to all conveyor sections, and some conveyor sections were merged into single conveyors.
+
+This example was not properly tested and may require adjustments.

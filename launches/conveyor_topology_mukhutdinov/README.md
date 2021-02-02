@@ -1,0 +1,3 @@
+This is the conveyor network used in the work [Mukhutdinov D, Filchenkov A, Shalyto A, Vyatkin V. Multi-agent deep learning for simultaneous optimization for time and energy in distributed routing system. Future Generation Computer Systems. 2019 May 1;94:587-600], where the verision of dqnroute with one-hot inputs was reported.
+
+Two files with settings correspond to the scenarios considered in D. Mukhutdinov's Master thesis.

@@ -1,9 +1,19 @@
 import os
 import time
 
-def run(command: str, config_file_graph: str, config_file_settings: str, cost_bound: float, more_args: str):
-    run_str = f"ipython Run.py -- ../launches/igor/{config_file_graph}.yaml ../launches/igor/{config_file_settings}.yaml"\
-              f" --command {command} --cost_bound {cost_bound} --marabou_path ../../Marabou/build/Marabou {more_args}"
+def run(command: str, directory: str, config_file_graph: str, config_file_settings: str,
+        cost_bound: float, more_args: str):
+    """
+    :param command: command to be passed to Run.py.
+    :param directory: directory with the conveyor topology.
+    :param config_file_graph: YAML config of the conveyor graph.
+    :param config_file_settings: YAML settings of bag arrival and the routing algorithm.
+    :param cost_bound: mean delivery time to check (only for verification-related commands).
+    :param more_args: additional arguments to be appended to the end of the call. 
+    """
+    run_str = (f"ipython Run.py -- ../launches/{directory}/{config_file_graph}.yaml "
+               f"../launches/{directory}/{config_file_settings}.yaml --command {command} "
+               f"--cost_bound {cost_bound} --marabou_path ../../Marabou/build/Marabou {more_args}"
     print(f"Running: {run_str}")
     start_time = time.time()
     os.system(run_str)
@@ -12,26 +22,22 @@ def run(command: str, config_file_graph: str, config_file_settings: str, cost_bo
 
 if __name__ == "__main__":
     """ The original example from D. Mukhutdinov. """
-    config = "original_example_graph", "original_example_settings_energy_test", 10043.10052
-    #config = "original_example_graph", "original_example_settings_break_test", 43.0
+    config = "conveyor_topology_mukhutdinov", "original_example_graph", "original_example_settings_energy_test", 10043.10052
+    #config = "conveyor_topology_mukhutdinov", "original_example_graph", "original_example_settings_break_test", 43.0
 
     """ Example from A. Tarau et al. Model-Based Control for Route Choice in Automated Baggage Handling Systems. """
-    #config = "tarau2010_graph_original", "tarau2010_settings_regular", 100820.04923  # Original version (adapted)
-    #config = "tarau2010_graph_modified", "tarau2010_settings_regular", 972 # Modified version with some conveyor sections extended
-    #config = "tarau2010_graph_modified", "tarau2010_settings_break_test", 972 # The same modified graph, conveyor break test
+    #config = "conveyor_topology_tarau", "tarau2010_graph_original", "tarau2010_settings_regular", 100820.04923  # Original version (adapted)
+    #config = "conveyor_topology_tarau", "tarau2010_graph_modified", "tarau2010_settings_regular", 972 # Modified version with some conveyor sections extended
+    #config = "conveyor_topology_tarau", "tarau2010_graph_modified", "tarau2010_settings_break_test", 972 # The same modified graph, conveyor break test
 
     """ Example from M.P. Johnstone. Simulation-based learning for control of complex conveyor networks. """
-    #config = "johnstone2010_graph", "johnstone2010_settings", 100000 # Adapted version
-
-    """ Some artificial examples of graph with cycles for smoke testing. """
-    #config = "cyclic_example1_graph", "cyclic_example_settings", 100000  # Very simple fictitious graph with cycle
-    #config = "cyclic_example2_graph", "cyclic_example_settings", 12430.0 # A complication of the previous example
+    #config = "conveyor_topology_johnstone", "johnstone2010_graph", "johnstone2010_settings", 100000 # Adapted version
 
     """ Select the command: """
-    #command, command_args = "run", ""
+    command, command_args = "run", ""
     #command, command_args = "compare", ""
     #command, command_args = "deterministic_test", ""
-    command, command_args = "embedding_adversarial_search", "--input_eps_l_inf 0.2"
+    #command, command_args = "embedding_adversarial_search", "--input_eps_l_inf 0.2"
     #command, command_args = "embedding_adversarial_verification", "--output_max_delta_q 3.6 --input_eps_l_inf 0.1 --output_max_delta_p 0.00001"
     #command, command_args = "embedding_adversarial_full_verification", "--input_eps_l_inf 0.001"
     #command, command_args = "q_adversarial", ""
