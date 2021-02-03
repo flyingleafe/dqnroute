@@ -13,7 +13,7 @@ def run(command: str, directory: str, config_file_graph: str, config_file_settin
     """
     run_str = (f"ipython Run.py -- ../launches/{directory}/{config_file_graph}.yaml "
                f"../launches/{directory}/{config_file_settings}.yaml --command {command} "
-               f"--cost_bound {cost_bound} --marabou_path ../../Marabou/build/Marabou {more_args}"
+               f"--cost_bound {cost_bound} --marabou_path ../../Marabou/build/Marabou {more_args}")
     print(f"Running: {run_str}")
     start_time = time.time()
     os.system(run_str)
@@ -34,15 +34,17 @@ if __name__ == "__main__":
     #config = "conveyor_topology_johnstone", "johnstone2010_graph", "johnstone2010_settings", 100000 # Adapted version
 
     """ Select the command: """
-    command, command_args = "run", ""
-    #command, command_args = "compare", ""
-    #command, command_args = "deterministic_test", ""
-    #command, command_args = "embedding_adversarial_search", "--input_eps_l_inf 0.2"
-    #command, command_args = "embedding_adversarial_verification", "--output_max_delta_q 3.6 --input_eps_l_inf 0.1 --output_max_delta_p 0.00001"
-    #command, command_args = "embedding_adversarial_full_verification", "--input_eps_l_inf 0.001"
-    #command, command_args = "q_adversarial", ""
+    # simulate/train:
+    #command, command_args = "run", "--routing_algorithms=dqn_emb"
+    command, command_args = "run", "--routing_algorithms=dqn_emb,centralized_simple,link_state,simple_q"
+    #command, command_args = "run", "--routing_algorithms=centralized_simple,link_state,simple_q"
+    
+    # formal verification:
     #command, command_args = "compute_expected_cost", ""
-    #command, command_args = "q_adversarial_lipschitz", ""
+    #command, command_args = "embedding_adversarial_search", "--input_eps_l_inf 0.01"
+    #command, command_args = "embedding_adversarial_verification", "--input_eps_l_inf 0.001"
+    #command, command_args = "q_adversarial_search", ""
+    #command, command_args = "q_adversarial_verification", ""
 
     if command_args != "":
         command_args += " "
@@ -53,7 +55,7 @@ if __name__ == "__main__":
         #"--force_train"
         #"--skip_graphviz"
         #"--skip_graphviz --single_source 1 --single_sink 3"
-        "--skip_graphviz --single_source 1 --single_sink 2"
+        #"--skip_graphviz --single_source 1 --single_sink 2"
         #"--skip_graphviz --single_source 0 --single_sink 1"
         #"--skip_graphviz --single_source 2 --single_sink 0"
         #"--force_pretrain --force_train"

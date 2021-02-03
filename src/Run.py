@@ -1,6 +1,7 @@
 import os
 import argparse
 import yaml
+import re
 
 import hashlib
 import base64
@@ -36,30 +37,35 @@ from dqnroute.verification.embedding_packer import EmbeddingPacker
 NETWORK_FILENAME = "../network.nnet"
 PROPERTY_FILENAME = "../property.txt"
 
-parser = argparse.ArgumentParser(description="Script to train, simulate and verify baggage routing neural networks.")
+parser = argparse.ArgumentParser(
+    description="Script to train, simulate and verify deep neural networks for baggage routing.",
+    formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+)
 
 # general parameters
-parser.add_argument("--command", type=str, default="run",
-                    help=("one of run (default), compare, deterministic_test, embedding_adversarial_search, "
-                          "embedding_adversarial_verification, embedding_adversarial_full_verification, "
-                          "compute_expected_cost, q_adversarial, q_adversarial_lipschitz"))
 parser.add_argument("config_files", type=str, nargs="+",
-                    help="YAML config file(s) with the topology graph and other configuration info "
-                         "(all files will be concatenated into one)")
+                    help="YAML config file(s) with the conveyor topology graph, input scenario and settings "
+                         "of routing algorithms (all files will be concatenated into one)")
+parser.add_argument("--routing_algorithms", type=str, default="dqn_emb,centralized_simple,link_state,simple_q",
+                    help="comma-separated list of routing algorithms to run (possible entries: "
+                         "dqn_emb, centralized_simple, link_state, simple_q)")
+parser.add_argument("--command", type=str, default="run",
+                    help="one of run, compute_expected_cost, embedding_adversarial_search, "
+                         "embedding_adversarial_verification, q_adversarial_search, q_adversarial_verification")
 parser.add_argument("--random_seed", type=int, default=42,
-                    help="random seed for pretraining and training (default: 42)")
+                    help="random seed for pretraining and training")
 parser.add_argument("--pretrain_num_episodes", type=int, default=10000,
-                    help="number of episodes for supervised pretraining (default: 10000)")
+                    help="number of episodes for supervised pretraining")
 parser.add_argument("--force_pretrain", action="store_true",
                     help="whether not to load previously saved pretrained models and force recomputation")
 parser.add_argument("--force_train", action="store_true",
                     help="whether not to load previously saved trained models and force recomputation")
 parser.add_argument("--skip_graphviz", action="store_true",
-                    help="do not visualize graphs")
+                    help="do not visualize graphs with Graphviz")
 
 # common verification / adversarial search parameters
 parser.add_argument("--cost_bound", type=float, default=100.0,
-                    help="upper bound on expected delivery cost to verify (default: 100)")
+                    help="upper bound on expected delivery cost to verify")
 parser.add_argument("--simple_path_cost", action="store_true",
                     help="use the number of transitions instead of the total conveyor length as path cost")
 parser.add_argument("--input_eps_l_inf", type=float, default=0.1,
@@ -78,16 +84,16 @@ parser.add_argument("--learning_step_indices", type=str, default=None,
 # parameters specific to adversarial search with PGD (embedding_adversarial_search)
 parser.add_argument("--input_eps_l_2", type=float, default=1.5,
                     help="maximum (scaled by dimension) L_2 discrepancy of input embeddings in "
-                         "adversarial search (default: 1.5)")
+                         "adversarial search")
 parser.add_argument("--adversarial_search_use_l_2", action="store_true",
                     help="use L_2 norm (scaled by dimension) instead of L_∞ norm during adversarial search")
 
 # parameters specific to learning step verification
-# (q_adversarial, q_adversarial_lipschitz)
+# (q_adversarial_search, q_adversarial_verification)
 parser.add_argument("--verification_lr", type=float, default=0.001,
-                    help="learning rate in learning step verification (default: 0.001)")
+                    help="learning rate in learning step verification")
 parser.add_argument("--input_max_delta_q", type=float, default=10.0,
-                    help="maximum ΔQ in learning step verification (default: 10.0)")
+                    help="maximum ΔQ in learning step verification")
 parser.add_argument("--q_adversarial_no_points", type=int, default=351,
                     help="number of points used to create plots in command q_adversarial")
 parser.add_argument("--q_adversarial_verification_no_points", type=int, default=351,
@@ -99,18 +105,27 @@ parser.add_argument("--q_adversarial_verification_no_points", type=int, default=
 # (embedding_adversarial_verification, embedding_adversarial_full_verification)
 parser.add_argument("--marabou_path", type=str, default=None,
                     help="path to the Marabou executable")
-parser.add_argument("--output_max_delta_q", type=float, default=10.0,
-                    help="maximum ΔQ in adversarial robustness verification (default: 10.0)")
-parser.add_argument("--output_max_delta_p", type=float, default=0.1,
-                    help="maximum Δp in adversarial robustness verification (default: 0.1)")
 parser.add_argument("--linux_marabou_memory_limit_mb", type=int, default=None,
                     help="set a memory limit in MB for Marabou (use only on Linux; default: no limit)")
 
 args = parser.parse_args()
 
+# dqn_emb = DQNroute-LE, centralized_simple = BSR
+router_types = re.split(", *", args.routing_algorithms)
+router_types_supported = "dqn_emb centralized_simple link_state simple_q".split(" ")
+assert len(router_types) > 0, "--routing_algorithms cannot be empty"
+assert len(set(router_types) - set(router_types_supported)) == 0,\
+    f"unsupported algorithm in --routing_algorithms was found; supported ones: {router_types_supported}"
+if "dqn_emb" in router_types:
+    # always process dqn_emb first
+    router_types.remove("dqn_emb")
+    router_types.insert(0, "dqn_emb")
+nn_loading_needed = router_types[0] == "dqn_emb" or args.command != "run"
+
 for dirname in ["../logs", "../img"]:
     os.makedirs(dirname, exist_ok=True)
 
+    
 # 1. load scenario from one or more config files
 string_scenario, filename_suffix = [], []
 for config_filename in args.config_files:
@@ -118,7 +133,6 @@ for config_filename in args.config_files:
     with open(config_filename, "r") as f:
         string_scenario += f.readlines()
 string_scenario = "".join(string_scenario)
-#print(sc)
 scenario = yaml.safe_load(string_scenario)
 print(f"Configuration files: {args.config_files}")
 
@@ -131,14 +145,12 @@ probability_smoothing = router_settings["dqn"]["probability_smoothing"]
 lengths = [len(scenario["configuration"][x]) for x in ["sources", "diverters", "sinks"]] \
     + [len([c for c in scenario["configuration"]["conveyors"].values()
            if c["upstream"]["type"] == "conveyor"])]
-#print(lengths)
 graph_size = sum(lengths)
 filename_suffix = "__".join(filename_suffix)
 filename_suffix = f"_{emb_dim}_{graph_size}_{filename_suffix}.bin"
 print(f"Embedding dimension: {emb_dim}, graph size: {graph_size}")
 
-
-# 2. pretrain
+# 2. supervised pretraining (only for dqn_emb)
 
 def pretrain(args, dir_with_models: str, pretrain_filename: str):
     """ Almost copied from the pretraining notebook. """
@@ -233,33 +245,38 @@ def pretrain(args, dir_with_models: str, pretrain_filename: str):
             net.save()
         return epochs_losses
     
-    data_conv = gen_episodes_progress(ignore_saved=True, context='conveyors',
+    data_conv = gen_episodes_progress(ignore_saved=True, context="conveyors",
                                       num_episodes=args.pretrain_num_episodes,
                                       random_seed=args.random_seed, run_params=scenario,
-                                      save_path='../logs/data_conveyor1_oneinp_new.csv')
-    data_conv.loc[:, 'working'] = 1.0
+                                      save_path="../logs/data_conveyor1_oneinp_new.csv")
+    data_conv.loc[:, "working"] = 1.0
     conv_emb = CachedEmbedding(LaplacianEigenmap, dim=emb_dim)
-    # FIXME the arguments should be loaded from the scenario!
-    args = {'scope': dir_with_models, 'activation': 'relu', 'layers': [64, 64], 'embedding_dim': conv_emb.dim}
+    args = {
+        "scope": dir_with_models,
+        "activation": router_settings["dqn"]["activation"],
+        "layers": router_settings["dqn"]["layers"],
+        "embedding_dim": emb_dim,
+    }
     conveyor_network_ng_emb = QNetwork(graph_size, **args)
-    conveyor_network_ng_emb_ws = QNetwork(graph_size, additional_inputs=[{'tag': 'working', 'dim': 1}], **args)
     conveyor_network_ng_emb_losses = qnetwork_pretrain(conveyor_network_ng_emb, shuffle(data_conv), epochs=10,
                                                        embedding=conv_emb, save_net=True)
-    #conveyor_network_ng_emb_ws_losses = qnetwork_pretrain(conveyor_network_ng_emb_ws, shuffle(data_conv), epochs=20,
-    #                                                      embedding=conv_emb, save_net=False)
+    # conveyor_network_ng_emb_ws = QNetwork(graph_size, additional_inputs=[{"tag": "working", "dim": 1}], **args)
+    # conveyor_network_ng_emb_ws_losses = qnetwork_pretrain(conveyor_network_ng_emb_ws, shuffle(data_conv), epochs=20,
+    #                                                       embedding=conv_emb, save_net=False)
 
 dir_with_models = "conveyor_test_ng"
-pretrain_filename = f"igor_pretrained{filename_suffix}"
+pretrain_filename = f"pretrained{filename_suffix}"
 pretrain_path = Path(TORCH_MODELS_DIR) / dir_with_models / pretrain_filename
 do_pretrain = args.force_pretrain or not pretrain_path.exists()
-if do_pretrain:
-    print(f"Pretraining {pretrain_path}...")
-    pretrain(args, dir_with_models, pretrain_filename)
-else:
-    print(f"Using the already pretrained model {pretrain_path}...")
+if nn_loading_needed:
+    if do_pretrain:
+        print(f"Pretraining {pretrain_path}...")
+        pretrain(args, dir_with_models, pretrain_filename)
+    else:
+        print(f"Using the already pretrained model {pretrain_path}...")
 
 
-# 3. train
+# 3. train (only for dqn_emb)
 
 # TODO check whether setting a random seed makes training deterministic
 
@@ -299,21 +316,22 @@ def train(args, dir_with_models: str, pretrain_filename: str, train_filename: st
     return event_series, world
     
 
-train_filename = f"igor_trained{filename_suffix}"
+train_filename = f"trained{filename_suffix}"
 train_path = Path(TORCH_MODELS_DIR) / dir_with_models / train_filename
-do_train = args.force_train or not train_path.exists() or args.command in ["run", "compare"] or do_pretrain
-if do_train:
-    print(f"Training {train_path}...")
-else:
-    print(f"Using the already trained model {train_path}...")
-    
-dqn_log, world = train(args, dir_with_models, pretrain_filename, train_filename, "dqn_emb", do_train, True)
+do_train = args.force_train or not train_path.exists() or args.command == "run" or do_pretrain
+if nn_loading_needed:
+    if do_train:
+        print(f"Training {train_path}...")
+    else:
+        print(f"Using the already trained model {train_path}...")
+    dqn_log, world = train(args, dir_with_models, pretrain_filename, train_filename, "dqn_emb", do_train, True)
 
 
 # 4. load the router graph
-g = RouterGraph(world)
-print("Reachability matrix:")
-g.print_reachability_matrix()
+if nn_loading_needed:
+    g = RouterGraph(world)
+    print("Reachability matrix:")
+    g.print_reachability_matrix()
 
 def visualize(g: RouterGraph):
     gv_graph = g.to_graphviz()
@@ -326,7 +344,7 @@ def visualize(g: RouterGraph):
             print(f"Drawing {path} ...")
             gv_graph.draw(path, prog=prog, args="-Gdpi=300 -Gmargin=0 -Grankdir=LR")
 
-if not args.skip_graphviz:
+if nn_loading_needed and not args.skip_graphviz:
     visualize(g)
 
 def get_symbolic_analyzer() -> SymbolicAnalyzer:
@@ -369,32 +387,35 @@ def get_learning_step_indices() -> Optional[Set[int]]:
 print(f"Running command {args.command}...")
 
 # Simulate and make plots
-if args.command in ["run", "compare"]:
+if args.command == "run":
     _legend_txt_replace = {
-        'networks': {
-            'link_state': 'Shortest paths', 'simple_q': 'Q-routing', 'pred_q': 'PQ-routing',
-            'glob_dyn': 'Global-dynamic', 'dqn': 'DQN', 'dqn_oneout': 'DQN (1-out)',
-            'dqn_emb': 'DQN-LE', 'centralized_simple': 'Centralized control'
-        }, 'conveyors': {
-            'link_state': 'Vyatkin-Black', 'simple_q': 'Q-routing', 'pred_q': 'PQ-routing',
-            'glob_dyn': 'Global-dynamic', 'dqn': 'DQN', 'dqn_oneout': 'DQN (1-out)',
-            'dqn_emb': 'DQN-LE', 'centralized_simple': 'BSR'
+        "networks": {
+            "link_state": "Shortest paths", "simple_q": "Q-routing", "pred_q": "PQ-routing",
+            "glob_dyn": "Global-dynamic", "dqn": "DQN", "dqn_oneout": "DQN (1-out)",
+            "dqn_emb": "DQN-LE", "centralized_simple": "Centralized control"
+        }, "conveyors": {
+            "link_state": "Vyatkin-Black", "simple_q": "Q-routing", "pred_q": "PQ-routing",
+            "glob_dyn": "Global-dynamic", "dqn": "DQN", "dqn_oneout": "DQN (1-out)",
+            "dqn_emb": "DQN-LE", "centralized_simple": "BSR"
         }
     }
-    _targets = {'time': 'avg', 'energy': 'sum', 'collisions': 'sum'}
-    _ylabels = {'time': 'Mean delivery time', 'energy': 'Total energy consumption',
-                'collisions': 'Cargo collisions'}
+    _targets = {"time": "avg", "energy": "sum", "collisions": "sum"}
+    _ylabels = {
+        "time": "Mean delivery time",
+        "energy": "Total energy consumption",
+        "collisions": "Cargo collisions"
+    }
     
-    # dqn_emb = DQNroute-LE, centralized_simple = BSR
-    router_types = ["dqn_emb"]
-    if args.command == "compare":
-        router_types += ["centralized_simple", "link_state", "simple_q"]
-        
+    
+    series = []
     # reuse the log for dqn_emb:
-    series = [dqn_log.getSeries(add_avg=True)]
-    for router_type in router_types[1:]:
-        s, _ = train(args, dir_with_models, pretrain_filename, train_filename, router_type, True, False)
-        series += [s.getSeries(add_avg=True)]
+    if router_types[0] == "dqn_emb":
+        series += [dqn_log.getSeries(add_avg=True)]
+    # perform training/simulation with other approaches
+    for router_type in router_types:
+        if router_type != "dqn_emb":
+            s, _ = train(args, dir_with_models, pretrain_filename, train_filename, router_type, True, False)
+            series += [s.getSeries(add_avg=True)]
     
     dfs = []
     for router_type, s in zip(router_types, series):
@@ -405,26 +426,26 @@ if args.command in ["run", "compare"]:
     
     def print_sums(df):
         for tp in router_types:
-            x = df.loc[df['router_type'] == tp, 'count'].sum()
+            x = df.loc[df["router_type"] == tp, "count"].sum()
             txt = _legend_txt_replace.get(tp, tp)
-            print(f'  {txt}: {x}')
+            print(f"  {txt}: {x}")
     
-    def plot_data(data, meaning='time', figsize=(15,5), xlim=None, ylim=None,
-              xlabel='Simulation time', ylabel=None, font_size=14, title=None, save_path=None,
-              draw_collisions=False, context='networks', **kwargs):
-        if 'time' not in data.columns:
-            datas = split_dataframe(data, preserved_cols=['router_type', 'seed'])
+    def plot_data(data, meaning="time", figsize=(15,5), xlim=None, ylim=None,
+              xlabel="Simulation time", ylabel=None, font_size=14, title=None, save_path=None,
+              draw_collisions=False, context="networks", **kwargs):
+        if "time" not in data.columns:
+            datas = split_dataframe(data, preserved_cols=["router_type", "seed"])
             for tag, df in datas:
-                if tag == 'collisions' and not draw_collisions:
-                    print('Number of collisions:')
+                if tag == "collisions" and not draw_collisions:
+                    print("Number of collisions:")
                     print_sums(df)
                     continue
-                xlim = kwargs.get(tag + '_xlim', xlim)
-                ylim = kwargs.get(tag + '_ylim', ylim)
-                save_path = kwargs.get(tag + '_save_path', save_path)
+                xlim = kwargs.get(tag + "_xlim", xlim)
+                ylim = kwargs.get(tag + "_ylim", ylim)
+                save_path = kwargs.get(tag + "_save_path", save_path)
                 plot_data(df, meaning=tag, figsize=figsize, xlim=xlim, ylim=ylim,
                           xlabel=xlabel, ylabel=ylabel, font_size=font_size,
-                          title=title, save_path=save_path, context='conveyors')
+                          title=title, save_path=save_path, context="conveyors")
             return
 
         target = _targets[meaning]
@@ -432,11 +453,11 @@ if args.command in ["run", "compare"]:
             ylabel = _ylabels[meaning]
 
         fig = plt.figure(figsize=figsize)
-        ax = sns.lineplot(x='time', y=target, hue='router_type', data=data, err_kws={'alpha': 0.1})
+        ax = sns.lineplot(x="time", y=target, hue="router_type", data=data, err_kws={"alpha": 0.1})
         handles, labels = ax.get_legend_handles_labels()
         new_labels = list(map(lambda l: _legend_txt_replace[context].get(l, l), labels[1:]))
         ax.legend(handles=handles[1:], labels=new_labels, fontsize=font_size)
-        ax.tick_params(axis='both', which='both', labelsize=int(font_size*0.75))
+        ax.tick_params(axis="both", which="both", labelsize=int(font_size*0.75))
         if xlim is not None:
             ax.set_xlim(xlim)
         if ylim is not None:
@@ -447,44 +468,25 @@ if args.command in ["run", "compare"]:
         ax.set_ylabel(ylabel, fontsize=font_size)
 
         if save_path is not None:
-            fig.savefig(f"../img/{save_path}", bbox_inches='tight')
+            fig.savefig(f"../img/{save_path}", bbox_inches="tight")
     
     plot_data(dfs, figsize=(14, 8), font_size=22,
               time_save_path="time-plot.pdf", energy_save_path="energy-plot.pdf")
 
-# Test package delivery with argmax choices (delivery may fail under this assumption)
-elif args.command == "deterministic_test":
-    for source in g.sources:
-        for sink, sink_embedding, _ in get_sinks():
-            print(f"Testing delivery from {source} to {sink}...")
-            current_node = source
-            visited_nodes = set()
-            while True:
-                if current_node in visited_nodes:
-                    print("    FAIL due to cycle")
-                    break
-                visited_nodes.add(current_node)
-                print("    in:", current_node)
-                if current_node[0] == "sink":
-                    print("    " + ("OK" if current_node == sink else "FAIL due to wrong destination"))
-                    break
-                elif current_node[0] in ["source", "junction"]:
-                    out_nodes = g.get_out_nodes(current_node)
-                    assert len(out_nodes) == 1
-                    current_node = out_nodes[0]
-                elif current_node[0] == "diverter":
-                    current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(current_node, sink)
-                    q_values = []
-                    for neighbor, neighbor_embedding in zip(neighbors, neighbor_embeddings):
-                        with torch.no_grad():
-                            q = g.q_forward(current_embedding, sink_embedding, neighbor_embedding).item()
-                        print(f"        Q({current_node} → {neighbor} | sink = {sink}) = {q:.4f}")
-                        q_values += [q]
-                    best_neighbor_index = np.argmax(np.array(q_values))
-                    current_node = neighbors[best_neighbor_index]
-                else:
-                    raise AssertionError()
-
+# Compute the expression of the expected delivery cost and evaluate it
+elif args.command == "compute_expected_cost":
+    sa = get_symbolic_analyzer()
+    for sink, sink_embedding, ma in get_sinks():
+        sink_embeddings = sink_embedding.repeat(2, 1)
+        for source in get_sources(ma):
+            customized_ma = ma.customize_for_source(source)
+            print(f"Delivery from {source} to {sink})...")
+            _, lambdified_objective = customized_ma.get_objective(source)
+            ps = sa.compute_ps(customized_ma, sink, sink_embeddings, 0, 0)
+            objective_value = lambdified_objective(*ps)
+            print(f"    Computed probabilities: {Util.list_round(ps, 6)}")
+            print(f"    E(delivery cost from {source} to {sink}) = {objective_value}")
+                          
 # Search for adversarial examples w.r.t. input embeddings
 elif args.command == "embedding_adversarial_search":
     if args.adversarial_search_use_l_2:
@@ -495,13 +497,10 @@ elif args.command == "embedding_adversarial_search":
                        verbose=2, norm=norm, n_repeat=10, repeat_mode="any", dtype=torch.float64)
     print(f"Trying to falsify ({norm}_norm(Δembedding) ≤ {norm_bound}) => (E(cost) < {args.cost_bound}).")
     for sink, sink_embedding, ma in get_sinks():
-        print(f"Searching for adversarial examples for delivery to {sink}...")
-        
-        # gather all embeddings that we need to compute the objective
-        embedding_packer = EmbeddingPacker(g, sink, sink_embedding, ma.reachable_nodes)
-
         for source in get_sources(ma):
             customized_ma = ma.customize_for_source(source)
+            # gather all embeddings that we need to compute the objective
+            embedding_packer = EmbeddingPacker(g, sink, sink_embedding, customized_ma.reachable_nodes)
             print(f"  Measuring adversarial robustness of delivery from {source} to {sink}...")
             _, lambdified_objective = customized_ma.get_objective(source)
 
@@ -527,12 +526,11 @@ elif args.command == "embedding_adversarial_search":
             print(f"Best perturbed vector: {Util.to_numpy(best_embedding).round(3).flatten().tolist()}"
                   f" {aux_info}")
             print(f"Best objective value: {objective}")
-
+                          
 # Formally verify the expected cost bound w.r.t. input embeddings
-elif args.command == "embedding_adversarial_full_verification":
+elif args.command == "embedding_adversarial_verification":
     nv = get_nnet_verifier()
     for sink, _, ma in get_sinks(False):
-        print(f"Verifying adversarial robustness of delivery to {sink}...")
         for source in get_sources(ma):
             print(f"  Verifying adversarial robustness of delivery from {source} to {sink}...")
             customized_ma = ma.customize_for_source(source)
@@ -540,94 +538,16 @@ elif args.command == "embedding_adversarial_full_verification":
                                                    args.input_eps_l_inf, args.cost_bound)
             print(f"    {result}")
 
-# Formally verify Q value stability w.r.t. input embeddings         
-elif args.command == "embedding_adversarial_verification":
-    nv = get_nnet_verifier()
-    for sink, sink_embedding, ma in get_sinks(False):
-        # for each node from which the sink is reachable, verify q value stability
-        for node in ma.reachable_nodes:
-            if node[0] == "sink":
-                # sinks do not have any neighbors
-                continue
-            print(f"Verifying Q value stability for node={node} and sink={sink}...")
-            current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node, sink)
-            # for each neighbor
-            for neighbor, neighbor_embedding in zip(neighbors, neighbor_embeddings):
-                emb_center = Util.transform_embeddings(sink_embedding, current_embedding, neighbor_embedding)
-                with torch.no_grad():
-                    actual_output = nv.net(emb_center).item()
-                ROUND_DIGITS = 3
-                print(f"  Q on real embedding: NN({Util.list_round(emb_center.flatten(), ROUND_DIGITS)})"
-                      f" = {round(actual_output, ROUND_DIGITS)}")
-    
-                # two verification queries: 
-                # check whether the output can be less than the bound,
-                # then check whether it can be greater
-                result = nv.verify_adv_robustness(
-                    nv.net, [nv.A, nv.B, nv.C], [nv.a, nv.b, nv.c],
-                    emb_center.flatten(), args.input_eps_l_inf,
-                    # the format is essential, Marabou does not support the exponential format
-                    [f"y0 <= {marabou_float2str(actual_output - args.output_max_delta_q)}",
-                     f"y0 >= {marabou_float2str(actual_output + args.output_max_delta_q)}"],
-                    check_or=True
-                )
-                print(f"    Verification result: {result}")
-            
-        # for each non-trivial diverter, verify the stability of routing probability
-        for diverter in ma.nontrivial_diverters:
-            print(f"Verifying the stability of routing probability for node={diverter} and sink={sink}...")
-            current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(diverter, sink)
-            # the first halves of these vectors are equal:
-            embs_center = [Util.transform_embeddings(sink_embedding, current_embedding, neighbor_embedding)
-                           for neighbor_embedding in neighbor_embeddings]
-            #print(embs_center[1] - embs_center[0])
-            emb_center = torch.cat((embs_center[0], embs_center[1][:, emb_dim:]), dim=1)
-            
-            # get current probability
-            q_values = g.q_forward(current_embedding, sink_embedding.repeat(2, 1),
-                                   torch.cat(neighbor_embeddings)).flatten()
-            p = Util.q_values_to_first_probability(q_values, softmax_temperature, probability_smoothing).item()
-            q_diff_min, q_diff_max = [nv.probability_to_q_diff(p + i * args.output_max_delta_p) for i in [-1, 1]]
-            print(f"  Q values: {Util.to_numpy(q_values)}")
-            print(f"  p on real embedding: {p}")
-            print(f"  Checking whether p is ins [{p - args.output_max_delta_p}, {p + args.output_max_delta_p}].")
-            print(f"  Checking whether the difference of Qs of two neighbors is in"
-                  f" [{q_diff_min}, {q_diff_max}].")
-            # the format is essential, Marabou does not support the exponential format
-            cases_to_check = ([f"+y0 -y1 <= {marabou_float2str(q_diff_min)}"] if q_diff_min != -np.infty else []) \
-                           + ([f"+y0 -y1 >= {marabou_float2str(q_diff_max)}"] if q_diff_max !=  np.infty else [])
-            print(f"  Cases to check: {cases_to_check}")
-            
-            result = nv.verify_adv_robustness(
-                nv.net_new, [nv.A_new, nv.B_new, nv.C_new], [nv.a_new, nv.b_new, nv.c_new],
-                emb_center.flatten(), args.input_eps_l_inf, cases_to_check, check_or=True
-            )
-            print(f"  Verification result: {result}")
-
-# Compute the expression of the expected delivery cost and evaluate it
-elif args.command == "compute_expected_cost":
-    sa = get_symbolic_analyzer()
-    for sink, sink_embedding, ma in get_sinks():
-        sink_embeddings = sink_embedding.repeat(2, 1)
-        for source in get_sources(ma):
-            customized_ma = ma.customize_for_source(source)
-            print(f"Delivery from {source} to {sink})...")
-            _, lambdified_objective = customized_ma.get_objective(source)
-            ps = sa.compute_ps(customized_ma, sink, sink_embeddings, 0, 0)
-            objective_value = lambdified_objective(*ps)
-            print(f"    Computed probabilities: {Util.list_round(ps, 6)}")
-            print(f"    E(delivery cost from {source} to {sink}) = {objective_value}")
-
 # Evaluate the expected delivery cost assuming a change in NN parameters and make plots            
-elif args.command == "q_adversarial":
+elif args.command == "q_adversarial_search":
     sa = get_symbolic_analyzer()
     learning_step_index = -1
     requested_indices = get_learning_step_indices()
     for sink, sink_embedding, ma in get_sinks():
-        print(f"Measuring robustness of delivery to {sink}...")
         sink_embeddings = sink_embedding.repeat(2, 1)
         for source in get_sources(ma):
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
+            customized_ma = ma.customize_for_source(source)
             objective, lambdified_objective = customized_ma.get_objective(source)
             for node_key in g.node_keys:
                 current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
@@ -641,10 +561,10 @@ elif args.command == "q_adversarial":
                                                        neighbor_embedding).flatten().item()
                     actual_qs = np.linspace(-sa.delta_q_max, sa.delta_q_max,
                                             args.q_adversarial_no_points) + reference_q
-                    kappa, lambdified_kappa = sa.get_transformed_cost(ma, objective, args.cost_bound)
+                    kappa, lambdified_kappa = sa.get_transformed_cost(customized_ma, objective, args.cost_bound)
                     objective_values, kappa_values = [torch.empty(len(actual_qs)) for _ in range(2)]
                     for i, actual_q in enumerate(actual_qs):
-                        ps = sa.compute_ps(ma, sink, sink_embeddings, reference_q, actual_q)
+                        ps = sa.compute_ps(customized_ma, sink, sink_embeddings, reference_q, actual_q)
                         objective_values[i] = lambdified_objective(*ps)
                         kappa_values[i]     = lambdified_kappa(*ps)
                     #print(((objective_values > args.cost_bound) != (kappa_values > 0)).sum()) 
@@ -673,17 +593,16 @@ elif args.command == "q_adversarial":
                     print(f"Empirically found maximum of κ: {kappa_values.max():.6f}")
 
 # Formally verify the bound on the expected delivery cost w.r.t. learning step magnitude  
-elif args.command == "q_adversarial_lipschitz":
+elif args.command == "q_adversarial_verification":
     sa = get_symbolic_analyzer()
-    print(sa.net)
     sa.load_matrices()
     learning_step_index = -1
     requested_indices = get_learning_step_indices()
     for sink, sink_embedding, ma in get_sinks():
-        print(f"Measuring robustness of delivery to {sink}...")
         for source in get_sources(ma):
             print(f"  Measuring robustness of delivery from {source} to {sink}...")
-            objective, _ = ma.get_objective(source)
+            customized_ma = ma.customize_for_source(source)
+            objective, _ = customized_ma.get_objective(source)
             for node_key in g.node_keys:
                 current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
                 for neighbor_key, neighbor_embedding in zip(neighbors, neighbor_embeddings):
@@ -691,8 +610,8 @@ elif args.command == "q_adversarial_lipschitz":
                     if requested_indices is not None and learning_step_index not in requested_indices:
                         continue
                     print(f"    Considering learning step {node_key} → {neighbor_key}...")
-                    lbc = LipschitzBoundComputer(sa, ma, objective, sink, current_embedding, sink_embedding,
-                                                 neighbor_embedding, args.cost_bound)
+                    lbc = LipschitzBoundComputer(sa, customized_ma, objective, sink, current_embedding,
+                                                 sink_embedding, neighbor_embedding, args.cost_bound)
                     if lbc.prove_bound(args.q_adversarial_verification_no_points):
                         print("      Proof found!")
                     print(f"      Number of evaluations of κ: {lbc.no_evaluations}")

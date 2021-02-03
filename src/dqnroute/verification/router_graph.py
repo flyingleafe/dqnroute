@@ -1,6 +1,5 @@
 from typing import *
 
-import pygraphviz as pgv
 import numpy as np
 import torch
 
@@ -177,9 +176,10 @@ class RouterGraph:
              f"conveyor into two with an artificial single-input junction.")
         return intersection[0]
             
-    def to_graphviz(self) -> pgv.AGraph:
-        gv_graph = pgv.AGraph(directed=True)
-        fill_colors = {"source": "#8888FF", "sink": "#88FF88", "diverter": "#FF9999", "junction": "#EEEEEE"}
+    def to_graphviz(self) -> "pygraphviz.AGraph":
+        import pygraphviz
+        gv_graph = pygraphviz.AGraph(directed=True)
+        fill_colors = dict(source="#8888FF", sink="#88FF88", diverter="#FF9999", junction="#EEEEEE")
         
         for i, node_key in self.indices_to_node_keys.items():
             gv_graph.add_node(i)
