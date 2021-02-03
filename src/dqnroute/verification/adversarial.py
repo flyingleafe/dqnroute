@@ -128,7 +128,7 @@ class PGDAdversary(Adversary):
                 perturbation = Util.conditional_to_cuda(perturbation)
 
             if self.verbose > 0:
-                print(f">> #run = {run_n}, ║x1║ = {self._norm(x1):.5f}, ρ = {rho:.5f}")
+                print(f"  >> #run = {run_n}, ║x1║ = {self._norm(x1):.5f}, ρ = {rho:.5f}")
 
             found = False
             for i in range(self.steps):
@@ -137,7 +137,7 @@ class PGDAdversary(Adversary):
                 objective_gradient, objective, aux_info = get_gradient(perturbed_vector)
                 if self.verbose > 0:
                     if objective > self.stop_loss or i == self.steps - 1 or i % 5 == 0 and self.verbose > 1:
-                        print(f"step {i:3d}: objective = {objective:7f}, "
+                        print(f"    step {i:3d}: objective = {objective:7f}, "
                                 f"║Δx║ = {self._norm(perturbation):.5f}, ║x║ = {self._norm(perturbed_vector):.5f}, {aux_info}")
                 if objective > self.stop_loss:
                     found = True
@@ -145,7 +145,7 @@ class PGDAdversary(Adversary):
                 # learning step
                 perturbation_step = rho * self.step_size * self._normalize_gradient(objective_gradient)
                 if perturbation_step.norm() == 0:
-                    print(f"zero gradient, stopping")
+                    print(f"    zero gradient, stopping")
                     break
                 perturbation += perturbation_step
                 # projecting on rho-ball around x1

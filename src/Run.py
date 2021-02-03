@@ -111,9 +111,9 @@ parser.add_argument("--linux_marabou_memory_limit_mb", type=int, default=None,
 args = parser.parse_args()
 
 # dqn_emb = DQNroute-LE, centralized_simple = BSR
+assert len(args.routing_algorithms) > 0, "--routing_algorithms cannot be empty"
 router_types = re.split(", *", args.routing_algorithms)
 router_types_supported = "dqn_emb centralized_simple link_state simple_q".split(" ")
-assert len(router_types) > 0, "--routing_algorithms cannot be empty"
 assert len(set(router_types) - set(router_types_supported)) == 0,\
     f"unsupported algorithm in --routing_algorithms was found; supported ones: {router_types_supported}"
 if "dqn_emb" in router_types:
@@ -185,22 +185,22 @@ def pretrain(args, dir_with_models: str, pretrain_filename: str):
             graph = nx.to_numpy_matrix(graph, nodelist=sorted(graph.nodes))
         m = hashlib.sha256()
         m.update(graph.tobytes())
-        return base64.b64encode(m.digest()).decode('utf-8')
+        return base64.b64encode(m.digest()).decode("utf-8")
     
     def add_inp_cols(tag, dim):
-        return mk_num_list(tag + '_', dim) if dim > 1 else tag
+        return mk_num_list(tag + "_", dim) if dim > 1 else tag
 
     def qnetwork_batches(net, data, batch_size=64, embedding=None):
         n = net.graph_size
         data_cols = []
         amatrix_cols = get_amatrix_cols(n)
         for tag, dim in net.add_inputs:
-            data_cols.append(amatrix_cols if tag == 'amatrix' else add_inp_cols(tag, dim))
+            data_cols.append(amatrix_cols if tag == "amatrix" else add_inp_cols(tag, dim))
         for a, b in make_batches(data.shape[0], batch_size):
             batch = data[a:b]
-            addr = batch['addr'].values
-            dst = batch['dst'].values
-            nbr = batch['neighbour'].values
+            addr = batch["addr"].values
+            dst = batch["dst"].values
+            nbr = batch["neighbour"].values
             if embedding is not None:
                 amatrices = batch[amatrix_cols].values
                 new_btch = []
@@ -216,7 +216,7 @@ def pretrain(args, dir_with_models: str, pretrain_filename: str):
             dst_inp = torch.FloatTensor(dst)
             nbr_inp = torch.FloatTensor(nbr)
             inputs = tuple(torch.FloatTensor(batch[cols].values) for cols in data_cols)
-            output = torch.FloatTensor(batch['predict'].values)
+            output = torch.FloatTensor(batch["predict"].values)
             yield (addr_inp, dst_inp, nbr_inp) + inputs, output
 
     def qnetwork_pretrain_epoch(net, optimizer, data, **kwargs):
@@ -229,13 +229,13 @@ def pretrain(args, dir_with_models: str, pretrain_filename: str):
             optimizer.step()
             yield float(loss)
 
-    def qnetwork_pretrain(net, data, optimizer='rmsprop', epochs=1, save_net=True, **kwargs):
+    def qnetwork_pretrain(net, data, optimizer="rmsprop", epochs=1, save_net=True, **kwargs):
         optimizer = get_optimizer(optimizer)(net.parameters())
         epochs_losses = []
         for i in tqdm(range(epochs)):
             sum_loss = 0
             loss_cnt = 0
-            for loss in tqdm(qnetwork_pretrain_epoch(net, optimizer, data, **kwargs), desc=f'epoch {i}'):
+            for loss in tqdm(qnetwork_pretrain_epoch(net, optimizer, data, **kwargs), desc=f"epoch {i}"):
                 sum_loss += loss
                 loss_cnt += 1
             epochs_losses.append(sum_loss / loss_cnt)
@@ -357,28 +357,31 @@ def get_nnet_verifier() -> NNetVerifier:
     return NNetVerifier(g, args.marabou_path, NETWORK_FILENAME, PROPERTY_FILENAME, probability_smoothing,
                         softmax_temperature, emb_dim, args.linux_marabou_memory_limit_mb)
 
-def get_sources(ma: MarkovAnalyzer) -> Generator[AgentId, None, None]:
+def get_sources(sink: AgentId) -> List[AgentId]:
     """
-    Return reachable sources. If a single source was specified in command line arguments, only
-    this source will be returned.
+    :return: a list of all sources that are reachable from the specified sink. If a single source
+        was specified in command line arguments, only this source will be returned.
     """
-    for source in ma.reachable_sources:
-        if args.single_source is not None and source[1] != args.single_source:
-            continue
-        yield source
+    return [source for source in g.get_sources_for_node(sink)
+            if args.single_source is None or source[1] == args.single_source]
 
-def get_sinks(ma_verbose: bool = True) -> Generator[Tuple[AgentId, torch.Tensor, MarkovAnalyzer], None, None]:
+def get_sinks() -> List[Tuple[AgentId, torch.Tensor]]:
     """
-    Return all sinks. If a single sink was specified in command line arguments, only
-    this sink will be returned.
+    :return: a list of all sinks. If a single sink was specified in command line arguments, only
+        this sink will be returned.
     """
-    for sink in g.sinks:
-        if args.single_sink is not None and sink[1] != args.single_sink:
-            continue
-        ma = MarkovAnalyzer(g, sink, args.simple_path_cost, verbose=ma_verbose)
-        sink_embedding, _, _ = g.node_to_embeddings(sink, sink)
-        yield sink, sink_embedding, ma
-        
+    return [(sink, g.node_to_embeddings(sink, sink)[0]) for sink in g.sinks
+            if args.single_sink is None or sink[1] == args.single_sink]
+
+def get_source_sink_pairs(message: str, ma_verbose: bool = False) -> \
+        Generator[Tuple[AgentId, AgentId, torch.Tensor, MarkovAnalyzer], None, None]:
+    for sink, sink_embedding in get_sinks():
+        sink_embeddings = sink_embedding.repeat(2, 1)
+        for source in get_sources(sink):
+            print(f"{message} from {source} to {sink}...")
+            ma = MarkovAnalyzer(g, source, sink, args.simple_path_cost, ma_verbose)
+            yield source, sink, sink_embedding, ma 
+    
 def get_learning_step_indices() -> Optional[Set[int]]:
     if args.learning_step_indices is None:
         return None
@@ -476,16 +479,12 @@ if args.command == "run":
 # Compute the expression of the expected delivery cost and evaluate it
 elif args.command == "compute_expected_cost":
     sa = get_symbolic_analyzer()
-    for sink, sink_embedding, ma in get_sinks():
-        sink_embeddings = sink_embedding.repeat(2, 1)
-        for source in get_sources(ma):
-            customized_ma = ma.customize_for_source(source)
-            print(f"Delivery from {source} to {sink})...")
-            _, lambdified_objective = customized_ma.get_objective(source)
-            ps = sa.compute_ps(customized_ma, sink, sink_embeddings, 0, 0)
-            objective_value = lambdified_objective(*ps)
-            print(f"    Computed probabilities: {Util.list_round(ps, 6)}")
-            print(f"    E(delivery cost from {source} to {sink}) = {objective_value}")
+    for source, sink, sink_embedding, ma in get_source_sink_pairs("Delivery", True):
+        _, lambdified_objective = ma.get_objective()
+        ps = sa.compute_ps(ma, sink, sink_embedding.repeat(2, 1), 0, 0)
+        objective_value = lambdified_objective(*ps)
+        print(f"  Computed probabilities: {Util.list_round(ps, 6)}")
+        print(f"  E(delivery cost from {source} to {sink}) = {objective_value}")
                           
 # Search for adversarial examples w.r.t. input embeddings
 elif args.command == "embedding_adversarial_search":
@@ -496,101 +495,91 @@ elif args.command == "embedding_adversarial_search":
     adv = PGDAdversary(rho=norm_bound, steps=100, step_size=0.02, random_start=True, stop_loss=args.cost_bound,
                        verbose=2, norm=norm, n_repeat=10, repeat_mode="any", dtype=torch.float64)
     print(f"Trying to falsify ({norm}_norm(Δembedding) ≤ {norm_bound}) => (E(cost) < {args.cost_bound}).")
-    for sink, sink_embedding, ma in get_sinks():
-        for source in get_sources(ma):
-            customized_ma = ma.customize_for_source(source)
-            # gather all embeddings that we need to compute the objective
-            embedding_packer = EmbeddingPacker(g, sink, sink_embedding, customized_ma.reachable_nodes)
-            print(f"  Measuring adversarial robustness of delivery from {source} to {sink}...")
-            _, lambdified_objective = customized_ma.get_objective(source)
+    for source, sink, sink_embedding, ma in get_source_sink_pairs("Measuring adversarial robustness of delivery"):
+        # gather all embeddings that we need to compute the objective
+        embedding_packer = EmbeddingPacker(g, sink, sink_embedding, ma.reachable_nodes)
+        _, lambdified_objective = ma.get_objective()
 
-            def get_gradient(x: torch.Tensor) -> Tuple[torch.Tensor, float, str]:
-                """
-                :param x: parameter vector (the one expected to converge to an adversarial example)
-                :return: a tuple (gradient pointing to the direction of the adversarial attack,
-                                  the corresponding loss function value,
-                                  auxiliary information for printing during optimization).
-                """
-                x = Util.optimizable_clone(x.flatten())
-                objective_value, objective_inputs = embedding_packer.compute_objective(
-                    embedding_packer.unpack(x), customized_ma.nontrivial_diverters, lambdified_objective,
-                    softmax_temperature, probability_smoothing)
-                objective_value.backward()
-                aux_info = ", ".join([f"{param}={value.detach().cpu().item():.4f}"
-                                      for param, value in zip(customized_ma.params, objective_inputs)])
-                return x.grad, objective_value.item(), f"[{aux_info}]"
+        def get_gradient(x: torch.Tensor) -> Tuple[torch.Tensor, float, str]:
+            """
+            :param x: parameter vector (the one expected to converge to an adversarial example)
+            :return: a tuple (gradient pointing to the direction of the adversarial attack,
+                              the corresponding loss function value,
+                              auxiliary information for printing during optimization).
+            """
+            x = Util.optimizable_clone(x.flatten())
+            objective_value, objective_inputs = embedding_packer.compute_objective(
+                embedding_packer.unpack(x), ma.nontrivial_diverters, lambdified_objective,
+                softmax_temperature, probability_smoothing)
+            objective_value.backward()
+            aux_info = ", ".join([f"{param}={value.detach().cpu().item():.4f}"
+                                  for param, value in zip(ma.params, objective_inputs)])
+            return x.grad, objective_value.item(), f"[{aux_info}]"
             
-            best_embedding = adv.perturb(embedding_packer.initial_vector(), get_gradient)
-            _, objective, aux_info = get_gradient(best_embedding)
-            print("Found counterexample!" if objective >= args.cost_bound else "Verified.")
-            print(f"Best perturbed vector: {Util.to_numpy(best_embedding).round(3).flatten().tolist()}"
-                  f" {aux_info}")
-            print(f"Best objective value: {objective}")
+        best_embedding = adv.perturb(embedding_packer.initial_vector(), get_gradient)
+        _, objective, aux_info = get_gradient(best_embedding)
+        print("  Found counterexample!" if objective >= args.cost_bound else "  Verified.")
+        print(f"  Best perturbed vector: {Util.to_numpy(best_embedding).round(3).flatten().tolist()} {aux_info}")
+        print(f"  Best objective value: {objective}")
                           
 # Formally verify the expected cost bound w.r.t. input embeddings
 elif args.command == "embedding_adversarial_verification":
     nv = get_nnet_verifier()
-    for sink, _, ma in get_sinks(False):
-        for source in get_sources(ma):
-            print(f"  Verifying adversarial robustness of delivery from {source} to {sink}...")
-            customized_ma = ma.customize_for_source(source)
-            result = nv.verify_delivery_cost_bound(sink, source, customized_ma,
-                                                   args.input_eps_l_inf, args.cost_bound)
-            print(f"    {result}")
+    for source, sink, _, ma in get_source_sink_pairs("Verifying adversarial robustness of delivery"):
+        result = nv.verify_delivery_cost_bound(source, sink, ma, args.input_eps_l_inf, args.cost_bound)
+        print(f"  {result}")
 
 # Evaluate the expected delivery cost assuming a change in NN parameters and make plots            
 elif args.command == "q_adversarial_search":
     sa = get_symbolic_analyzer()
     learning_step_index = -1
     requested_indices = get_learning_step_indices()
-    for sink, sink_embedding, ma in get_sinks():
+    for source, sink, sink_embedding, ma in get_source_sink_pairs("Measuring robustness of delivery"):
         sink_embeddings = sink_embedding.repeat(2, 1)
-        for source in get_sources(ma):
-            print(f"  Measuring robustness of delivery from {source} to {sink}...")
-            customized_ma = ma.customize_for_source(source)
-            objective, lambdified_objective = customized_ma.get_objective(source)
-            for node_key in g.node_keys:
-                current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
-                for neighbor_key, neighbor_embedding in zip(neighbors, neighbor_embeddings):
-                    learning_step_index += 1
-                    if requested_indices is not None and learning_step_index not in requested_indices:
-                        continue
-                    # compute
-                    # we assume a linear change of parameters
-                    reference_q = sa.compute_gradients(current_embedding, sink_embedding,
-                                                       neighbor_embedding).flatten().item()
-                    actual_qs = np.linspace(-sa.delta_q_max, sa.delta_q_max,
-                                            args.q_adversarial_no_points) + reference_q
-                    kappa, lambdified_kappa = sa.get_transformed_cost(customized_ma, objective, args.cost_bound)
-                    objective_values, kappa_values = [torch.empty(len(actual_qs)) for _ in range(2)]
-                    for i, actual_q in enumerate(actual_qs):
-                        ps = sa.compute_ps(customized_ma, sink, sink_embeddings, reference_q, actual_q)
-                        objective_values[i] = lambdified_objective(*ps)
-                        kappa_values[i]     = lambdified_kappa(*ps)
-                    #print(((objective_values > args.cost_bound) != (kappa_values > 0)).sum()) 
-                    fig, axes = plt.subplots(3, 1, figsize=(10, 10))
-                    plt.subplots_adjust(hspace=0.4)
-                    caption_starts = *(["Delivery cost (τ)"] * 2), "Transformed delivery cost (κ)"
-                    values         = *([objective_values   ] * 2), kappa_values
-                    axes[0].set_yscale("log")
-                    for ax, caption_start, values in zip(axes, caption_starts, values):
-                        label = (f"{caption_start} from {source} to {sink} when making\n optimization"
-                                 f" step with current={node_key}, neighbor={neighbor_key}")
-                        print(f"Plotting: {label}...")
-                        ax.set_title(label)
-                        ax.plot(actual_qs, values)
-                        y_delta = 0 if np.ptp(values) > 0 else 5
-                        # show the zero step value:
-                        ax.vlines(reference_q, min(values) - y_delta, max(values) + y_delta)
-                        ax.hlines(values[len(values) // 2], min(actual_qs), max(actual_qs))
-                    # show the verification bound:
-                    for i in range(2):
-                        axes[i].hlines(args.cost_bound, min(actual_qs), max(actual_qs))
-                    axes[2].hlines(0, min(actual_qs), max(actual_qs))
-                    plt.savefig(f"../img/{filename_suffix}_{learning_step_index}.pdf", bbox_inches = "tight")
-                    plt.close()
-                    print(f"Empirically found maximum of τ: {objective_values.max():.6f}")
-                    print(f"Empirically found maximum of κ: {kappa_values.max():.6f}")
+        objective, lambdified_objective = ma.get_objective()
+        for node_key in g.node_keys:
+            current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
+            for neighbor_key, neighbor_embedding in zip(neighbors, neighbor_embeddings):
+                learning_step_index += 1
+                if requested_indices is not None and learning_step_index not in requested_indices:
+                    continue
+                print(f"  Considering learning step {node_key} → {neighbor_key}...")
+                # compute
+                # we assume a linear change of parameters
+                reference_q = sa.compute_gradients(current_embedding, sink_embedding,
+                                                    neighbor_embedding).flatten().item()
+                actual_qs = np.linspace(-sa.delta_q_max, sa.delta_q_max,
+                                        args.q_adversarial_no_points) + reference_q
+                kappa, lambdified_kappa = sa.get_transformed_cost(ma, objective, args.cost_bound)
+                objective_values, kappa_values = [torch.empty(len(actual_qs)) for _ in range(2)]
+                for i, actual_q in enumerate(actual_qs):
+                    ps = sa.compute_ps(ma, sink, sink_embeddings, reference_q, actual_q)
+                    objective_values[i] = lambdified_objective(*ps)
+                    kappa_values[i]     = lambdified_kappa(*ps)
+                #print(((objective_values > args.cost_bound) != (kappa_values > 0)).sum()) 
+                fig, axes = plt.subplots(3, 1, figsize=(10, 10))
+                plt.subplots_adjust(hspace=0.4)
+                caption_starts = *(["Delivery cost (τ)"] * 2), "Transformed delivery cost (κ)"
+                values         = *([objective_values   ] * 2), kappa_values
+                axes[0].set_yscale("log")
+                for ax, caption_start, values in zip(axes, caption_starts, values):
+                    label = (f"{caption_start} from {source} to {sink} when making optimization"
+                                f" step with current={node_key}, neighbor={neighbor_key}")
+                    print(f"    Plotting: {caption_start}...")
+                    ax.set_title(label)
+                    ax.plot(actual_qs, values)
+                    y_delta = 0 if np.ptp(values) > 0 else 5
+                    # show the zero step value:
+                    ax.vlines(reference_q, min(values) - y_delta, max(values) + y_delta)
+                    ax.hlines(values[len(values) // 2], min(actual_qs), max(actual_qs))
+                # show the verification bound:
+                for i in range(2):
+                    axes[i].hlines(args.cost_bound, min(actual_qs), max(actual_qs))
+                axes[2].hlines(0, min(actual_qs), max(actual_qs))
+                plt.savefig(f"../img/{filename_suffix}_{learning_step_index}.pdf", bbox_inches = "tight")
+                plt.close()
+                print(f"    Empirically found maximum of τ: {objective_values.max():.6f}")
+                print(f"    Empirically found maximum of κ: {kappa_values.max():.6f}")
 
 # Formally verify the bound on the expected delivery cost w.r.t. learning step magnitude  
 elif args.command == "q_adversarial_verification":
@@ -598,24 +587,21 @@ elif args.command == "q_adversarial_verification":
     sa.load_matrices()
     learning_step_index = -1
     requested_indices = get_learning_step_indices()
-    for sink, sink_embedding, ma in get_sinks():
-        for source in get_sources(ma):
-            print(f"  Measuring robustness of delivery from {source} to {sink}...")
-            customized_ma = ma.customize_for_source(source)
-            objective, _ = customized_ma.get_objective(source)
-            for node_key in g.node_keys:
-                current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
-                for neighbor_key, neighbor_embedding in zip(neighbors, neighbor_embeddings):
-                    learning_step_index += 1
-                    if requested_indices is not None and learning_step_index not in requested_indices:
-                        continue
-                    print(f"    Considering learning step {node_key} → {neighbor_key}...")
-                    lbc = LipschitzBoundComputer(sa, customized_ma, objective, sink, current_embedding,
-                                                 sink_embedding, neighbor_embedding, args.cost_bound)
-                    if lbc.prove_bound(args.q_adversarial_verification_no_points):
-                        print("      Proof found!")
-                    print(f"      Number of evaluations of κ: {lbc.no_evaluations}")
-                    print(f"      Maximum depth reached: {lbc.max_depth}")
+    for source, sink, sink_embedding, ma in get_source_sink_pairs("Verifying robustness of delivery"):
+        objective, _ = ma.get_objective()
+        for node_key in g.node_keys:
+            current_embedding, neighbors, neighbor_embeddings = g.node_to_embeddings(node_key, sink)
+            for neighbor_key, neighbor_embedding in zip(neighbors, neighbor_embeddings):
+                learning_step_index += 1
+                if requested_indices is not None and learning_step_index not in requested_indices:
+                    continue
+                print(f"  Considering learning step {node_key} → {neighbor_key}...")
+                lbc = LipschitzBoundComputer(sa, ma, objective, sink, current_embedding,
+                                             sink_embedding, neighbor_embedding, args.cost_bound)
+                if lbc.prove_bound(args.q_adversarial_verification_no_points):
+                    print("    Proof found!")
+                print(f"    Number of evaluations of κ: {lbc.no_evaluations}")
+                print(f"    Maximum depth reached: {lbc.max_depth}")
 
 else:
     raise RuntimeError(f"Unknown command {args.command}.")

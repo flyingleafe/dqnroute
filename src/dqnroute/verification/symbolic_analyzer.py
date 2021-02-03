@@ -98,7 +98,8 @@ class SymbolicAnalyzer:
             diverter_embeddings = diverter_embedding.repeat(2, 1)
             neighbor_embeddings = torch.cat(neighbor_embeddings, dim=0)
             q_values = self.g.q_forward(diverter_embeddings, sink_embeddings, neighbor_embeddings).flatten()
-            ps += [Util.q_values_to_first_probability(q_values, self.softmax_temperature, self.probability_smoothing).item()]
+            ps += [Util.q_values_to_first_probability(q_values, self.softmax_temperature,
+                                                      self.probability_smoothing).item()]
         self._gd_step(predicted_q, actual_q, True)
         return ps
     
@@ -187,11 +188,11 @@ class SymbolicAnalyzer:
         points = sorted(points)
         points = [-self.beta_bound] + points + [self.beta_bound]
         intervals = self.to_intervals(points)
-        print(f"      intervals: {self.interval_list_to_string(intervals)}")
+        print(f"    intervals: {self.interval_list_to_string(intervals)}")
         all_values = set()
         
         for interval in intervals:
-            print(f"      {self.interval_to_string(interval)}")
+            print(f"    {self.interval_to_string(interval)}")
             e = self.resolve_bottom_decisions(expr, self.get_subs_value(interval))[0].simplify()
             final_decision_points = self.get_bottom_decision_points(e)[0]
             final_decision_points = [p for p in final_decision_points if interval[0] < p < interval[1]]
@@ -205,7 +206,7 @@ class SymbolicAnalyzer:
                                      if refined_interval[0] < p < refined_interval[1]]
                 all_points = [refined_interval[0]] + additional_points + [refined_interval[1]]
                 all_values.update([np.abs(float(refined_e.subs(self.beta, p).simplify())) for p in all_points])
-                print(f"        {self.interval_to_string(refined_interval)}: κ'(β) = {self.expr_to_string(refined_e)};"
+                print(f"      {self.interval_to_string(refined_interval)}: κ'(β) = {self.expr_to_string(refined_e)};"
                       f" stationary points: {additional_points}")
         return max(all_values)
     
@@ -256,13 +257,13 @@ class SymbolicAnalyzer:
                 denominator *= arg.args[0]
             else:
                 nominator *= arg            
-        print(f"      nominator(p) = {nominator}")
-        print(f"      denominator(p) = {denominator}")
+        print(f"    nominator(p) = {nominator}")
+        print(f"    denominator(p) = {denominator}")
         
         # compute the sign of v, then ensure that it is "+"
         # the values to subsitute are arbitrary within (0, 1)
         denominator_value = denominator.subs([(param, 0.5) for param in ma.params]).simplify()
-        print(f"      denominator((0.5, ..., 0.5)) = {float(denominator_value):.4f}")
+        print(f"    denominator((0.5, ..., 0.5)) = {float(denominator_value):.4f}")
         if denominator_value < 0:
             nominator *= -1
             denominator *= -1
@@ -289,7 +290,7 @@ class LipschitzBoundComputer:
 
         self.reference_q = sa.compute_gradients(current_embedding, sink_embedding,
                                                 neighbor_embedding).flatten().item()
-        print(f"      Reference Q value = {self.reference_q:.4f}")
+        print(f"    Reference Q value = {self.reference_q:.4f}")
         
         sa.load_grad_matrices()
         if mock_matrices:
@@ -299,13 +300,13 @@ class LipschitzBoundComputer:
         function_ps = [sympy.Function(name) for name in self.ps_function_names]
         evaluated_function_ps = [f(sa.beta) for f in function_ps]
             
-        print(f"      τ(p) = {objective}, τ(p) < {cost_bound}?")
+        print(f"    τ(p) = {objective}, τ(p) < {cost_bound}?")
         kappa_of_p, self.lambdified_kappa = sa.get_transformed_cost(ma, objective, cost_bound)
-        print(f"      κ(p) = {kappa_of_p}, κ(p) < 0?")
+        print(f"    κ(p) = {kappa_of_p}, κ(p) < 0?")
         kappa_of_beta = kappa_of_p.subs(list(zip(ma.params, evaluated_function_ps)))
-        print(f"      κ(β) = {kappa_of_beta}, κ(β) < 0?")
+        print(f"    κ(β) = {kappa_of_beta}, κ(β) < 0?")
         self.dkappa_dbeta = kappa_of_beta.diff(sa.beta)
-        print(f"      dκ(β)/dβ = {self.dkappa_dbeta}")
+        print(f"    dκ(β)/dβ = {self.dkappa_dbeta}")
         
         self.empirical_bound, self.max_depth, self.no_evaluations, self.checked_q_measure = [None] * 4
     
@@ -319,7 +320,7 @@ class LipschitzBoundComputer:
             dlogit_dbeta = logit.diff(self.sa.beta)
             self.computed_logits_and_derivatives[diverter_key] = logit, dlogit_dbeta
         else:
-            print("      (using cached value)")
+            print("    (using cached value)")
         return self.computed_logits_and_derivatives[diverter_key]
     
     def prove_bound(self, no_points_for_presearch: int) -> bool:       
@@ -333,32 +334,32 @@ class LipschitzBoundComputer:
 
         # pre-search: check uniformly positioned points hoping to find a counterexample
         if no_points_for_presearch > 2:
-            print(f"      Performing pre-search of counterexamples with {no_points_for_presearch} points...")
+            print(f"    Performing pre-search of counterexamples with {no_points_for_presearch} points...")
             points = np.linspace(left_q, right_q, no_points_for_presearch)
             for q in sorted(points, key=(lambda x: -np.abs(x - self.reference_q))):
                 kappa = self._q_to_kappa(q)
                 if kappa >= 0:
                     self._report_counterexample(q, kappa)
                     return False
-            print(f"      No counterexample found during the pre-search")
+            print(f"    No counterexample found during the pre-search")
         
         #  compute a pool of bounds
         derivative_bounds = {}
         for param, diverter_key in zip(self.ma.params, self.ma.nontrivial_diverters):
             _, current_neighbors, _ = self.sa.g.node_to_embeddings(diverter_key, self.sink)
-            print(f"      Computing the logit and its derivative for {param} ="
+            print(f"    Computing the logit and its derivative for {param} ="
                   f" P({diverter_key} → {current_neighbors[0]} | sink = {self.sink})....")
             logit, dlogit_dbeta = self._compute_logit_and_derivative(diverter_key)
             # surprisingly, the strings are very slow to obtain
             #print(f"      logit = {sa.expr_to_string(logit)[:500]} ...")
             #print(f"      dlogit/dβ = {sa.expr_to_string(dlogit_dbeta)[:500]} ...")
-            print(f"      Computing logit bounds...")
+            print(f"    Computing logit bounds...")
             derivative_bounds[param.name] = self.sa.estimate_upper_bound(dlogit_dbeta)
 
-        print(f"      Computing the final upper bound on dκ(β)/dβ...")
+        print(f"    Computing the final upper bound on dκ(β)/dβ...")
         top_level_bound = self.sa.estimate_top_level_upper_bound(self.dkappa_dbeta, self.ps_function_names,
                                                                  derivative_bounds)
-        print(f"      Final upper bound on the Lipschitz constant of κ(β): {top_level_bound}")
+        print(f"    Final upper bound on the Lipschitz constant of κ(β): {top_level_bound}")
         return self._prove_bound(left_q, right_q, self._q_to_kappa(left_q), self._q_to_kappa(right_q), 0,
                                  top_level_bound)
     
@@ -373,7 +374,7 @@ class LipschitzBoundComputer:
     def _report_counterexample(self, q: float, kappa: float):
         dq = q - self.reference_q
         beta = self._q_to_beta(q)
-        print(f"      Counterexample found: q = {q:.6f}, Δq = {dq:.6f}, β = {beta:.6f}, κ = {kappa:.6f}")
+        print(f"    Counterexample found: q = {q:.6f}, Δq = {dq:.6f}, β = {beta:.6f}, κ = {kappa:.6f}")
     
     def _prove_bound(self, left_q: float, right_q: float, left_kappa: float, right_kappa: float,
                      depth: int, top_level_bound: float) -> bool:
@@ -405,15 +406,14 @@ class LipschitzBoundComputer:
         self.empirical_bound = max(self.empirical_bound, max_kappa)
         if self.no_evaluations % 1000 == 0:
             percentage = self.checked_q_measure / self.sa.delta_q_max / 2 * 100
-            print(f"      Status: {self.no_evaluations} evaluations, empirical bound is"
+            print(f"    Status: {self.no_evaluations} evaluations, empirical bound is"
                   f" {self.empirical_bound:.6f}, maximum depth is {self.max_depth}, checked Δq"
                   f" percentage: {percentage:.2f}")
         
         # 3. otherwise, try recursively
         calls = [(lambda: self._prove_bound(left_q, mid_q,   left_kappa, mid_kappa,   depth + 1, top_level_bound)),
                  (lambda: self._prove_bound(mid_q,  right_q, mid_kappa,  right_kappa, depth + 1, top_level_bound))]
-        # to produce counetrexamples faster,
-        # start from the most empirically dangerous subinterval
+        # to produce counterexamples faster, start from the most empirically dangerous subinterval
         if max_on_interval.argmax() == 1:
             calls = calls[::-1]
         return calls[0]() and calls[1]()

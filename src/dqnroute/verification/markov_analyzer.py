@@ -6,32 +6,24 @@ from .router_graph import RouterGraph
 from ..utils import AgentId
 
 class MarkovAnalyzer:
-    def __init__(self, g: RouterGraph, sink: AgentId, simple_path_cost: bool, verbose: bool = True,
-                 source: Optional[AgentId] = None):
+    def __init__(self, g: RouterGraph, source: AgentId, sink: AgentId, simple_path_cost: bool = False,
+                 verbose: bool = True):
         self.g = g
-        self.sink = sink
-        self.simple_path_cost = simple_path_cost
         self.source = source
+        self.sink = sink
         
-        # reindex nodes so that only the nodes from which the sink is reachable are considered
-        self.reachable_nodes = [node_key for node_key in g.node_keys if g.reachable[node_key, sink]]
-        
-        # optionally, filter out the nodes that are unreachable from the source and thus reduce the number
-        # of probabilities
-        if source is not None:
-            self.reachable_nodes = [node_key for node_key in self.reachable_nodes
-                                    if g.reachable[source, node_key]]
+        # remove the nodes that are not relevant for the delivery between this source and this sink
+        self.reachable_nodes = [node_key for node_key in g.node_keys
+                                if g.reachable[source, node_key] and g.reachable[node_key, sink]]
         
         if verbose:
-            if source is not None:
-                print(f"  Nodes between {source} and {sink}: {self.reachable_nodes}")
-            else:
-                print(f"  Nodes from which {sink} is reachable: {self.reachable_nodes}")
+            print(f"  Nodes between {source} and {sink}: {self.reachable_nodes}")
         
         self.reachable_sources = [node_key for node_key in self.reachable_nodes if node_key[0] == "source"]
+        
+        # reindex nodes
         self.reachable_nodes_to_indices = {node_key: i for i, node_key in enumerate(self.reachable_nodes)}
         sink_index = self.reachable_nodes_to_indices[sink]
-        #print(f"  sink index = {sink_index}")
 
         # filter out reachable diverters that have only one option due to shielding
         next_nodes = lambda from_key: [to_key for to_key in g.get_out_nodes(from_key) if g.reachable[to_key, sink]]
@@ -90,40 +82,10 @@ class MarkovAnalyzer:
             print(f"  bias: {bias}")
             #print(f"  solution: {self.solution}")
         
-    def get_objective(self, source: AgentId) -> Tuple[sympy.Expr, Callable]:
-        source_index = self.reachable_nodes_to_indices[source]
+    def get_objective(self) -> Tuple[sympy.Expr, Callable]:
+        source_index = self.reachable_nodes_to_indices[self.source]
         symbolic_objective = sympy.simplify(self.solution[source_index])
-        print(f"    E(delivery cost from {source} to {self.sink}) = {symbolic_objective}")
+        print(f"  E(delivery cost from {self.source} to {self.sink}) = {symbolic_objective}")
         objective = sympy.lambdify(self.params, symbolic_objective)
         return symbolic_objective, objective
-    
-    def customize_for_source(self, source: AgentId, verbose: bool = True) -> "MarkovAnalyzer":
-        return MarkovAnalyzer(self.g, self.sink, self.simple_path_cost, verbose, source)
-        
-        """
-        source_index = self.g.node_keys_to_indices[source]
-        symbolic_objective, _ = self.get_objective(source)
-        symbols = sorted(list(symbolic_objective.free_symbols), key=str)
-        used_p_indices = [int(str(symbol)[1:]) for symbol in symbols]
-        reindexed_symbols = ["p" + str(i) for i in range(len(used_p_indices))]
-        reindexed_symbols = sympy.symbols(reindexed_symbols)
-        replacement_map = {s: reindexed_symbols[i] for i, s in enumerate(symbols)}
-        print(symbols, used_p_indices, reindexed_symbols, replacement_map)
-        
-        result = MarkovAnalyzer.__new__()
-        result.g = self.g
-        result.sink = self.sink
-        result.params = reindexed_symbols
-        result.solution = {source_index: symbolic_objective}
-        
-        # TODO
-        result.reachable_nodes = self.reachable_nodes
-        
-        # fill other fields like in the main constructor
-        next_nodes = lambda from_key: [to_key for to_key in self.g.get_out_nodes(from_key)
-                                       if self.g.reachable[to_key, self.sink]]
-        result.nontrivial_diverters = [from_key for from_key in result.reachable_nodes
-                                       if len(next_nodes(from_key)) > 1]
-        result.reachable_sources = [node_key for node_key in result.reachable_nodes if node_key[0] == "source"]
-        return result
-        """
+

@@ -35,8 +35,8 @@ if __name__ == "__main__":
 
     """ Select the command: """
     # simulate/train:
-    #command, command_args = "run", "--routing_algorithms=dqn_emb"
-    command, command_args = "run", "--routing_algorithms=dqn_emb,centralized_simple,link_state,simple_q"
+    command, command_args = "run", "--routing_algorithms=dqn_emb"
+    #command, command_args = "run", "--routing_algorithms=dqn_emb,centralized_simple,link_state,simple_q"
     #command, command_args = "run", "--routing_algorithms=centralized_simple,link_state,simple_q"
     
     # formal verification:
@@ -50,10 +50,9 @@ if __name__ == "__main__":
         command_args += " "
 
     run(command, *config, command_args+(
-        ""
         #"--skip_graphviz --verification_lr 0.001"
         #"--force_train"
-        #"--skip_graphviz"
+        "--skip_graphviz"
         #"--skip_graphviz --single_source 1 --single_sink 3"
         #"--skip_graphviz --single_source 1 --single_sink 2"
         #"--skip_graphviz --single_source 0 --single_sink 1"

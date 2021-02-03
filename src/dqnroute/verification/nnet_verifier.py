@@ -281,10 +281,10 @@ class NNetVerifier:
     def _verified_fraction(self, probability_dimension: int) -> float:
         return self._verified_volume_meter / (1 - self.probability_smoothing) ** probability_dimension
     
-    def verify_delivery_cost_bound(self, sink: AgentId, source: AgentId, ma: MarkovAnalyzer,
+    def verify_delivery_cost_bound(self, source: AgentId, sink: AgentId, ma: MarkovAnalyzer,
                                    input_eps_l_inf: float, cost_bound: float) -> VerificationResult:
         sink_embedding, _, _ = self.g.node_to_embeddings(sink, sink)
-        self.objective, self.lambdified_objective = ma.get_objective(source)
+        self.objective, self.lambdified_objective = ma.get_objective()
 
         # gather all embeddings that we need to compute the objective:
         self.embedding_packer = EmbeddingPacker(self.g, sink, sink_embedding, ma.reachable_nodes)
@@ -293,7 +293,7 @@ class NNetVerifier:
         
         m = len(ma.params)
         n = self.embedding_packer.number_of_embeddings()
-        print(f"    Number of embeddings: {n}, number of probabilities: {m}")
+        print(f"  Number of embeddings: {n}, number of probabilities: {m}")
         
         # STAGE 1: create a matrix that transforms all (unshifted) embeddings
         # to groups of shifted embeddings (sink, nbr1, nbr2) for each probability
@@ -308,44 +308,44 @@ class NNetVerifier:
         region_queue = deque([(ProbabilityRegion.get_initial(len(ma.params), self), 0)])
         while len(region_queue) > 0:
             region, depth = region_queue.popleft()
-            maybe_ce = self._verify_delivery_cost_bound(sink, source, ma, input_eps_l_inf, cost_bound,
+            maybe_ce = self._verify_delivery_cost_bound(source, sink, ma, input_eps_l_inf, cost_bound,
                                                         region, depth, region_queue)
             if maybe_ce is not None:
                 return maybe_ce
         # in this case, all the regions were checked:
         return Verified()
     
-    def _verify_delivery_cost_bound(self, sink: AgentId, source: AgentId, ma: MarkovAnalyzer,
+    def _verify_delivery_cost_bound(self, source: AgentId, sink: AgentId, ma: MarkovAnalyzer,
                                     input_eps_l_inf: float, cost_bound: float,
                                     region: ProbabilityRegion, depth: int,
                                     region_queue: deque) -> Optional[Counterexample]:
         m = len(ma.params)
         n = self.embedding_packer.number_of_embeddings()
-        print(f"    [depth={depth}] Verified probability mass percentage: {self._verified_fraction(m) * 100:.7f}%")
-        print(f"    [depth={depth}] Currently verifying {region}")
+        print(f"  [depth={depth}] Verified probability mass percentage: {self._verified_fraction(m) * 100:.7f}%")
+        print(f"  [depth={depth}] Currently verifying {region}")
         
         # R is our probability hyperrectange
         
         # 1. Prove or refute ∀p ∈ R cost ≤ cost_bound with CSP/SMT solvers
-        print(f"    [depth={depth}] Calling Z3...")
+        print(f"  [depth={depth}] Calling Z3...")
         if self._prove_bound_for_region(m, cost_bound, region):
             self._verified_volume_meter += region.volume()
-            print(f"    [depth={depth}] Z3 proved that the bound cannot be exceeded in"
+            print(f"  [depth={depth}] Z3 proved that the bound cannot be exceeded in"
                   " this probability region")
             # verified and nothing more to check here
             return None
         
         # 2. Find out whether R is reachable (for some allowed embedding)
-        print(f"    [depth={depth}] Calling Marabou...")
+        print(f"  [depth={depth}] Calling Marabou...")
         result = self.verify_adv_robustness(
             self.net_large,
             [self.A_large, self.B_large, self.C_large],
             [self.a_large, self.b_large, self.c_large],
             self.emb_center.flatten(), input_eps_l_inf,
-            region.get_reachability_constraints(), check_or=False
+            region.get_reachability_constraints()
         )
         if type(result) == Verified:
-            print(f"    [depth={depth}] Marabou proved that the bound cannot be exceeded in"
+            print(f"  [depth={depth}] Marabou proved that the bound cannot be exceeded in"
                   " this probability region")
             self._verified_volume_meter += region.volume()
             # verified and nothing more to check here
@@ -367,27 +367,22 @@ class NNetVerifier:
                                                     self.softmax_temperature,
                                                     self.probability_smoothing).item() for i in range(m)
             ]
-        print(f"    [depth={depth}] Checking candidate counterexample with"
+        print(f"  [depth={depth}] Checking candidate counterexample with"
                 f" ys={Util.list_round(counterexample_ps, ROUND_DIGITS)}"
                 f" [cross-check: {Util.list_round(executed_ps, ROUND_DIGITS)}]...")
         result.add_objective_value(np.array(counterexample_ps), objective_value)
         if objective_value >= cost_bound:
-            print(f"    [depth={depth}] True counterexample found!")
+            print(f"  [depth={depth}] True counterexample found!")
             return result
 
         # 4. If no conclusion can be made, split R and schedule verification for children
-        print(f"    [depth={depth}] No conclusion, trying recursively...")
+        print(f"  [depth={depth}] No conclusion, trying recursively...")
         for smaller_region in region.split():
             region_queue.append((smaller_region, depth + 1))
         
     def verify_adv_robustness(self, net: torch.nn.Module, weights: List[torch.Tensor],
                               biases: List[torch.Tensor], input_center: torch.Tensor, input_eps: float,
-                              output_constraints: List[str], check_or: bool) -> VerificationResult:
-        if check_or:
-            calls = [lambda: self.verify_adv_robustness(net, weights, biases, input_center, input_eps, 
-                                                        [constraint], False) for constraint in output_constraints]
-            return verify_conjunction(calls)
-        
+                              output_constraints: List[str]) -> VerificationResult:        
         # write the NN
         input_dim = weights[0].shape[1]
         output_dim = biases[-1].shape[0]
@@ -437,7 +432,7 @@ class NNetVerifier:
         for line in final_lines:
             #print(line)
             lines += [line.strip()]
-        print("  ".join(lines))
+        print("  " + "  ".join(lines))
         if returncode != 0:
             raise MarabouException(f"Marabou terminated with unexpected exit code {returncode}!")
             

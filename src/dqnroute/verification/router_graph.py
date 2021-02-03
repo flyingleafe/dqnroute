@@ -274,3 +274,6 @@ class RouterGraph:
             out_nodes = [out_node for out_node in out_nodes if self.reachable[out_node, sink]]
         out_embeddings = [self._get_router_embedding(self.node_to_router[out_node]) for out_node in out_nodes]
         return current_embedding, out_nodes, out_embeddings
+    
+    def get_sources_for_node(self, node_key: AgentId) -> List[AgentId]:
+        return [source_key for source_key in self.sources if self.reachable[source_key, node_key]]
