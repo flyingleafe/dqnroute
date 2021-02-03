@@ -1,0 +1,77 @@
+configuration:
+  sinks: [0, 1, 2]
+  sources:
+    0: {upstream_conv: 0}
+    1: {upstream_conv: 1}
+    2: {upstream_conv: 7}
+    3: {upstream_conv: 2}
+    4: {upstream_conv: 9}
+  conveyors:
+    0:
+      length: 40
+      upstream: {type: 'sink', idx: 0}
+    1:
+      lenght: 20
+      upstream: {type: 'conveyor', idx: 0, pos: 10}
+    2:
+      length: 45
+      upstream: {type: 'sink', idx: 1}
+    3:
+      length: 30
+      upstream: {type: 'conveyor', idx: 2, pos: 35}
+    4:
+      length: 35
+      upstream: {type: 'conveyor', idx: 0, pos: 30}
+    5:
+      length: 30
+      upstream: {type: 'conveyor', idx: 0, pos: 30}
+    6:
+      length: 20
+      upstream: {type: 'conveyor', idx: 4, pos: 10}
+    7:
+      length: 20
+      upstream: {type: 'conveyor', idx: 6, pos: 10}
+    8:
+      length: 20
+      upstream: {type: 'conveyor', idx: 4, pos: 15}
+    9:
+      length: 50
+      upstream: {type: 'sink', idx: 2}
+    10:
+      length: 10
+      upstream: {type: 'conveyor', idx: 9, pos: 15}
+    11:
+      length: 10
+      upstream: {type: 'conveyor', idx: 2, pos: 25}
+    12:
+      length: 10
+      upstream: {type: 'conveyor', idx: 9, pos: 40}
+  diverters:
+    0:
+      conveyor: 0
+      pos: 15
+      upstream_conv: 6
+    1:
+      conveyor: 0
+      pos: 35
+      upstream_conv: 3
+    2:
+      conveyor: 2
+      pos: 10
+      upstream_conv: 4
+    3:
+      conveyor: 2
+      pos: 30
+      upstream_conv: 8
+    4:
+      conveyor: 2
+      pos: 40
+      upstream_conv: 12
+    5:
+      conveyor: 4
+      pos: 25
+      upstream_conv: 5
+    6:
+      conveyor: 9
+      pos: 25
+      upstream_conv: 2

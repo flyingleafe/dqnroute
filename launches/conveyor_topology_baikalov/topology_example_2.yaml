@@ -1,0 +1,101 @@
+configuration:
+  sinks: [ 0, 1, 2 ]
+  sources:
+    0: { upstream_conv: 0 }
+    1: { upstream_conv: 1 }
+    2: { upstream_conv: 9 }
+  conveyors:
+    0:
+      length: 80
+      upstream: { type: 'sink', idx: 0 }
+    1:
+      length: 50
+      upstream: { type: 'conveyor', idx: 10, pos: 50 }
+    2:
+      length: 40
+      upstream: { type: 'conveyor', idx: 1, pos: 5 }
+    3:
+      length: 30
+      upstream: { type: 'conveyor', idx: 1, pos: 15 }
+    4:
+      length: 30
+      upstream: { type: 'conveyor', idx: 0, pos: 20 }
+    5:
+      length: 20
+      upstream: { type: 'conveyor', idx: 3, pos: 5 }
+    6:
+      length: 5
+      upstream: { type: 'conveyor', idx: 3, pos: 20 }
+    7:
+      length: 15
+      upstream: { type: 'conveyor', idx: 1, pos: 45 }
+    8:
+      length: 20
+      upstream: { type: 'sink', idx: 1 }
+    9:
+      length: 85
+      upstream: { type: 'sink', idx: 2 }
+    10:
+      length: 100
+      upstream: { type: 'conveyor', idx: 9, pos: 70 }
+    11:
+      length: 40
+      upstream: { type: 'conveyor', idx: 9, pos: 5 }
+    12:
+      length: 15
+      upstream: { type: 'conveyor', idx: 1, pos: 20 }
+    13:
+      length: 10
+      upstream: { type: 'conveyor', idx: 11, pos: 25 }
+    14:
+      length: 40
+      upstream: { type: 'conveyor', idx: 10, pos: 60 }
+  diverters:
+    0:
+      conveyor: 0
+      pos: 5
+      upstream_conv: 1
+    1:
+      conveyor: 0
+      pos: 45
+      upstream_conv: 5
+    2:
+      conveyor: 0
+      pos: 70
+      upstream_conv: 10
+    3:
+      conveyor: 1
+      pos: 30
+      upstream_conv: 6
+    4:
+      conveyor: 3
+      pos: 10
+      upstream_conv: 7
+    5:
+      conveyor: 3
+      pos: 25
+      upstream_conv: 4
+    6:
+      conveyor: 9
+      pos: 50
+      upstream_conv: 13
+    7:
+      conveyor: 9
+      pos: 75
+      upstream_conv: 14
+    8:
+      conveyor: 10
+      pos: 10
+      upstream_conv: 3
+    9:
+      conveyor: 10
+      pos: 25
+      upstream_conv: 8
+    10:
+      conveyor: 10
+      pos: 70
+      upstream_conv: 11
+    11:
+      conveyor: 11
+      pos: 20
+      upstream_conv: 12
