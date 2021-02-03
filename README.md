@@ -1,6 +1,6 @@
 ## 1. Preface: DQNroute
 
-The original project [DQNroute](https://github.com/flyingleafe/dqnroute) comprises a simulation model for package delivery in computer networks, a simulation model for baggage delivery, and a reinforcement learning approach to learn a single neural network that controls routing in a distributed way. This approach is described in [Mukhutdinov, D., Filchenkov, A., Shalyto, A., & Vyatkin, V. (2019). Multi-agent deep learning for simultaneous optimization for time and energy in distributed routing system. Future Generation Computer Systems, 94, 587-600](https://www.sciencedirect.com/science/article/pii/S0167739X18309087?casa_token=3O7gKwF4KRAAAAAA:Ia9qKHkdtgvekRjrCL_M7U5jBFpIYCVPMUagJTf88lWfjJrv6D7zNkaJyYIPj9mculdSsbLXYhI). Beyond this publication, DQNroute is enhanced by using Laplacian Eigenmap embeddings of nodes to be adaptive to the changes in network topology.
+The original project [DQNroute](https://github.com/flyingleafe/dqnroute) comprises a simulation model for package delivery in computer networks, a simulation model for baggage delivery, and a reinforcement learning approach to learn a single neural network that controls routing in a distributed way. This approach is described in [[Mukhutdinov, D., Filchenkov, A., Shalyto, A., & Vyatkin, V. (2019). Multi-agent deep learning for simultaneous optimization for time and energy in distributed routing system. Future Generation Computer Systems, 94, 587-600]](https://www.sciencedirect.com/science/article/pii/S0167739X18309087?casa_token=3O7gKwF4KRAAAAAA:Ia9qKHkdtgvekRjrCL_M7U5jBFpIYCVPMUagJTf88lWfjJrv6D7zNkaJyYIPj9mculdSsbLXYhI). Beyond this publication, DQNroute is enhanced by using Laplacian Eigenmap embeddings of nodes to be adaptive to the changes in network topology.
 
 ## 2. Introduction
 
@@ -109,4 +109,4 @@ Refer to [the slides](/rl_verif.pdf) for more information.
 * [src/dqnroute/networks](/src/dqnroute/networks): definitions of neural network architectures;
 * [src/dqnroute/agents/routers](/src/dqnroute/agents/routers): DQNroute and several other routing algorithms (baselines);
 * [src/dqnroute/agents/conveyors](/src/dqnroute/agents/conveyors), [src/dqnroute/conveyor_model](/src/dqnroute/conveyor_model), [src/dqnroute/simulation](/src/dqnroute/simulation): implementation of the simulation models of conveyor and computer networks;
-* [src/dqnroute/verifications](/src/dqnroute/verifications): analysis and verification approaches described in Section 6.
+* [src/dqnroute/verification](/src/dqnroute/verification): analysis and verification approaches described in Section 6.
