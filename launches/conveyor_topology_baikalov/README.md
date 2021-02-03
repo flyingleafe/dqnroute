@@ -6,4 +6,4 @@ In this folder you can find:
 
 - .png images of topologies
 
-- .drawio files for easy fixes (see `draw.io`)
+- .drawio files for easy fixes (you can open them <a href="https://app.diagrams.net/">here</a>)
