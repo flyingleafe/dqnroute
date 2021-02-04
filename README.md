@@ -11,8 +11,12 @@ The changes w.r.t. the original DQNroute are:
 
 * Bugfix: a bag was processed incorrectly if it passed twice along the same conveyor. This is possible only in topology graphs with cycles.
 * Bugfix: Laplacian Eigenmap and HOPE embeddings were computed nondeterministically (with different random initialization), making different nodes have different embedding matrices. The initialization was replaced by a fixed, deterministic one.
+* An option that allows configuring whether the neural networks in different nodes share their parameters.
+    * Configure this in YAML configuration files under settings -> router -> dqn -> use_single_neural_network (True/False). If not specified, the default is False.
+    * The original version of DQNroute with Laplacian Eigenmap embeddings worked as follows: a single neural network was pretrained and copied to all the nodes, then the nodes modified their own versions of the neural network during simulation. This corresponds to use_single_neural_network = False.
+    * To make all nodes execute/train the same neural network, set use_single_neural_network = True.
 * Neural network verification methods. They are explained in detail in Section 6.
-* The decisions of the neural network are altered to exclude routing probabilities that are very close to 0 and 1. This is done similarly to label smoothing. This is needed for the verification methods.
+* The decisions of the neural network are altered to exclude routing probabilities that are very close to 0 and 1. This is done similarly to label smoothing. This is needed for the verification methods to work properly.
 * A [script](/src/Run.py) (use with "--command run") that offers an easier access to the original project by performing both pretraining and training. It also visualizes topology graphs.
 * New baggage handling conveyor networks/graphs:
     * [conveyor_topology_tarau](/launches/conveyor_topology_tarau) based on [[Tarau, Alina N., Bart De Schutter, and Hans Hellendoorn. "Model-based control for route choice in automated baggage handling systems." IEEE Transactions on Systems, Man, and Cybernetics, Part C (Applications and Reviews) 40.3 (2010): 341-351]](https://ieeexplore.ieee.org/abstract/document/5382550/);

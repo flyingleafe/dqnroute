@@ -20,6 +20,25 @@ from ...networks import *
 
 logger = logging.getLogger(DQNROUTE_LOGGER)
 
+class SharedBrainStorage:
+    INSTANCE = None
+    PROCESSED_NODES = 0
+    
+    @staticmethod
+    def load(brain_loader: Callable[[], QNetwork], no_nodes: int) -> QNetwork:
+        if SharedBrainStorage.INSTANCE == None:
+            SharedBrainStorage.INSTANCE = brain_loader()
+        SharedBrainStorage.PROCESSED_NODES += 1
+        #print(f"Brain initialization: {SharedBrainStorage.PROCESSED_NODES} / {no_nodes} agents")
+        result = SharedBrainStorage.INSTANCE
+        if SharedBrainStorage.PROCESSED_NODES == no_nodes:
+            # all nodes have been processes
+            # prepare this class for possible reuse
+            SharedBrainStorage.INSTANCE = None
+            SharedBrainStorage.PROCESSED_NODES = 0
+        return result
+        
+
 class DQNRouter(LinkStateRouter, RewardAgent):
     """
     A router which implements the DQN-routing algorithm.
@@ -27,12 +46,16 @@ class DQNRouter(LinkStateRouter, RewardAgent):
     def __init__(self, batch_size: int, mem_capacity: int, nodes: List[AgentId],
                  optimizer='rmsprop', brain=None, random_init=False, max_act_time=None,
                  additional_inputs=[], softmax_temperature: float = 1.5,
-                 probability_smoothing: float = 0.0, **kwargs):
+                 probability_smoothing: float = 0.0, load_filename: str = None,
+                 use_single_neural_network: bool = False, **kwargs):
         """
         Parameters added by Igor:
         :param softmax_temperature: larger temperature means larger entropy of routing decisions.
         :param probability_smoothing (from 0.0 to 1.0): if greater than 0, then routing probabilities will
             be separated from zero.
+        :param load_filename: filename to load the neural network. If None, a new network will be created.
+        :param use_single_neural_network: all routers will reference the same instance of the neural network.
+            In particular, this very network will be influeced by training steps in all nodes.
         """
         super().__init__(**kwargs)
         self.batch_size = batch_size
@@ -46,19 +69,23 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         # added by Igor: probability smoothing (0 means no smoothing):
         self.probability_smoothing = probability_smoothing
         
-        if brain is None:
-            self.brain = self._makeBrain(additional_inputs=additional_inputs, **kwargs)
-            if random_init:
-                self.brain.init_xavier()
-            else:
-                # added by Igor to override the filename of the loaded model:
-                if "IGOR_OVERRIDDEN_DQN_LOAD_FILENAME" in os.environ:
-                    self.brain._label = os.environ["IGOR_OVERRIDDEN_DQN_LOAD_FILENAME"]
-                
-                self.brain.restore()
-                self.log(f'Restored model {self.brain._label}')
+        # changed by Igor: brain loading process
+        def load_brain():
+            b = brain
+            if b is None:
+                b = self._makeBrain(additional_inputs=additional_inputs, **kwargs)
+                if random_init:
+                    b.init_xavier()
+                else:
+                    if load_filename is not None:
+                        b._label = load_filename
+                    b.restore()
+            return b
+        if use_single_neural_network:
+            self.brain = SharedBrainStorage.load(load_brain, len(nodes))
         else:
-            self.brain = brain
+            self.brain = load_brain()
+        self.use_single_neural_network = use_single_neural_network
 
         self.optimizer = get_optimizer(optimizer)(self.brain.parameters())
         self.loss_func = nn.MSELoss()

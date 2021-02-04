@@ -291,24 +291,30 @@ def run_single(run_params: dict, router_type: str, random_seed: int, **kwargs):
 
 def train(args, dir_with_models: str, pretrain_filename: str, train_filename: str,
           router_type: str, retrain: bool, work_with_files: bool):
-    # added by Igor (TODO implement in a proper way):
-    os.environ["IGOR_OVERRIDDEN_DQN_LOAD_FILENAME"] = pretrain_filename
-    if retrain:
-        if "IGOR_OMIT_TRAINING" in os.environ:
-            del os.environ["IGOR_OMIT_TRAINING"]
-    else:
-        os.environ["IGOR_OMIT_TRAINING"] = "True"
-    
+    if router_type == "dqn_emb":
+        # specify a file with the brain to be loaded by each dqn_emb router
+        scenario["settings"]["router"]["dqn_emb"]["load_filename"] = pretrain_filename
+        if retrain:
+            # TODO get rid of this environmental variable
+            if "OMIT_TRAINING" in os.environ:
+                del os.environ["OMIT_TRAINING"]
+        else:
+            os.environ["OMIT_TRAINING"] = "True"
     event_series, runner = run_single(run_params=scenario, router_type=router_type, progress_step=500,
                                       ignore_saved=[True], random_seed=args.random_seed)
     if router_type == "dqn_emb":
         world = runner.world
-        net = next(iter(next(iter(world.handlers.values())).routers.values())).brain
+        some_router = next(iter(next(iter(world.handlers.values())).routers.values()))
+        net = some_router.brain
         net._label = train_filename    
         # save or load the trained network
         if work_with_files:
             if retrain:
-                net.save()
+                if some_router.use_single_neural_network:
+                    net.save()
+                else:
+                    print("Warning: saving/loaded models trained in simulation is only implemented "
+                         "when use_single_neural_network = True. The models were not saved to disk.")
             else:
                 net.restore()
     else:

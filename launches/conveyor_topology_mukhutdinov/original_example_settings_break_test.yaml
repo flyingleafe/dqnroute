@@ -34,6 +34,7 @@ settings:
       mem_capacity: 1
       softmax_temperature: 1.5 # added by Igor
       probability_smoothing: 0.01 # added by Igor
+      use_single_neural_network: False # added by Igor
     dqn_oneout:
       <<: *dqn
     dqn_emb:

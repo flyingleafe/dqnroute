@@ -457,10 +457,10 @@ class ConveyorsRunner(SimulationRunner):
         return (ps['configuration'], ss['bags_distr'], ss['conveyor_env'],
                 ss['conveyor'], ss['router'].get(self.world.factory.router_type, {}))
 
-    def makeRunId(self, random_seed):
+    def makeRunId(self, random_seed: int) -> str:
         return f'{self.world.factory.router_type}-{random_seed}'
 
-    def runProcess(self, random_seed = None):
+    def runProcess(self, random_seed: int = None):
         if random_seed is not None:
             if self.world.factory.centralized():
                 seed = random_seed + 42
@@ -481,21 +481,8 @@ class ConveyorsRunner(SimulationRunner):
 
         bag_id = 1
         
-        # added by Igor
-        # uncomment to make all NNs share their weights
-        """
-        net = None
-        for h in self.world.handlers.values():
-            if hasattr(h, "routers"):
-                for r in h.routers.values():
-                    if hasattr(r, "brain"):
-                        if net is None:
-                            net = r.brain
-                        r.brain = net
-        """
-        
         # added by Igor to support loading already trained models
-        if "IGOR_OMIT_TRAINING" in os.environ:
+        if "OMIT_TRAINING" in os.environ:
             return
         
         for period in bag_distr['sequence']:
