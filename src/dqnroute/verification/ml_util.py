@@ -51,10 +51,21 @@ class Util(ABC):
     
     @staticmethod
     def to_numpy(x: torch.Tensor) -> np.ndarray:
+        """
+        Converts a PyTorch tensor to a numpy array.
+        :param x: input tensor.
+        :return: output numpy array.
+        """
         return x.detach().cpu().numpy()
 
     @staticmethod
     def to_torch_linear(weight: torch.Tensor, bias: torch.Tensor) -> torch.nn.Linear:
+        """
+        Constructs a torch.nn.Linear layer from the given weight matrix and bias vector.
+        :param weight: weight matrix.
+        :param bias: bias vector.
+        :return: torch.nn.Linear layer.
+        """
         m = torch.nn.Linear(*weight.shape)
         m.weight = torch.nn.Parameter(weight)
         m.bias   = torch.nn.Parameter(bias)
@@ -62,6 +73,12 @@ class Util(ABC):
     
     @staticmethod
     def to_torch_relu_nn(weights: List[torch.Tensor], biases: List[torch.Tensor]) -> torch.nn.Sequential:
+        """
+        Constructs a multiplayer perceptron with ReLUs.
+        :param weights: weight matrices.
+        :param biases: bias vectors.
+        :return multiplayer perceptron as a PyTorch model.
+        """
         assert len(weights) == len(biases)
         modules = []
         for w, b in zip(weights, biases):
@@ -71,12 +88,25 @@ class Util(ABC):
     
     @staticmethod
     def fill_block(m: torch.Tensor, i: int, j: int, target: torch.Tensor):
+        """
+        Fills a block of a matrix.
+        :param m: matrix to which the block will be written.
+        :param i: row index of the block to write.
+        :param j: column index of the block to write.
+        :param target: the block to write.
+        """
         start_row, end_row = target.shape[0] * i, target.shape[1] * (i + 1)
         start_col, end_col = target.shape[0] * j, target.shape[1] * (j + 1)
         m[start_row:end_row, start_col:end_col] = target
         
     @staticmethod
     def make_block_diagonal(block: torch.Tensor, times: int) -> torch.Tensor:
+        """
+        Constructs a block-diagonal matrix filled with the single given matrix.
+        :param block: block to use for filling.
+        :param times: number of times to repeat block.
+        :return: block-diagonal matrix filled with block.
+        """
         O = block * 0
         blocks = np.empty((times, times), dtype=object)
         for i in range(times):
@@ -87,30 +117,71 @@ class Util(ABC):
     
     @staticmethod
     def repeat_tensor(x: torch.Tensor, times: int) -> torch.Tensor:
+        """
+        Repeats the given vector several times.
+        :param x: vector to repeat.
+        :param times: number of times to repeat x.
+        :return: repeated x.
+        """
         return torch.cat((x,) * times, dim=0)
     
     @staticmethod
-    def list_round(x, digits: int) -> list:
+    def list_round(x: Iterable, digits: int) -> list:
+        """
+        Rounds each number in a collection and returns the result.
+        :param x: target collection.
+        :param digits: number of digits after the period to leave.
+        :return: list of rounded elements.
+        """
         if issubclass(type(x), torch.Tensor):
             x = Util.to_numpy(x)
         return [round(y, digits) for y in x]
     
     @staticmethod
     def smooth(p, alpha: float):
+        """
+        Applies probability smoothing, which shifts all probabilities closer to 0.5. This removes
+        problems related to dealing with infinite or large values caused by extreme probabilities.
+        :param p: number, array or tensor.
+        :param alpha: smoothing parameter (between 0 and 1).
+        :return: smoothed p.
+        """
         # smoothing to get rid of 0 and 1 probabilities that lead to saturated gradients
         return (1 - alpha) * p + alpha / 2
     
     @staticmethod
     def unsmooth(p, alpha: float):
+        """
+        Reverse of smooth().
+        :param p: number, array or tensor.
+        :param alpha: smoothing parameter (between 0 and 1).
+        :return: x such that smooth(x) = p.
+        """
         return (p - alpha / 2) / (1 - alpha)
 
     @staticmethod
     def q_values_to_first_probability(qs: torch.Tensor, temperature: float, alpha: float) -> torch.Tensor:
+        """
+        For DQNroute-LE, computes the probability of routing to the first successor of a node based on
+        produced Q values.
+        :param qs: 1D tensor of Q values for each successor of the current node.
+        :param temperature: temperature (T) hyperparameter.
+        :param alpha: probability smoothing parameter (between 0 and 1).
+        :return: the probability of routing to the first successor of a node.
+        """
         return Util.smooth((qs / temperature).softmax(dim=0)[0], alpha)
     
     @staticmethod
     def transform_embeddings(sink_embedding    : torch.Tensor,
                              current_embedding : torch.Tensor,
                              neighbor_embedding: torch.Tensor) -> torch.Tensor:
+        """
+        For DQNroute-LE, subtracts the embedding of the current node from other embeddings.
+        Thus, the embeddings are converted to the inputs of the neural network.
+        :param sink_embedding: embedding of the sink.
+        :param current_embedding: embedding of the current node.
+        :param neighbor_embedding: embedding of the chosen successor of the current node.
+        :return input to the neural network of DQNroute-LE.
+        """
         return torch.cat((sink_embedding     - current_embedding,
                           neighbor_embedding - current_embedding), dim=1)

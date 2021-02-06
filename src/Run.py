@@ -365,7 +365,7 @@ def get_nnet_verifier() -> NNetVerifier:
 
 def get_sources(sink: AgentId) -> List[AgentId]:
     """
-    :return: a list of all sources that are reachable from the specified sink. If a single source
+    :return: the list of all sources that are reachable from the specified sink. If a single source
         was specified in command line arguments, only this source will be returned.
     """
     return [source for source in g.get_sources_for_node(sink)
@@ -373,7 +373,7 @@ def get_sources(sink: AgentId) -> List[AgentId]:
 
 def get_sinks() -> List[Tuple[AgentId, torch.Tensor]]:
     """
-    :return: a list of all sinks. If a single sink was specified in command line arguments, only
+    :return: the list of all sinks. If a single sink was specified in command line arguments, only
         this sink will be returned.
     """
     return [(sink, g.node_to_embeddings(sink, sink)[0]) for sink in g.sinks

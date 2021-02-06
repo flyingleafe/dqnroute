@@ -6,8 +6,23 @@ from .router_graph import RouterGraph
 from ..utils import AgentId
 
 class MarkovAnalyzer:
+    """
+    This class computes the expected delivery time by modeling the delivery process as a discrete Markov
+    chain, where the states correspond to the nodes of the network and the transitions correspond to
+    conveyor sections. The transitions are weighted with conveyor section lengths. 
+    """
+    
     def __init__(self, g: RouterGraph, source: AgentId, sink: AgentId, simple_path_cost: bool = False,
                  verbose: bool = True):
+        """
+        Constructs MarkovAnalyzer for a fixed source/sink pair.
+        :param g: RouterGraph.
+        :param source: the source.
+        :param sink: the sink.
+        :param simple_path_cost: whether to count the number of routing decisions and not the actual
+            delivery time.
+        :param verbose: print more (True/False).
+        """
         self.g = g
         self.source = source
         self.sink = sink
@@ -40,6 +55,7 @@ class MarkovAnalyzer:
             print(f"  parameters: {self.params}")
 
         # fill the system of linear equations
+        # (compute the expected hitting time in a discrete Markov chain)
         for i in range(system_size):
             node_key = self.reachable_nodes[i]
             matrix[i][i] = 1
@@ -83,9 +99,12 @@ class MarkovAnalyzer:
             #print(f"  solution: {self.solution}")
         
     def get_objective(self) -> Tuple[sympy.Expr, Callable]:
+        """
+        Computes the expected delivery cost as a function of routing probabilities.
+        :return (objective as SymPy expression, objective as Callable).
+        """
         source_index = self.reachable_nodes_to_indices[self.source]
         symbolic_objective = sympy.simplify(self.solution[source_index])
         print(f"  E(delivery cost from {self.source} to {self.sink}) = {symbolic_objective}")
         objective = sympy.lambdify(self.params, symbolic_objective)
         return symbolic_objective, objective
-

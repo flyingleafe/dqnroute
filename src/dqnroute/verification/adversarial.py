@@ -16,26 +16,26 @@ class Adversary(ABC):
     def perturb(self, initial_vector: torch.Tensor,
                 get_gradient: Callable[[torch.Tensor], Tuple[torch.Tensor, float]]) -> torch.Tensor:
         """
-        Perturb the given vector. 
+        Perturb the given vector.
         :param initial_vector: initial vector. If this is the original image representation, it must be flattened
             prior to the call (more precisely, it must be of size [1, the_rest]).
         :param get_gradient: a get_gradient function. It accepts the current vector and returns a tuple
             (gradient pointing to the direction of the adversarial attack, the corresponding loss function value).
-        :return: the pertured vector of the same size as initial_vector.
+        :return: the perturbed vector of the same size as initial_vector.
         """
         pass
 
 
 class PGDAdversary(Adversary):
     """
-    Performes Projected Gradient Descent (PGD), or, more precisely, PG ascent according to the provided gradient.
+    Performs projected gradient descent (PGD), or, more precisely, PG ascent according to the provided gradient.
     """
     
     def __init__(self, rho: float = 0.1, steps: int = 25, step_size: float = 0.1, random_start: bool = True,
                  stop_loss: float = 0, verbose: int = 1, norm: str = "scaled_l_2",
                  n_repeat: int = 1, repeat_mode: str = None, dtype: type = torch.float32):
         """
-        Constructs PGDAdversary. 
+        Constructs PGDAdversary.
         :param rho > 0: bound on perturbation norm.
         :param steps: number of steps to perform in each run. Less steps can be done if stop_loss is reached.
         :param step_size: step size. Each step will be of magnitude rho * step_size.
@@ -63,7 +63,7 @@ class PGDAdversary(Adversary):
         self.inf_norm = norm == "l_inf"
         # checks on repeated runs
         assert n_repeat >= 1, "n_repeat must be positive"
-        assert not(n_repeat > 1 and repeat_mode is None), "if n_repeat > 1, repeat_mode must be set" 
+        assert not(n_repeat > 1 and repeat_mode is None), "if n_repeat > 1, repeat_mode must be set"
         assert repeat_mode in [None, "any", "min"], "if repeat_mode is set, it must be either 'any' or 'min'"
         self.n_repeat = n_repeat
         self.shrinking_repeats = repeat_mode == "min"
@@ -174,4 +174,3 @@ class PGDAdversary(Adversary):
                 best_perturbation = perturbation
                 
         return x1 + best_perturbation
-

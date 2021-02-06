@@ -14,6 +14,12 @@ class RouterGraph:
     """
     
     def __init__(self, world: ConveyorsEnvironment):
+        """
+        Constructs RouterGraph based on the description of the conveyor network,
+        inluding the one of the agents. Works only for DQNRoute-LE and requires that
+        all the agents use the same neural network.
+        :param world: ConveyorsEnvironment.
+        """
         # 1. explore
         self.world = world
         self.graph = world.topology_graph
@@ -164,6 +170,13 @@ class RouterGraph:
                                        "by the nondeterminism in computing embeddings.")
     
     def get_conveyor_of_edge(self, from_node: AgentId, to_node: AgentId) -> int:
+        """
+        Finds the index of the conveyor whose section is between the given node. It is assumed
+        that there is exactly one such conveyor section.
+        :param from_node: first node.
+        :param to_node: second node.
+        :return: the index of the conveyor whose section is between from_node and to_node.
+        """
         c_from = self._node_to_conveyor_ids[from_node]
         c_to = self._node_to_conveyor_ids[to_node]
         intersection = list(c_from.intersection(c_to))
@@ -177,6 +190,9 @@ class RouterGraph:
         return intersection[0]
             
     def to_graphviz(self) -> "pygraphviz.AGraph":
+        """
+        :return: Graphviz representation of the graph.
+        """
         import pygraphviz
         gv_graph = pygraphviz.AGraph(directed=True)
         fill_colors = dict(source="#8888FF", sink="#88FF88", diverter="#FF9999", junction="#EEEEEE")
@@ -208,17 +224,29 @@ class RouterGraph:
                 e.attr["label"] = f"{self.get_edge_length(from_node, to_node)} [c{c}]"
         return gv_graph
     
-    def q_forward(self, current_embedding, sink_embedding, neighbor_embedding):
+    def q_forward(self, current_embedding: torch.Tensor, sink_embedding: torch.Tensor,
+                  neighbor_embedding: torch.Tensor) -> torch.Tensor:
+        """
+        Executes the neural network stored in the graph.
+        :param current_embedding: embedding of the current node.
+        :param sink_embedding: embedding of the sink.
+        :param neighbor_embedding: embedding of the chosen successor of the current node.
+        :return: QNetwork output on the given node embeddings.
+        """
         return self.q_network.forward(current_embedding, sink_embedding, neighbor_embedding)
     
     def _compute_reachability_matrix(self):
+        """
+        Computes the reachability matrix of the graph.
+        """
+        # Floyd-Warshall algorithm
         # 1. initialize with self-reachability
         reachable = {(k1, k2): k1 == k2 for k1 in self.node_keys for k2 in self.node_keys}
         # 2. add transitions
         for from_node in self.node_keys:
             for to_node in self.get_out_nodes(from_node):
                 reachable[from_node, to_node] = True
-        # 3. close with Floyd-Warshall
+        # 3. close the transition relation
         for k in self.node_keys:
             for i in self.node_keys:
                 for j in self.node_keys:
@@ -226,6 +254,12 @@ class RouterGraph:
         return reachable
     
     def get_edge_length(self, from_node_key: AgentId, to_node_key: AgentId) -> float:
+        """
+        Get the length of the edge between two nodes. It is required that this edge is unique.
+        :param from_node_key: first node.
+        :param to_node_key: second node.
+        :return: length of the conveyor section between from_node_key and to_node_key.
+        """
         # Igor: the implementation of this method is not very clear.
         node_key = from_node_key
         if from_node_key[0] == "diverter":
@@ -238,10 +272,12 @@ class RouterGraph:
         
     def get_out_nodes(self, node_key: AgentId) -> List[AgentId]:
         """
-        :return the list of successor nodes of node_key. If node_key is a diverter,
+        Get the successors of the given node.
+        :param node_key: node to query.
+        :return: the list of successor nodes of node_key. If node_key is a diverter,
           then the successor nodes will be returned in the following order:
           [0] the next node along the same conveyor;
-          [1] the next node along the different conveyor. 
+          [1] the next node along the different conveyor.
         """
         e = sorted([e[1] for e in self.graph.out_edges(node_key)])
         if len(e) == 2:
@@ -251,19 +287,42 @@ class RouterGraph:
         return e
             
     def get_out_node_indices(self, node_index: int) -> List[int]:
+        """
+        Get the indices of the successors of node with the given index.
+        :param node_index: index of the node to query.
+        :return: the list of the indices of the successor nodes of node_key. Successors are
+            traversed in the order of get_out_nodes().
+        """
         return [self.node_keys_to_indices[key]
                 for key in self.get_out_nodes(self.indices_to_node_keys[node_index])]
     
     def print_reachability_matrix(self):
+        """
+        Prints the reachability matrix to stdout.
+        """
         for from_node in self.node_keys:
             for to_node in self.node_keys:
                 print(1 if self.reachable[from_node, to_node] else 0, end="")
             print(f" # from {from_node}")
     
     def _get_router_embedding(self, router_key: AgentId) -> torch.Tensor:
+        """
+        Get the embedding of the node that corresponds to the given router key. Technically, routers
+        and their nodes correspond to different AgentIds.
+        :param router_key: the node to query.
+        :return: the embedding of router_key.
+        """
         return Util.conditional_to_cuda(torch.DoubleTensor([self.node_repr(router_key[1])]))
     
     def node_to_embeddings(self, current_node: AgentId, sink: AgentId) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+        """
+        Get the embedding of the given node, and also the embeddings of its successors from which the given
+        sink is reachable.
+        :param current_node: current node to query.
+        :param sink: the sink to which the delivery is considered.
+        :return: (embedding of current_node,
+                  list of embeddings of current_node's successors from which sink is reachable).
+        """
         current_router = self.node_to_router[current_node]
         current_embedding = self._get_router_embedding(current_router)
         if current_node[0] == "sink":
@@ -276,4 +335,9 @@ class RouterGraph:
         return current_embedding, out_nodes, out_embeddings
     
     def get_sources_for_node(self, node_key: AgentId) -> List[AgentId]:
+        """
+        Get the sources from which the given node is reachable.
+        :param node_key: node to query.
+        :return: list of sources such that the given node is reachable from them.
+        """
         return [source_key for source_key in self.sources if self.reachable[source_key, node_key]]
