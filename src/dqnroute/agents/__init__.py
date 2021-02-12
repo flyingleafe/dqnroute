@@ -1,6 +1,8 @@
 """
 Contains definitions of `MessageHandler` interface and its implementations.
 """
+from dqnroute.agents.routers.ppo import PPORouterEmbNetwork, PPORouterEmbConveyor
+
 from .base import *
 from .routers import *
 from .conveyors import *
@@ -22,6 +24,7 @@ _network_router_classes = {
     'dqn': DQNRouterNetwork,
     'dqn_oneout': DQNRouterOONetwork,
     'dqn_emb': DQNRouterEmbNetwork,
+    'ppo_emb': PPORouterEmbNetwork,
 }
 
 _conveyors_router_classes = {
@@ -31,8 +34,9 @@ _conveyors_router_classes = {
     # 'glob_dyn': GlobalDynamicRouterConveyor,
     'dqn': DQNRouterConveyor,
     'dqn_oneout': DQNRouterOOConveyor,
-    'dqn_emb': DQNRouterEmbConveyor,
     'centralized_simple': (CentralizedController, CentralizedOracle),
+    'dqn_emb': DQNRouterEmbNetwork,
+    'ppo_emb': PPORouterEmbConveyor,
 }
 
 def get_router_class(router_type: str, context: Optional[str] = None, oracle=False):

@@ -16,7 +16,7 @@ class RouterGraph:
     def __init__(self, world: ConveyorsEnvironment):
         """
         Constructs RouterGraph based on the description of the conveyor network,
-        inluding the one of the agents. Works only for DQNRoute-LE and requires that
+        including the one of the agents. Works only for DQNRoute-LE and requires that
         all the agents use the same neural network.
         :param world: ConveyorsEnvironment.
         """

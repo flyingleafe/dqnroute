@@ -382,7 +382,7 @@ class RewardAgent(object):
         self._pending_pkgs = {}
         self._debug_pkgs = {}
 
-    def registerResentPkg(self, pkg: Package, Q_estimate: float, action, data) -> RewardMsg:
+    def registerResentPkg(self, pkg: Package, Q_estimate: float, action, data, **kwargs) -> RewardMsg:
         rdata = self._getRewardData(pkg, data)
         self._pending_pkgs[pkg.id] = (action, rdata, data)
         

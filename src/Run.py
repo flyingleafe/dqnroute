@@ -46,11 +46,11 @@ parser = argparse.ArgumentParser(
 parser.add_argument("config_files", type=str, nargs="+",
                     help="YAML config file(s) with the conveyor topology graph, input scenario and settings "
                          "of routing algorithms (all files will be concatenated into one)")
-parser.add_argument("--routing_algorithms", type=str, default="dqn_emb,centralized_simple,link_state,simple_q",
-                    help="comma-separated list of routing algorithms to run (possible entries: "
-                         "dqn_emb, centralized_simple, link_state, simple_q)")
+parser.add_argument("--routing_algorithms", type=str, default="dqn_emb,centralized_simple,link_state,simple_q,ppo_emb",
+                    help="comma-separated list of routing algorithms to run "
+                         "(possible entries: dqn_emb, centralized_simple, link_state, simple_q, ppo_emb, random)")
 parser.add_argument("--command", type=str, default="run",
-                    help="one of run, compute_expected_cost, embedding_adversarial_search, "
+                    help="possible options: run, compute_expected_cost, embedding_adversarial_search, "
                          "embedding_adversarial_verification, q_adversarial_search, q_adversarial_verification")
 parser.add_argument("--random_seed", type=int, default=42,
                     help="random seed for pretraining and training")
@@ -113,15 +113,26 @@ args = parser.parse_args()
 # dqn_emb = DQNroute-LE, centralized_simple = BSR
 assert len(args.routing_algorithms) > 0, "--routing_algorithms cannot be empty"
 router_types = re.split(", *", args.routing_algorithms)
-router_types_supported = "dqn_emb centralized_simple link_state simple_q".split(" ")
+router_types_supported = "dqn_emb ppo_emb centralized_simple link_state simple_q".split(" ")
 assert len(set(router_types) - set(router_types_supported)) == 0,\
     f"unsupported algorithm in --routing_algorithms was found; supported ones: {router_types_supported}"
+
 if "dqn_emb" in router_types:
     # always process dqn_emb first
     router_types.remove("dqn_emb")
     router_types.insert(0, "dqn_emb")
-nn_loading_needed = router_types[0] == "dqn_emb" or args.command != "run"
 
+if "ppo_emb" in router_types:
+    # always process ppo_emb second
+    router_types.remove("ppo_emb")
+    router_types.insert(0, "ppo_emb")
+
+
+nn_loading_needed = "dqn_emb" in router_types or args.command != "run"
+dqn_emb_exists = "dqn_emb" in router_types or args.command != "run"
+ppo_emb_exists = "ppo_emb" in router_types
+
+# Create directories for logs and results
 for dirname in ["../logs", "../img"]:
     os.makedirs(dirname, exist_ok=True)
 
@@ -137,7 +148,7 @@ scenario = yaml.safe_load(string_scenario)
 print(f"Configuration files: {args.config_files}")
 
 router_settings = scenario["settings"]["router"]
-emb_dim = router_settings["dqn_emb"]["embedding"]["dim"]
+emb_dim = router_settings["embedding"]["dim"]
 softmax_temperature = router_settings["dqn"]["softmax_temperature"]
 probability_smoothing = router_settings["dqn"]["probability_smoothing"]
 
@@ -268,7 +279,8 @@ dir_with_models = "conveyor_test_ng"
 pretrain_filename = f"pretrained{filename_suffix}"
 pretrain_path = Path(TORCH_MODELS_DIR) / dir_with_models / pretrain_filename
 do_pretrain = args.force_pretrain or not pretrain_path.exists()
-if nn_loading_needed:
+if dqn_emb_exists:
+    # In this case right now we have dqn_emp only
     if do_pretrain:
         print(f"Pretraining {pretrain_path}...")
         pretrain(args, dir_with_models, pretrain_filename)
@@ -276,7 +288,7 @@ if nn_loading_needed:
         print(f"Using the already pretrained model {pretrain_path}...")
 
 
-# 3. train (only for dqn_emb)
+# 3. train (only for dqn_emb) (not a true)
 
 # TODO check whether setting a random seed makes training deterministic
 
@@ -291,6 +303,7 @@ def run_single(run_params: dict, router_type: str, random_seed: int, **kwargs):
 
 def train(args, dir_with_models: str, pretrain_filename: str, train_filename: str,
           router_type: str, retrain: bool, work_with_files: bool):
+
     if router_type == "dqn_emb":
         # specify a file with the brain to be loaded by each dqn_emb router
         scenario["settings"]["router"]["dqn_emb"]["load_filename"] = pretrain_filename
@@ -300,8 +313,10 @@ def train(args, dir_with_models: str, pretrain_filename: str, train_filename: st
                 del os.environ["OMIT_TRAINING"]
         else:
             os.environ["OMIT_TRAINING"] = "True"
-    event_series, runner = run_single(run_params=scenario, router_type=router_type, progress_step=500,
+
+    event_series, runner = run_single(run_params=scenario, router_type=router_type, progress_step=2000,
                                       ignore_saved=[True], random_seed=args.random_seed)
+
     if router_type == "dqn_emb":
         world = runner.world
         some_router = next(iter(next(iter(world.handlers.values())).routers.values()))
@@ -319,6 +334,7 @@ def train(args, dir_with_models: str, pretrain_filename: str, train_filename: st
                 net.restore()
     else:
         world = None
+
     return event_series, world
     
 
@@ -334,10 +350,11 @@ if nn_loading_needed:
 
 
 # 4. load the router graph
-if nn_loading_needed:
+if dqn_emb_exists:
     g = RouterGraph(world)
     print("Reachability matrix:")
     g.print_reachability_matrix()
+
 
 def visualize(g: RouterGraph):
     gv_graph = g.to_graphviz()
@@ -350,18 +367,22 @@ def visualize(g: RouterGraph):
             print(f"Drawing {path} ...")
             gv_graph.draw(path, prog=prog, args="-Gdpi=300 -Gmargin=0 -Grankdir=LR")
 
+
 if nn_loading_needed and not args.skip_graphviz:
     visualize(g)
+
 
 def get_symbolic_analyzer() -> SymbolicAnalyzer:
     return SymbolicAnalyzer(g, softmax_temperature, probability_smoothing,
                             args.verification_lr, delta_q_max=args.input_max_delta_q)
+
 
 def get_nnet_verifier() -> NNetVerifier:
     assert args.marabou_path is not None,\
         "You must specify --verification_marabou_path for command embedding_adversarial_verification."
     return NNetVerifier(g, args.marabou_path, NETWORK_FILENAME, PROPERTY_FILENAME, probability_smoothing,
                         softmax_temperature, emb_dim, args.linux_marabou_memory_limit_mb)
+
 
 def get_sources(sink: AgentId) -> List[AgentId]:
     """
@@ -371,6 +392,7 @@ def get_sources(sink: AgentId) -> List[AgentId]:
     return [source for source in g.get_sources_for_node(sink)
             if args.single_source is None or source[1] == args.single_source]
 
+
 def get_sinks() -> List[Tuple[AgentId, torch.Tensor]]:
     """
     :return: the list of all sinks. If a single sink was specified in command line arguments, only
@@ -378,6 +400,7 @@ def get_sinks() -> List[Tuple[AgentId, torch.Tensor]]:
     """
     return [(sink, g.node_to_embeddings(sink, sink)[0]) for sink in g.sinks
             if args.single_sink is None or sink[1] == args.single_sink]
+
 
 def get_source_sink_pairs(message: str, ma_verbose: bool = False) -> \
         Generator[Tuple[AgentId, AgentId, torch.Tensor, MarkovAnalyzer], None, None]:
@@ -387,13 +410,16 @@ def get_source_sink_pairs(message: str, ma_verbose: bool = False) -> \
             print(f"{message} from {source} to {sink}...")
             ma = MarkovAnalyzer(g, source, sink, args.simple_path_cost, ma_verbose)
             yield source, sink, sink_embedding, ma 
-    
+
+
 def get_learning_step_indices() -> Optional[Set[int]]:
     if args.learning_step_indices is None:
         return None
     return set([int(s) for s in args.learning_step_indices.split(",")])
 
+
 print(f"Running command {args.command}...")
+
 
 # Simulate and make plots
 if args.command == "run":
@@ -401,14 +427,16 @@ if args.command == "run":
         "networks": {
             "link_state": "Shortest paths", "simple_q": "Q-routing", "pred_q": "PQ-routing",
             "glob_dyn": "Global-dynamic", "dqn": "DQN", "dqn_oneout": "DQN (1-out)",
-            "dqn_emb": "DQN-LE", "centralized_simple": "Centralized control"
+            "dqn_emb": "DQN-LE", "centralized_simple": "Centralized control", "ppo_emb": "PPO"
         }, "conveyors": {
             "link_state": "Vyatkin-Black", "simple_q": "Q-routing", "pred_q": "PQ-routing",
             "glob_dyn": "Global-dynamic", "dqn": "DQN", "dqn_oneout": "DQN (1-out)",
-            "dqn_emb": "DQN-LE", "centralized_simple": "BSR"
+            "dqn_emb": "DQN-LE", "centralized_simple": "BSR", "ppo_emb": "PPO"
         }
     }
+
     _targets = {"time": "avg", "energy": "sum", "collisions": "sum"}
+
     _ylabels = {
         "time": "Mean delivery time",
         "energy": "Total energy consumption",
@@ -418,7 +446,7 @@ if args.command == "run":
     
     series = []
     # reuse the log for dqn_emb:
-    if router_types[0] == "dqn_emb":
+    if "dqn_emb" in router_types:
         series += [dqn_log.getSeries(add_avg=True)]
     # perform training/simulation with other approaches
     for router_type in router_types:
