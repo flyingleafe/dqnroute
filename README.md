@@ -41,7 +41,7 @@ The changes w.r.t. the original DQNroute are:
 Run the script [Run.py](/src/Run.py) from the "src" directory. You can get a summary of its command line arguments by running it as follows:
 ```console
 cd src
-python src/Run.py -h
+python Run.py -h
 ```
 
 Most likely, you will need its "run" command, which, by default, will run DQNroute and several other algorithms (not based on neural networks) for comparison. Run it without arguments to get help on command line options. With them, you can configure which algorithms are executed and whether a pretrained neural network is loaded from a file. Once all the algorithms are run, this command will create delivery time and energy consumption plots. Also note that you need to provide additional configuration file(s) to this script. They are explained in more detail below in Section 5.
