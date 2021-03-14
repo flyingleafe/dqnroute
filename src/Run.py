@@ -292,30 +292,24 @@ if dqn_emb_exists:
 
 # TODO check whether setting a random seed makes training deterministic
 
-def run_single(run_params: dict, router_type: str, random_seed: int, **kwargs):
+def run_single(run_params: dict, router_type: str, random_seed: int, omit_training: bool, **kwargs):
     job_id = mk_job_id(router_type, random_seed)
     with tqdm(desc=job_id) as bar:
         queue = DummyProgressbarQueue(bar)
         runner = ConveyorsRunner(run_params=run_params, router_type=router_type, random_seed=random_seed,
-                                 progress_queue=queue, **kwargs)
+                                 progress_queue=queue, omit_training=omit_training, **kwargs)
         event_series = runner.run(**kwargs)
     return event_series, runner
 
 def train(args, dir_with_models: str, pretrain_filename: str, train_filename: str,
           router_type: str, retrain: bool, work_with_files: bool):
-
+    omit_training = False
     if router_type == "dqn_emb":
         # specify a file with the brain to be loaded by each dqn_emb router
         scenario["settings"]["router"]["dqn_emb"]["load_filename"] = pretrain_filename
-        if retrain:
-            # TODO get rid of this environmental variable
-            if "OMIT_TRAINING" in os.environ:
-                del os.environ["OMIT_TRAINING"]
-        else:
-            os.environ["OMIT_TRAINING"] = "True"
-
-    event_series, runner = run_single(run_params=scenario, router_type=router_type, progress_step=2000,
-                                      ignore_saved=[True], random_seed=args.random_seed)
+        omit_training = not retrain
+    event_series, runner = run_single(scenario, router_type, args.random_seed, omit_training,
+                                      progress_step=2000, ignore_saved=[True])
 
     if router_type == "dqn_emb":
         world = runner.world
@@ -328,7 +322,7 @@ def train(args, dir_with_models: str, pretrain_filename: str, train_filename: st
                 if some_router.use_single_neural_network:
                     net.save()
                 else:
-                    print("Warning: saving/loaded models trained in simulation is only implemented "
+                    print("Warning: saving/loading models trained in simulation is only implemented "
                          "when use_single_neural_network = True. The models were not saved to disk.")
             else:
                 net.restore()

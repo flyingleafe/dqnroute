@@ -434,8 +434,12 @@ class ConveyorsRunner(SimulationRunner):
     """
     context = 'conveyors'
 
-    def __init__(self, data_dir=LOG_DATA_DIR+'/conveyors', **kwargs):
+    def __init__(self, data_dir=LOG_DATA_DIR+'/conveyors', omit_training: bool = False, **kwargs):
+        """
+        :param omit_training: whether to skip simulation & training when run.
+        """
         super().__init__(data_dir=data_dir, **kwargs)
+        self.omit_training = omit_training
 
     def makeDataSeries(self, series_period, series_funcs):
         time_series = event_series(series_period, series_funcs)
@@ -479,11 +483,11 @@ class ConveyorsRunner(SimulationRunner):
         # Little pause in order to let all initialization messages settle
         yield self.env.timeout(1)
 
-        bag_id = 1
-        
         # added by Igor to support loading already trained models
-        if "OMIT_TRAINING" in os.environ:
+        if self.omit_training:
             return
+        
+        bag_id = 1
         
         for period in bag_distr['sequence']:
             try:
