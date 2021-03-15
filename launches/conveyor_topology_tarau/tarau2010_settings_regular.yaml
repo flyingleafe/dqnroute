@@ -15,6 +15,9 @@ settings:
     stop_delay: 40
     slowdown_delay: 1
   router:
+    embedding:
+      alg: 'lap'
+      dim: 8
     simple_q:
       energy_reward_weight: 0.4 # * 0.0002
       learning_rate: 0.5
