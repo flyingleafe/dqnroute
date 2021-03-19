@@ -204,7 +204,7 @@ class NetworkRunner(SimulationRunner):
 
                 if action == 'break_link':
                     if is_random:
-                        i = random.randint(0, len(all_edges-1))
+                        i = random.randint(0, len(all_edges - 1))
                         u, v, ps = all_edges.pop(i)
                         broken_edges.append((u, v, ps))
                     else:
@@ -217,7 +217,7 @@ class NetworkRunner(SimulationRunner):
                         if len(broken_edges) == 0:
                             continue
 
-                        i = random.randint(0, len(broken_edges-1))
+                        i = random.randint(0, len(broken_edges - 1))
                         u, v, ps = broken_edges.pop(i)
                         all_edges.append((u, v, ps))
                     else:
@@ -246,7 +246,7 @@ class NetworkRunner(SimulationRunner):
                     srcs = random.sample(sources, simult_sources)
                     for src in srcs:
                         dst = random.choice(dests)
-                        pkg = Package(pkg_id, DEF_PKG_SIZE, dst, self.env.now, None) # create empty packet
+                        pkg = Package(pkg_id, DEF_PKG_SIZE, dst, self.env.now, None)  # create empty packet
                         logger.debug(f"Sending random pkg #{pkg_id} from {src} to {dst} at time {self.env.now}")
                         yield self.world.handleWorldEvent(PkgEnqueuedEvent(('world', 0), src, pkg))
                         pkg_id += 1

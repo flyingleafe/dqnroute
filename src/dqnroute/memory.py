@@ -1,5 +1,7 @@
 import random
-import numpy
+import numpy as np
+from collections import defaultdict
+
 
 class AbstractMemory:
     def add(self, sample):
@@ -7,6 +9,7 @@ class AbstractMemory:
 
     def sample(self, n):
         pass
+
 
 class Memory(AbstractMemory):
     samples = []
@@ -26,13 +29,14 @@ class Memory(AbstractMemory):
         n = min(n, len(self.samples))
         return random.sample(self.samples, n)
 
+
 class SumTree:
     write = 0
 
     def __init__(self, capacity):
         self.capacity = capacity
-        self.tree = numpy.zeros( 2*capacity - 1 )
-        self.data = numpy.zeros( capacity, dtype=object )
+        self.tree = np.zeros( 2*capacity - 1 )
+        self.data = np.zeros( capacity, dtype=object )
 
     def _propagate(self, idx, change):
         parent = (idx - 1) // 2
@@ -78,6 +82,7 @@ class SumTree:
         dataIdx = idx - self.capacity + 1
         return (idx, self.tree[idx], self.data[dataIdx])
 
+
 class PrioritizedMemory(AbstractMemory):
     e = 0.01
     a = 0.6
@@ -109,3 +114,67 @@ class PrioritizedMemory(AbstractMemory):
     def update(self, idx, error):
         p = self._getPriority(error)
         self.tree.update(idx, p)
+
+
+class PPOMemory(AbstractMemory):
+    def __init__(self, batch_size):
+        self.addr_idxs = []
+        self.dst_idxs = []
+        self.action_idxs = []
+        self.probs = []
+        self.q_estimates = []
+        self.neighbours = []
+        self.rewards = []
+        self.values = []
+
+        self.batch_size = batch_size
+
+    def sample(self):
+        batches_starts = np.arange(0, len(self.rewards), self.batch_size)
+
+        idxs = np.arange(0, len(self.rewards))
+        np.random.shuffle(idxs)
+
+        batches = np.array([idxs[i:i + self.batch_size] for i in batches_starts])
+
+        return \
+            np.array(self.addr_idxs),\
+            np.array(self.dst_idxs),\
+            np.array(self.action_idxs),\
+            np.array(self.probs),\
+            np.array(self.q_estimates),\
+            self.neighbours,\
+            np.array(self.rewards),\
+            np.array(self.values), \
+            batches
+
+    # def add(self, addr_idx, dst_idx, action_idx, prob, q_estimate, neighbours, reward, v_func):
+    def add(self, sample):
+        addr_idx, dst_idx, action_idx, prob, q_estimate, neighbours, reward, v_func = sample
+        self.addr_idxs.append(addr_idx)
+        self.dst_idxs.append(dst_idx)
+        self.action_idxs.append(action_idx)
+        self.probs.append(prob)
+        self.q_estimates.append(q_estimate)
+        self.neighbours.append(neighbours)
+        self.rewards.append(reward)
+        self.values.append(v_func)
+
+    def clear_memory(self):
+        self.addr_idxs = []
+        self.dst_idxs = []
+        self.action_idxs = []
+        self.probs = []
+        self.q_estimates = []
+        self.neighbours = []
+        self.rewards = []
+        self.values = []
+
+    def __len__(self):
+        return len(self.rewards)
+
+
+class ReinforceMemory(AbstractMemory):
+    def __init__(self):
+        super(ReinforceMemory, self).__init__()
+        # TODO implement

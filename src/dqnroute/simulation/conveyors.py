@@ -19,6 +19,7 @@ from .network import RouterFactory
 
 logger = logging.getLogger(DQNROUTE_LOGGER)
 
+
 DIVERTER_RANGE = 0.5
 REAL_BAG_RADIUS = 0.5
 
@@ -188,6 +189,10 @@ class ConveyorsEnvironment(MultiAgentEnv):
 
             assert bag.id in self.current_bags, "why leave twice??"
             self.current_bags.pop(action.bag.id)
+
+            # fix to make reinforce work
+            from ..agents.routers.reinforce import PackageHistory
+            PackageHistory.finishHistory(bag)
 
             self.data_series.logEvent('time', self.env.now, self.env.now - action.bag.start_time)
             return Event(self.env).succeed()
@@ -526,6 +531,11 @@ class ConveyorsRunner(SimulationRunner):
                             yield self.env.timeout(mini_delta)
 
                         dst = random.choice(cur_sinks)
+
+                        # fix to make reinforce work
+                        from dqnroute.agents.routers.reinforce import PackageHistory
+                        PackageHistory.started_packages.add(bag_id)
+
                         bag = Bag(bag_id, ('sink', dst), self.env.now, None)
                         logger.debug(f"Sending random bag #{bag_id} from {src} to {dst} at time {self.env.now}")
                         yield self.world.handleWorldEvent(BagAppearanceEvent(src, bag))

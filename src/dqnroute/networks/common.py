@@ -33,6 +33,18 @@ def get_optimizer(name, params={}):
     else:
         raise Exception('Invalid optimizer: ' + str(name))
 
+def get_distance_function(name):
+    if type(name) != str:
+        return name
+    if name == 'euclid':
+        return euclidean_distance
+    elif name == 'linear':
+        pass
+    elif name == 'cosine':
+        pass
+    else:
+        raise Exception(f'Invalid distance function: {str(name)}')
+
 def atleast_dim(x: torch.Tensor, dim: int, axis=0) -> torch.Tensor:
     while x.dim() < dim:
         x = x.unsqueeze(axis)
@@ -93,3 +105,17 @@ class SaveableModel(nn.Module):
 
     def restore(self):
         return self.load_state_dict(torch.load(self._savepath()))
+
+
+# distance functions
+def euclidean_distance(allowed_neighbours: torch.Tensor, existing_state: torch.Tensor):
+    sum = torch.sum((allowed_neighbours - existing_state) ** 2, dim=1)
+    return torch.sqrt(sum)
+
+
+def linear_distance(existing_state: torch.Tensor, predicted_state: torch.Tensor):
+    pass  # TODO Implement
+
+
+def cosine_distance(existing_state, predicted_state):
+    pass  # TODO Implement

@@ -21,16 +21,13 @@ settings:
     stop_delay: 40
     slowdown_delay: 1
   router:
-    embedding:
-      alg: 'lap'
-      dim: 10
     simple_q:
       energy_reward_weight: 0.4 # * 0.0002
       learning_rate: 0.5
     dqn: &dqn
       energy_reward_weight: 1
       optimizer: 'rmsprop'
-      scope: 'conveyor_test_ng'
+      scope: 'conveyor_models_dqn'
       activation: 'relu'
       layers: [ 64, 64 ]
       additional_inputs:
@@ -50,9 +47,33 @@ settings:
         alg: 'lap'
         dim: 10
     ppo_emb:
+      distance_function: 'euclid'
       energy_reward_weight: 0.5
-      state_shape: 10
+      additional_inputs:
+        - tag: 'amatrix'
+      actor:
+        optimizer: 'adam'
+        layers: [64, 64]
+        activation: 'relu'
+      critic:
+        optimizer: 'adam'
+        layers: [64, 64]
+        activation: 'relu'
       embedding:
         alg: 'lap'
         dim: 10
+    reinforce_emb:
       distance_function: 'euclid'
+      energy_reward_weight: 0.5
+      additional_inputs:
+        - tag: 'amatrix'
+      actor:
+        optimizer: 'adam'
+        layers: [ 64, 64 ]
+        activation: 'relu'
+      embedding:
+        alg: 'lap'
+        dim: 10
+    embedding:
+      alg: 'lap'
+      dim: 10

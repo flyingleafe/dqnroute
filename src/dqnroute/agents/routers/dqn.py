@@ -26,7 +26,7 @@ class SharedBrainStorage:
     
     @staticmethod
     def load(brain_loader: Callable[[], QNetwork], no_nodes: int) -> QNetwork:
-        if SharedBrainStorage.INSTANCE == None:
+        if SharedBrainStorage.INSTANCE is None:
             SharedBrainStorage.INSTANCE = brain_loader()
         SharedBrainStorage.PROCESSED_NODES += 1
         #print(f"Brain initialization: {SharedBrainStorage.PROCESSED_NODES} / {no_nodes} agents")
