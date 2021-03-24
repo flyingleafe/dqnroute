@@ -78,7 +78,7 @@ class DQNRouter(LinkStateRouter, RewardAgent):
                     b.init_xavier()
                 else:
                     if load_filename is not None:
-                        b._label = load_filename
+                        b.change_label(load_filename)
                     b.restore()
             return b
         if use_single_neural_network:
@@ -257,8 +257,13 @@ class DQNRouterEmb(DQNRouterOO):
         super().__init__(**kwargs)
 
     def _makeBrain(self, additional_inputs=[], **kwargs):
-        return QNetwork(len(self.nodes), additional_inputs=additional_inputs,
-                        embedding_dim=self.embedding.dim, one_out=True, **kwargs)
+        # return QNetwork(len(self.nodes), additional_inputs=additional_inputs,
+        #                 embedding_dim=self.embedding.dim, one_out=True, **kwargs)
+        # In order to use DQN without CombinedModel uncomment lines above
+        return CombinedNetwork(
+            len(self.nodes), additional_inputs=additional_inputs,
+            embedding_dim=self.embedding.dim, one_out=True, **kwargs
+        )
 
     def _nodeRepr(self, node):
         return self.embedding.transform(node).astype(np.float32)

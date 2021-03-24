@@ -263,7 +263,8 @@ def dqn_pretrain(
             epochs_losses.append(sum_loss / loss_cnt)
         if pretrain_filename is not None:
             # label changed by Igor:
-            net._label = pretrain_filename
+            net.change_label(pretrain_filename)
+            # net._label = pretrain_filename
             net.save()
         return epochs_losses
 
@@ -392,7 +393,8 @@ def pretrain_ppo(
                 loss_cnt += 1
             critic_losses.append(sum_loss / loss_cnt)
         if critic_pretrain_filename is not None:
-            net._label = critic_pretrain_filename
+            net.change_label(pretrain_filename)
+            # net._label = critic_pretrain_filename
             net.save()
         return np.array(critic_losses, dtype=np.float32)
 
@@ -406,7 +408,8 @@ def pretrain_ppo(
                 loss_cnt += 1
             actor_losses.append(sum_loss / loss_cnt)
         if actor_pretrain_filename is not None:
-            net._label = actor_pretrain_filename
+            net.change_label(pretrain_filename)
+            # net._label = actor_pretrain_filename
             net.save()
         return np.array(actor_losses, dtype=np.float32)
 
@@ -535,7 +538,8 @@ def pretrain_reinforce(
                 loss_cnt += 1
             actor_losses.append(sum_loss / loss_cnt)
         if actor_pretrain_filename is not None:
-            net._label = actor_pretrain_filename
+            net.change_label(pretrain_filename)
+            # net._label = actor_pretrain_filename
             net.save()
         return np.array(actor_losses, dtype=np.float32)
 
@@ -720,10 +724,12 @@ def train_ppo(
         some_router = next(iter(next(iter(world.handlers.values())).routers.values()))
 
         actor_model = some_router.actor
-        actor_model._label = actor_train_filename
+        actor_model.change_label(actor_train_filename)
+        # actor_model._label = actor_train_filename
 
         critic_model = some_router.critic
-        critic_model._label = critic_train_filename
+        critic_model.change_label(critic_train_filename)
+        # critic_model._label = critic_train_filename
 
         if work_with_files:
             if retrain:
@@ -769,7 +775,8 @@ def train_reinforce(
         some_router = next(iter(next(iter(world.handlers.values())).routers.values()))
 
         actor_model = some_router.actor
-        actor_model._label = train_filename
+        actor_model.change_label(train_filename)
+        # actor_model._label = train_filename
 
         if work_with_files:
             if retrain:
@@ -818,7 +825,8 @@ def train(
         world = runner.world
         some_router = next(iter(next(iter(world.handlers.values())).routers.values()))
         net = some_router.brain
-        net._label = train_filename
+        net.change_label(train_filename)
+        # net._label = train_filename
         # save or load the trained network
         if work_with_files:
             if retrain:

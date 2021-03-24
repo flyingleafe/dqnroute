@@ -64,7 +64,8 @@ class PPORouterEmb(LinkStateRouter, RewardAgent):
             actor_model = PPOActor(**actor_args)
 
             if actor_load_filename is not None:
-                actor_model._label = actor_load_filename
+                actor_model.change_label(actor_load_filename)
+                # actor_model._label = actor_load_filename
                 actor_model.restore()
             else:
                 actor_model.init_xavier()
@@ -80,7 +81,8 @@ class PPORouterEmb(LinkStateRouter, RewardAgent):
             critic_model = PPOCritic(**critic_args)
 
             if critic_load_filename is not None:
-                critic_model._label = critic_load_filename
+                critic_model.change_label(critic_load_filename)
+                # critic_model._label = critic_load_filename
                 critic_model.restore()
             else:
                 critic_model.init_xavier()

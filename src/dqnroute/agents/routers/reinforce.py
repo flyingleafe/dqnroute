@@ -164,7 +164,8 @@ class Reinforce(LinkStateRouter, RewardAgent):
             # Init net weights
             if load_filename is not None:
                 # Get pretrained net from file
-                actor_model._label = load_filename
+                actor_model.change_label(load_filename)
+                # actor_model._label = load_filename
                 actor_model.restore()
             else:
                 # Create net from scratch

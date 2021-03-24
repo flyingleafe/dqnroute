@@ -20,6 +20,42 @@ def _transform_add_inputs(n, add_inputs):
 
     return [(inp['tag'], _get_dim(inp)) for inp in add_inputs]
 
+
+class CombinedNetwork(SaveableModel):
+    def __init__(self, *args, **kwargs):
+        super(CombinedNetwork, self).__init__()
+
+        self.fst_model = QNetwork(*args, **kwargs)
+        self.snd_model = QNetwork(*args, **kwargs)
+        # TODO Add some other params if you need something
+
+    def init_xavier(self):
+        self.fst_model.init_xavier()
+        self.snd_model.init_xavier()
+
+    def forward(self, addr, dst, neighbour, *others):
+        fst_result = self.fst_model(addr, dst, neighbour, *others)
+        snd_result = self.snd_model(addr, dst, neighbour, *others)
+
+        # TODO implement
+        return self.fst_model.forward(addr, dst, neighbour, *others)
+
+    # SaveableModel part
+
+    def save(self):
+        fst_save_result = self.fst_model.save()
+        snd_save_result = self.snd_model.save()
+        return fst_save_result, snd_save_result
+
+    def restore(self):
+        self.fst_model.change_label('pretrained_10_20_original_example_graph__original_example_settings_break_test.bin')
+        self.snd_model.change_label('pretrained_10_20_original_example_graph__original_example_settings_break_test.bin')
+
+        fst_restore_result = self.fst_model.restore()
+        snd_restore_result = self.snd_model.restore()
+        return fst_restore_result, snd_restore_result
+
+
 class QNetwork(SaveableModel):
     """
     Simple Q-network with one-hot encoded inputs
@@ -109,3 +145,6 @@ class QNetwork(SaveableModel):
             output = torch.add(output, inf_mask)
 
         return output
+
+    def change_label(self, new_label_value):
+        self._label = new_label_value
