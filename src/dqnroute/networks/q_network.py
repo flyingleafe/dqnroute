@@ -42,15 +42,18 @@ class CombinedNetwork(SaveableModel):
 
     # SaveableModel part
 
+    def change_label(self, _):
+        self.fst_model.change_label(
+            'pretrained_10_20_original_example_graph__original_example_settings_energy_test.bin')
+        self.snd_model.change_label(
+            'pretrained_10_20_original_example_graph__original_example_settings_energy_test.bin')
+
     def save(self):
         fst_save_result = self.fst_model.save()
         snd_save_result = self.snd_model.save()
         return fst_save_result, snd_save_result
 
     def restore(self):
-        self.fst_model.change_label('pretrained_10_20_original_example_graph__original_example_settings_break_test.bin')
-        self.snd_model.change_label('pretrained_10_20_original_example_graph__original_example_settings_break_test.bin')
-
         fst_restore_result = self.fst_model.restore()
         snd_restore_result = self.snd_model.restore()
         return fst_restore_result, snd_restore_result
