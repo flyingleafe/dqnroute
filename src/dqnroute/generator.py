@@ -7,6 +7,7 @@ import numpy as np
 import networkx as nx
 import pandas as pd
 import pprint
+import copy
 import os
 
 from .utils import *
@@ -48,8 +49,11 @@ def _gen_episodes(
         num_episodes: int,
         bar=None,
         sinks=None,
-        random_seed=None
+        random_seed=None,
+        use_full_topology=True
 ) -> pd.DataFrame:
+    print(f'Use full topolology: {use_full_topology}')
+
     G = factory.topology_graph
     nodes = sorted(G.nodes)
     n = len(nodes)
@@ -58,17 +62,26 @@ def _gen_episodes(
         G, nodelist=nodes, weight=factory.edge_weight, dtype=np.float32)
     gstate = np.ravel(amatrix)
 
-    best_transitions = defaultdict(dict)
-    lengths = defaultdict(dict)
+    # edges_indexes = []
+    # for from_idx, from_node in enumerate(nodes):
+    #     for to_idx, to_node in enumerate(nodes):
+    #         if amatrix[from_idx][to_idx] > 0:
+    #             # edge exists
+    #             edges_indexes.append((from_node, to_node))
+    #             assert nx.path_weight(G, [from_node, to_node], weight=factory.edge_weight) == amatrix[from_idx][to_idx]
+    # edges_indexes = np.array(edges_indexes)
 
-    for start_node in nodes:
-        for finish_node in nodes:
-            if start_node != finish_node and nx.has_path(G, start_node, finish_node):
-                path = nx.dijkstra_path(G, start_node, finish_node, weight=factory.edge_weight)
-                length = nx.dijkstra_path_length(G, start_node, finish_node, weight=factory.edge_weight)
+    # best_transitions = defaultdict(dict)
+    # lengths = defaultdict(dict)
 
-                best_transitions[start_node][finish_node] = path[1] if len(path) > 1 else start_node
-                lengths[start_node][finish_node] = length
+    # Shortest path preprocessing
+    # for start_node in nodes:
+    #     for finish_node in nodes:
+    #         if start_node != finish_node and nx.has_path(G, start_node, finish_node):
+    #             path = nx.dijkstra_path(G, start_node, finish_node, weight=factory.edge_weight)
+    #             length = nx.path_weight(G, path, weight=factory.edge_weight)
+    #             best_transitions[start_node][finish_node] = path[1] if len(path) > 1 else start_node
+    #             lengths[start_node][finish_node] = length
 
     if sinks is None:
         sinks = nodes
@@ -106,17 +119,31 @@ def _gen_episodes(
 
     df = pd.DataFrame(columns=cols)
 
-    if random_seed is not None:
-        set_random_seed(random_seed)
 
     pkg_id = 1
     episode = 0
     while episode < num_episodes:
+        current_graph = copy.deepcopy(G)
+        # if not use_full_topology:
+        #     np.random.shuffle(edges_indexes)
+        #     remove_edge_count = np.random.randint(0, len(edges_indexes) // 4)
+        #
+        #     for edge in edges_indexes[:remove_edge_count]:
+        #         u = (edge[0][0], int(edge[0][1]))
+        #         v = (edge[1][0], int(edge[1][1]))
+        #         current_graph.remove_edge(u, v)
+
+        amatrix = nx.convert_matrix.to_numpy_array(
+            current_graph, nodelist=nodes, weight=factory.edge_weight, dtype=np.float32)
+        gstate = np.ravel(amatrix)
+
         dst = random.choice(sinks)
-        cur = random.choice(only_reachable(G, dst, nodes))
+        cur = random.choice(only_reachable(current_graph, dst, nodes))
+        if cur == dst:
+            continue
         router = routers[cur]
-        out_nbrs = G.successors(router.id)
-        nbrs = only_reachable(G, dst, out_nbrs)
+        out_nbrs = current_graph.successors(router.id)
+        nbrs = only_reachable(current_graph, dst, out_nbrs)
 
         if len(nbrs) == 0:
             continue
@@ -125,8 +152,10 @@ def _gen_episodes(
 
         # ppo addition
         if 'ppo' in router_type:
-            next_addr = best_transitions[cur][dst]
-            full_path_length = -lengths[cur][dst]
+            path = nx.dijkstra_path(G, cur, dst, weight=factory.edge_weight)
+            # print(path, cur, dst)
+            next_addr = path[1]
+            full_path_length = -nx.path_weight(G, path, weight=factory.edge_weight)
 
             row = [cur[1], dst[1]] + gstate.tolist() + [next_addr[1], full_path_length]
             df.loc[len(df)] = row
@@ -172,9 +201,9 @@ def gen_episodes(
         router_params={},
         save_path=None,
         ignore_saved=False,
-        run_params={}
+        run_params={},
+        use_full_topology=True
 ) -> pd.DataFrame:
-
     if save_path is not None:
         if not ignore_saved and os.path.isfile(save_path):
             df = pd.read_csv(save_path, index_col=False)
@@ -195,7 +224,9 @@ def gen_episodes(
     else:
         factory = runner.world.factory.sub_factory
 
-    df = _gen_episodes(router_type, one_out, factory, num_episodes, sinks=sinks, bar=bar, random_seed=random_seed)
+    df = _gen_episodes(
+        router_type, one_out, factory, num_episodes, sinks=sinks, bar=bar, random_seed=random_seed,
+        use_full_topology=use_full_topology)
 
     if save_path is not None:
         df.to_csv(save_path, index=False)

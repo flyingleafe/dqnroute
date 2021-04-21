@@ -24,7 +24,7 @@ from dqnroute.generator import gen_episodes
 from dqnroute.networks.common import get_optimizer
 from dqnroute.networks.embeddings import Embedding, LaplacianEigenmap
 from dqnroute.networks.q_network import QNetwork
-from dqnroute.networks.ppo_actor_critic_networks import PPOActor, PPOCritic
+from dqnroute.networks.actor_critic_networks import PPOActor, PPOCritic
 from dqnroute.simulation.common import mk_job_id, add_cols, DummyProgressbarQueue
 from dqnroute.simulation.conveyors import ConveyorsRunner
 from dqnroute.utils import AgentId, get_amatrix_cols, make_batches, stack_batch, mk_num_list
@@ -132,7 +132,6 @@ nn_loading_needed = "dqn_emb" in router_types or args.command != "run"
 
 random_seed = args.random_seed
 
-
 # Create directories for logs and results
 for dirname in ['../logs', '../img']:
     os.makedirs(dirname, exist_ok=True)
@@ -148,7 +147,7 @@ scenario = yaml.safe_load(string_scenario)
 print(f"Configuration files: {args.config_files}")
 
 router_settings = scenario["settings"]["router"]
-emb_dim = router_settings["dqn_emb"]["embedding"]["dim"]  # TODO put embedding info out of router settings
+emb_dim = router_settings["embedding"]["dim"]
 softmax_temperature = router_settings["dqn"]["softmax_temperature"]
 probability_smoothing = router_settings["dqn"]["probability_smoothing"]
 
@@ -161,9 +160,10 @@ filename_suffix = "__".join(filename_suffix)
 filename_suffix = f"_{emb_dim}_{graph_size}_{filename_suffix}.bin"
 print(f"Embedding dimension: {emb_dim}, graph size: {graph_size}")
 
-
-# 2. supervised pretraining (dqn_emb ppo_emb reinforce_emb)
-""" Almost copied from the pretraining notebook. """
+# pretrain common params and function
+pretrain_data_size = args.pretrain_num_episodes
+pretrain_epochs_num = args.pretrain_num_epochs
+force_pretrain = args.force_pretrain
 
 
 def gen_episodes_progress(router_type, num_episodes, **kwargs):
@@ -203,15 +203,36 @@ def add_inp_cols(tag, dim):
     return mk_num_list(tag + "_", dim) if dim > 1 else tag
 
 
-# dqn_emb pretraining
-def dqn_pretrain(
+# train common params and function
+train_data_size = args.train_num_episodes
+force_train = args.force_train
+
+
+# TODO check whether setting a random seed makes training deterministic
+def run_single(
+        run_params: dict,
+        router_type: str,
+        random_seed: int,
+        **kwargs
+):
+    job_id = mk_job_id(router_type, random_seed)
+    with tqdm(desc=job_id) as bar:
+        queue = DummyProgressbarQueue(bar)
+        runner = ConveyorsRunner(run_params=run_params, router_type=router_type, random_seed=random_seed,
+                                 progress_queue=queue, omit_training=False, **kwargs)
+        event_series = runner.run(**kwargs)
+    return event_series, runner
+
+
+# DQN part (pre-train + train)
+def pretrain_dqn(
         generated_data_size: int,
         num_epochs: int,
         dir_with_models: str,
         pretrain_filename: str = None,
-        pretrain_dataset_filename: str = None
+        pretrain_dataset_filename: str = None,
+        use_full_topology: bool = True,
 ):
-
     def qnetwork_batches(net, data, batch_size=64, embedding=None):
         n = graph_size
         data_cols = []
@@ -275,7 +296,8 @@ def dqn_pretrain(
         context="conveyors",
         random_seed=random_seed,
         run_params=scenario,
-        save_path=pretrain_dataset_filename
+        save_path=pretrain_dataset_filename,
+        use_full_topology=use_full_topology
     )
     data_conv.loc[:, "working"] = 1.0
     shuffled_data = data_conv.sample(frac=1)
@@ -296,13 +318,136 @@ def dqn_pretrain(
         embedding=conv_emb
     )
 
-    # conveyor_network_ng_emb_ws = QNetwork(graph_size, additional_inputs=[{"tag": "working", "dim": 1}], **args)
-    # conveyor_network_ng_emb_ws_losses = qnetwork_pretrain(conveyor_network_ng_emb_ws, shuffle(data_conv), epochs=20,
-    #                                                       embedding=conv_emb, save_net=False)
     return conveyor_network_ng_emb_losses
 
 
-# ppo_emb pretraining
+def train_dqn(
+        progress_step: int,
+        router_type: str,
+        dir_with_models: str,
+        pretrain_filename: str,
+        train_filename: str,
+        random_seed: int,
+        work_with_files: bool,
+        retrain: bool,
+        use_reinforce: bool = True,
+        use_combined_model: bool = False
+):
+    scenario["settings"]["router"][router_type]["use_reinforce"] = use_reinforce
+    scenario["settings"]["router"][router_type]["use_combined_model"] = use_combined_model
+    scenario["settings"]["router"][router_type]["scope"] = dir_with_models
+    scenario["settings"]["router"][router_type]["load_filename"] = pretrain_filename
+
+    if retrain:
+        # TODO get rid of this environmental variable
+        if "OMIT_TRAINING" in os.environ:
+            del os.environ["OMIT_TRAINING"]
+    else:
+        os.environ["OMIT_TRAINING"] = "True"
+
+    event_series, runner = run_single(
+        run_params=scenario,
+        router_type=router_type,
+        progress_step=progress_step,
+        ignore_saved=[True],
+        random_seed=random_seed
+    )
+
+    world = runner.world
+    some_router = next(iter(next(iter(world.handlers.values())).routers.values()))
+
+    net = some_router.brain
+    net.change_label(train_filename)
+
+    # save or load the trained network
+    if work_with_files:
+        if retrain:
+            if some_router.use_single_neural_network:
+                net.save()
+            else:
+                print(
+                    "Warning: saving/loading models trained in simulation is only implemented "
+                    "when use_single_neural_network = True. The models were not saved to disk."
+                )
+        else:
+            net.restore()
+
+    return event_series, world
+
+
+def dqn_experiments(
+        n: int,
+        use_combined_model: bool = True,
+        use_full_topology: bool = True,
+        use_reinforce: bool = True,
+        process_pretrain: bool = True,
+        process_train: bool = True
+):
+    dqn_logs = []
+
+    for _ in range(n):
+        if process_pretrain:
+            print('Pretraining DQN Models...')
+            dqn_losses = pretrain_dqn(
+                pretrain_data_size,
+                pretrain_epochs_num,
+                dir_with_models,
+                pretrain_filename,
+                data_path,
+                use_full_topology=use_full_topology,
+            )
+        else:
+            print(f'Using the already pretrained model...')
+
+        if process_train:
+            print('Training DQN Model...')
+            dqn_log, dqn_world = train_dqn(
+                train_data_size,
+                'dqn_emb',
+                dir_with_models,
+                pretrain_filename,
+                train_filename,
+                random_seed,
+                True,
+                True,
+                use_reinforce=use_reinforce,
+                use_combined_model=use_combined_model
+            )
+        else:
+            print('Skip training process...')
+
+        dqn_logs.append(dqn_log.getSeries(add_avg=True))
+
+    return dqn_logs
+
+
+# whole pipeline
+if dqn_emb_exists:
+    dqn_serieses = []
+
+    dqn_emp_config = scenario['settings']['router']['dqn_emb']
+
+    dir_with_models = 'conveyor_models_dqn'
+
+    pretrain_filename = f'pretrained{filename_suffix}'
+    pretrain_path = Path(TORCH_MODELS_DIR) / dir_with_models / pretrain_filename
+
+    data_filename = f'pretrain_data_ppo{filename_suffix}'
+    data_path = f'../logs/{data_filename}'
+
+    train_filename = f'trained{filename_suffix}'
+    train_path = Path(TORCH_MODELS_DIR) / dir_with_models / train_filename
+
+    do_pretrain = force_pretrain or not pretrain_path.exists() or True
+    do_train = force_train or not train_path.exists() or args.command == 'run' or True
+
+    print(f'Model: {pretrain_path}')
+
+    dqn_combined_model_results = dqn_experiments(1, True, True, True, False, True)
+    dqn_single_model_results = dqn_experiments(1, False, True, True, False, True)
+
+
+# PPO part (pre-train + train)
 def pretrain_ppo(
         generated_data_size: int,
         num_epochs: int,
@@ -313,7 +458,6 @@ def pretrain_ppo(
         critic_pretrain_filename: str = None,
         pretrain_dataset_filename: str = None
 ) -> Tuple[np.ndarray, np.ndarray]:
-
     def ppo_batches(data, batch_size=64, embedding=None):
         n = graph_size
         amatrix_cols = get_amatrix_cols(n)
@@ -462,6 +606,115 @@ def pretrain_ppo(
     return actor_losses, critic_losses
 
 
+def train_ppo(
+        progress_step: int,
+        router_type: str,
+        dir_with_models: str,
+        actor_pretrain_filename: str,
+        critic_pretrain_filename: str,
+        actor_train_filename: str,
+        critic_train_filename: str,
+        random_seed: int,
+        work_with_files: bool,
+        retrain: bool
+):
+    scenario["settings"]["router"][router_type]["dir_with_models"] = dir_with_models
+    scenario["settings"]["router"][router_type]["actor_load_filename"] = actor_pretrain_filename
+    scenario["settings"]["router"][router_type]["critic_load_filename"] = critic_pretrain_filename
+
+    event_series, runner = run_single(
+        run_params=scenario,
+        router_type=router_type,
+        progress_step=progress_step,
+        ignore_saved=[True],
+        random_seed=random_seed
+    )
+
+    world = runner.world
+    some_router = next(iter(next(iter(world.handlers.values())).routers.values()))
+
+    actor_model = some_router.actor
+    actor_model.change_label(actor_train_filename)
+
+    critic_model = some_router.critic
+    critic_model.change_label(critic_train_filename)
+
+    if work_with_files:
+        if retrain:
+            if False:  # some_router.use_single_neural_network: TODO implement
+                actor_model.save()
+                critic_model.save()
+            else:
+                print("Warning: saving/loaded models trained in simulation is only implemented "
+                      "when use_single_neural_network = True. The models were not saved to disk.")
+        else:
+            actor_model.restore()
+            critic_model.restore()
+
+    return event_series, world
+
+
+if ppo_emb_exists:
+    ppo_emb_config = scenario['settings']['router']['ppo_emb']
+    actor_config = ppo_emb_config['actor']
+    critic_config = ppo_emb_config['critic']
+
+    dir_with_models = 'conveyor_models_ppo'
+
+    actor_pretrain_filename = f'actor_pretrained{filename_suffix}'
+    actor_pretrain_path = Path(TORCH_MODELS_DIR) / dir_with_models / actor_pretrain_filename
+
+    critic_pretrain_filename = f'critic_pretrained{filename_suffix}'
+    critic_pretrain_path = Path(TORCH_MODELS_DIR) / dir_with_models / critic_pretrain_filename
+
+    actor_trained_filename = f'actor_trained{filename_suffix}'
+    actor_trained_path = Path(TORCH_MODELS_DIR) / dir_with_models / actor_trained_filename
+
+    critic_trained_filename = f'critic_trained{filename_suffix}'
+    critic_trained_path = Path(TORCH_MODELS_DIR) / dir_with_models / critic_trained_filename
+
+    do_pretrain = force_pretrain or not actor_pretrain_path.exists() or not critic_pretrain_path.exists()
+    do_train = force_train or not actor_trained_path.exists() or not critic_trained_path.exists()
+
+    print(f'Actor: {actor_pretrain_path}')
+    print(f'Critic: {critic_pretrain_path}')
+
+    if do_pretrain:
+        print('Pretraining PPO Models...')
+        actor_losses, critic_losses = pretrain_ppo(
+            pretrain_data_size,
+            pretrain_epochs_num,
+            actor_config,
+            critic_config,
+            dir_with_models,
+            actor_pretrain_filename,
+            critic_pretrain_filename,
+            '../logs/data_conveyor_ppo.csv'
+        )
+        print(f'Actor loss: {actor_losses.tolist()}')
+        print(f'Critic loss: {critic_losses.tolist()}')
+    else:
+        print('Using already pretrained models')
+
+    if do_train:
+        print('Training PPO Model...')
+        ppo_log, ppo_world = train_ppo(
+            train_data_size,
+            'ppo_emb',
+            dir_with_models,
+            actor_pretrain_filename,
+            critic_pretrain_filename,
+            actor_trained_filename,
+            critic_trained_filename,
+            random_seed,
+            True,
+            True
+        )
+    else:
+        print('Skip training process...')
+
+
+# REINFORCE part (pre-train + train)
 def pretrain_reinforce(
         generated_data_size: int,
         num_epochs: int,
@@ -470,7 +723,6 @@ def pretrain_reinforce(
         actor_pretrain_filename: str = None,
         pretrain_dataset_filename: str = None
 ) -> np.ndarray:
-
     def reinforce_batches(data, batch_size=64, embedding=None):
         n = graph_size
         amatrix_cols = get_amatrix_cols(n)
@@ -538,7 +790,7 @@ def pretrain_reinforce(
                 loss_cnt += 1
             actor_losses.append(sum_loss / loss_cnt)
         if actor_pretrain_filename is not None:
-            net.change_label(pretrain_filename)
+            net.change_label(actor_pretrain_filename)
             # net._label = actor_pretrain_filename
             net.save()
         return np.array(actor_losses, dtype=np.float32)
@@ -570,184 +822,6 @@ def pretrain_reinforce(
     return actor_losses
 
 
-# pretrain common params
-pretrain_data_size = args.pretrain_num_episodes
-pretrain_epochs_num = args.pretrain_num_epochs
-force_pretrain = args.force_pretrain
-
-
-# ppo_emb pretrain
-if ppo_emb_exists:
-    ppo_emb_config = scenario['settings']['router']['ppo_emb']
-    actor_config = ppo_emb_config['actor']
-    critic_config = ppo_emb_config['critic']
-
-    dir_with_models = 'conveyor_models_ppo'
-
-    actor_pretrain_filename = f'actor_pretrained{filename_suffix}'
-    actor_pretrain_path = Path(TORCH_MODELS_DIR) / dir_with_models / actor_pretrain_filename
-
-    critic_pretrain_filename = f'critic_pretrained{filename_suffix}'
-    critic_pretrain_path = Path(TORCH_MODELS_DIR) / dir_with_models / critic_pretrain_filename
-
-    do_pretrain = force_pretrain or not actor_pretrain_path.exists() or not critic_pretrain_path.exists()
-
-    print(f'Actor: {actor_pretrain_path}')
-    print(f'Critic: {critic_pretrain_path}')
-
-    if do_pretrain:
-        print('Pretraining PPO Models...')
-        actor_losses, critic_losses = pretrain_ppo(
-            pretrain_data_size,
-            pretrain_epochs_num,
-            actor_config,
-            critic_config,
-            dir_with_models,
-            actor_pretrain_filename,
-            critic_pretrain_filename,
-            '../logs/data_conveyor_ppo.csv'
-        )
-        print(f'Actor loss: {actor_losses.tolist()}')
-        print(f'Critic loss: {critic_losses.tolist()}')
-    else:
-        print('Using already pretrained models')
-
-
-# dqn_emb pretrain
-if dqn_emb_exists:
-    dqn_emp_config = scenario['settings']['router']['dqn_emb']
-
-    dir_with_models = 'conveyor_models_dqn'
-
-    pretrain_filename = f'pretrained{filename_suffix}'
-    pretrain_path = Path(TORCH_MODELS_DIR) / dir_with_models / pretrain_filename
-
-    data_filename = f'pretrain_data_ppo{filename_suffix}'
-    data_path = f'../logs/{data_filename}'
-
-    do_pretrain = force_pretrain or not pretrain_path.exists()
-
-    print(f'Model: {pretrain_path}')
-    if do_pretrain:
-        print('Pretraining DQN Models...')
-        dqn_losses = dqn_pretrain(
-            pretrain_data_size,
-            pretrain_epochs_num,
-            dir_with_models,
-            pretrain_filename,
-            data_path
-        )
-    else:
-        print(f'Using the already pretrained model...')
-
-
-# reinforce_emb pretrain
-if reinforce_emb_exists:
-    reinforce_emb_config = scenario['settings']['router']['reinforce_emb']
-    reinforce_config = reinforce_emb_config['actor']
-
-    dir_with_models = 'conveyor_models_reinforce'
-
-    reinforce_pretrain_filename = f'actor_pretrained{filename_suffix}'
-    reinforce_pretrain_path = Path(TORCH_MODELS_DIR) / dir_with_models / reinforce_pretrain_filename
-
-    do_pretrain = force_pretrain or not reinforce_pretrain_path.exists()
-
-    print(f'Actor: {reinforce_pretrain_path}')
-
-    if do_pretrain:
-        print('Pretraining REINFORCE Models...')
-        reinforce_losses = pretrain_reinforce(
-            pretrain_data_size,
-            pretrain_epochs_num,
-            reinforce_config,
-            dir_with_models,
-            reinforce_pretrain_filename,
-            '../logs/data_conveyor_reinforce.csv'
-        )
-        print(f'Actor loss: {reinforce_losses.tolist()}')
-    else:
-        print('Using already pretrained models')
-
-
-# 3. train
-# TODO check whether setting a random seed makes training deterministic
-def run_single(
-        run_params: dict,
-        router_type: str,
-        random_seed: int,
-        **kwargs
-):
-    job_id = mk_job_id(router_type, random_seed)
-    with tqdm(desc=job_id) as bar:
-        queue = DummyProgressbarQueue(bar)
-        runner = ConveyorsRunner(run_params=run_params, router_type=router_type, random_seed=random_seed,
-                                 progress_queue=queue, omit_training = False, **kwargs)
-        event_series = runner.run(**kwargs)
-    return event_series, runner
-
-def train_ppo(
-        progress_step: int,
-        router_type: str,
-        dir_with_models: str,
-        actor_pretrain_filename: str,
-        critic_pretrain_filename: str,
-        actor_train_filename: str,
-        critic_train_filename: str,
-        random_seed: int,
-        work_with_files: bool,
-        retrain: bool
-):
-    if router_type == 'ppo_emb':
-        scenario["settings"]["router"]["ppo_emb"]["dir_with_models"] = dir_with_models
-
-        scenario["settings"]["router"]["ppo_emb"]["actor_load_filename"] = actor_pretrain_filename
-        scenario["settings"]["router"]["ppo_emb"]["critic_load_filename"] = critic_pretrain_filename
-
-        # if retrain:
-        #     # TODO get rid of this environmental variable
-        #     if "OMIT_TRAINING" in os.environ:
-        #         del os.environ["OMIT_TRAINING"]
-        # else:
-        #     os.environ["OMIT_TRAINING"] = "True"
-
-    event_series, runner = run_single(
-        run_params=scenario,
-        router_type=router_type,
-        progress_step=progress_step,
-        ignore_saved=[True],
-        random_seed=random_seed
-    )
-
-    if router_type == "ppo_emb":
-        world = runner.world
-        some_router = next(iter(next(iter(world.handlers.values())).routers.values()))
-
-        actor_model = some_router.actor
-        actor_model.change_label(actor_train_filename)
-        # actor_model._label = actor_train_filename
-
-        critic_model = some_router.critic
-        critic_model.change_label(critic_train_filename)
-        # critic_model._label = critic_train_filename
-
-        if work_with_files:
-            if retrain:
-                if False:  # some_router.use_single_neural_network: TODO implement
-                    actor_model.save()
-                    critic_model.save()
-                else:
-                    print("Warning: saving/loaded models trained in simulation is only implemented "
-                          "when use_single_neural_network = True. The models were not saved to disk.")
-            else:
-                actor_model.restore()
-                critic_model.restore()
-    else:
-        world = None
-
-    return event_series, world
-
-
 def train_reinforce(
         progress_step: int,
         router_type: str,
@@ -758,9 +832,8 @@ def train_reinforce(
         work_with_files: bool,
         retrain: bool
 ):
-    if router_type == 'reinforce_emb':
-        scenario["settings"]["router"]["reinforce_emb"]["dir_with_models"] = dir_with_models
-        scenario["settings"]["router"]["reinforce_emb"]["load_filename"] = pretrain_filename
+    scenario["settings"]["router"][router_type]["dir_with_models"] = dir_with_models
+    scenario["settings"]["router"][router_type]["load_filename"] = pretrain_filename
 
     event_series, runner = run_single(
         run_params=scenario,
@@ -770,49 +843,93 @@ def train_reinforce(
         random_seed=random_seed
     )
 
-    if router_type == "reinforce_emb":
-        world = runner.world
-        some_router = next(iter(next(iter(world.handlers.values())).routers.values()))
+    world = runner.world
+    some_router = next(iter(next(iter(world.handlers.values())).routers.values()))
 
-        actor_model = some_router.actor
-        actor_model.change_label(train_filename)
-        # actor_model._label = train_filename
+    actor_model = some_router.actor
+    actor_model.change_label(train_filename)
 
-        if work_with_files:
-            if retrain:
-                # print(dir(some_router))
-                if some_router.use_single_network:
-                    actor_model.save()
-                else:
-                    print("Warning: saving/loaded models trained in simulation is only implemented "
-                          "when use_single_neural_network = True. The models were not saved to disk.")
+    if work_with_files:
+        if retrain:
+            # print(dir(some_router))
+            if some_router.use_single_network:
+                actor_model.save()
             else:
-                actor_model.restore()
-    else:
-        world = None
+                print("Warning: saving/loaded models trained in simulation is only implemented "
+                      "when use_single_neural_network = True. The models were not saved to disk.")
+        else:
+            actor_model.restore()
 
     return event_series, world
+
+
+# pretrain
+if reinforce_emb_exists:
+    reinforce_serieses = []
+
+    from dqnroute.agents.routers.reinforce import PackageHistory
+    from collections import defaultdict
+
+    reinforce_emb_config = scenario['settings']['router']['reinforce_emb']
+    reinforce_config = reinforce_emb_config['actor']
+
+    dir_with_models = 'conveyor_models_reinforce'
+
+    reinforce_pretrain_filename = f'pretrained{filename_suffix}'
+    reinforce_pretrain_path = Path(TORCH_MODELS_DIR) / dir_with_models / reinforce_pretrain_filename
+
+    trained_filename = f'actor_trained{filename_suffix}'
+    trained_path = Path(TORCH_MODELS_DIR) / dir_with_models / trained_filename
+
+    do_pretrain = force_pretrain or not reinforce_pretrain_path.exists() or True
+    do_train = force_train or not trained_path.exists() or True
+
+    print(f'Reinforce model: {reinforce_pretrain_path}')
+
+    for _ in range(10):
+        PackageHistory.routers = defaultdict(dict)
+        PackageHistory.rewards = defaultdict(list)
+        PackageHistory.log_probs = defaultdict(list)
+        PackageHistory.finished_packages = set()
+        PackageHistory.started_packages = set()
+
+        if do_pretrain:
+            print('Pretraining REINFORCE Models...')
+            reinforce_losses = pretrain_reinforce(
+                pretrain_data_size,
+                pretrain_epochs_num,
+                reinforce_config,
+                dir_with_models,
+                reinforce_pretrain_filename,
+                '../logs/data_conveyor_reinforce.csv'
+            )
+            print(f'Actor loss: {reinforce_losses.tolist()}')
+        else:
+            print('Using already pretrained models')
+
+        if do_train:
+            print('Training REINFORCE Model...')
+            reinforce_log, reinforce_world = train_reinforce(
+                train_data_size,
+                'reinforce_emb',
+                dir_with_models,
+                reinforce_pretrain_filename,
+                trained_filename,
+                random_seed,
+                True,
+                True
+            )
+        else:
+            print('Skip training process...')
+
+        reinforce_serieses.append(reinforce_log.getSeries(add_avg=True))
 
 
 def train(
         progress_step: int,
         router_type: str,
-        pretrain_filename: str,
-        train_filename: str,
         random_seed: int,
-        work_with_files: bool,
-        retrain: bool,
 ):
-    if router_type == 'dqn_emb':
-        # specify a file with the brain to be loaded by each dqn_emb router
-        scenario["settings"]["router"]["dqn_emb"]["load_filename"] = pretrain_filename
-        if retrain:
-            # TODO get rid of this environmental variable
-            if "OMIT_TRAINING" in os.environ:
-                del os.environ["OMIT_TRAINING"]
-        else:
-            os.environ["OMIT_TRAINING"] = "True"
-
     event_series, runner = run_single(
         run_params=scenario,
         router_type=router_type,
@@ -821,118 +938,9 @@ def train(
         random_seed=random_seed
     )
 
-    if router_type == "dqn_emb":
-        world = runner.world
-        some_router = next(iter(next(iter(world.handlers.values())).routers.values()))
-        net = some_router.brain
-        net.change_label(train_filename)
-        # net._label = train_filename
-        # save or load the trained network
-        if work_with_files:
-            if retrain:
-                if some_router.use_single_neural_network:
-                    net.save()
-                else:
-
-                    print("Warning: saving/loading models trained in simulation is only implemented "
-                         "when use_single_neural_network = True. The models were not saved to disk.")
-            else:
-                net.restore()
-    else:
-        world = None
+    world = None
 
     return event_series, world
-
-
-# train common params
-train_data_size = args.train_num_episodes
-force_train = args.force_train
-
-# ppo train
-if ppo_emb_exists:
-    dir_with_models = 'conveyor_models_ppo'
-
-    actor_trained_filename = f'actor_trained{filename_suffix}'
-    actor_trained_path = Path(TORCH_MODELS_DIR) / dir_with_models / actor_trained_filename
-
-    critic_trained_filename = f'critic_trained{filename_suffix}'
-    critic_trained_path = Path(TORCH_MODELS_DIR) / dir_with_models / critic_trained_filename
-
-    do_train = force_train or not actor_trained_path.exists() or not critic_trained_path.exists()
-
-    print(f'Actor: {actor_trained_path}')
-    print(f'Critic: {critic_trained_path}')
-    if do_train:  # TODO ????????
-        print('Training PPO Model...')
-    else:
-        print('Using already trained models...')
-
-    ppo_log, ppo_world = train_ppo(
-        train_data_size,
-        'ppo_emb',
-        dir_with_models,
-        actor_pretrain_filename,
-        critic_pretrain_filename,
-        actor_trained_filename,
-        critic_trained_filename,
-        random_seed,
-        True,
-        True
-    )
-
-# reinforce train
-if reinforce_emb_exists:
-    dir_with_models = 'conveyor_models_reinforce'
-
-    trained_filename = f'actor_trained{filename_suffix}'
-    trained_path = Path(TORCH_MODELS_DIR) / dir_with_models / trained_filename
-
-    do_train = force_train or not trained_path.exists()
-
-
-    print(f'Reinforce model: {trained_path}')
-    if do_train:
-        print('Training REINFORCE Model...')
-        reinforce_log, reinforce_world = train_reinforce(
-            train_data_size,
-            'reinforce_emb',
-            dir_with_models,
-            reinforce_pretrain_filename,
-            trained_filename,
-            random_seed,
-            True,
-            True
-        )
-    else:
-        print('Using already trained models...')
-
-
-# dqn train
-if dqn_emb_exists:
-    dir_with_models = 'conveyor_models_dqn'
-
-    train_filename = f'trained{filename_suffix}'
-    train_path = Path(TORCH_MODELS_DIR) / dir_with_models / train_filename
-
-    do_train = force_train or not train_path.exists() or args.command == 'run'
-
-    print(f'Model: {train_path}')
-    if do_train:
-        print('Training DQN Model...')
-    else:
-        print('Using the already trained model...')
-
-    print(pretrain_filename)
-
-    dqn_log, dqn_world = train(
-        train_data_size,
-        'dqn_emb',
-        pretrain_filename,
-        train_filename,
-        random_seed,
-        True,
-        True
-    )
 
 
 # 4. load the router graph
@@ -947,13 +955,6 @@ def visualize(g: RouterGraph):
             path = f"{prog_prefix}{fmt}"
             print(f"Drawing {path} ...")
             gv_graph.draw(path, prog=prog, args="-Gdpi=300 -Gmargin=0 -Grankdir=LR")
-
-
-# if dqn_emb_exists:
-#     g = RouterGraph(dqn_world)
-#     visualize(g)
-#     print("Reachability matrix:")
-#     g.print_reachability_matrix()
 
 
 def get_symbolic_analyzer() -> SymbolicAnalyzer:
@@ -1004,7 +1005,6 @@ def get_learning_step_indices() -> Optional[Set[int]]:
 
 print(f"Running command {args.command}...")
 
-
 # Simulate and make plots
 if args.command == "run":
     _legend_txt_replace = {
@@ -1032,24 +1032,55 @@ if args.command == "run":
     series = []
     series_types = []
 
-    # reuse the log for ppo_emb
+    def get_results(results, name):
+        global series
+        global series_types
+
+        basic_series = None
+
+        for s in results:
+            if basic_series is None:
+                basic_series = s
+            else:
+                basic_series += s
+        basic_series /= len(results)
+
+        series += [basic_series]
+        series_types += [name]
+
+        print(f'{name} mean delivery time: {np.mean(basic_series["time_avg"])}')
+        print(f'{name} mean energy consumption: {np.mean(basic_series["energy_avg"])}')
+        print(f'{name} sum collision number: {np.sum(basic_series["collisions_sum"])}')
+
+        return basic_series
+
+    if dqn_emb_exists:
+        single_series = get_results(dqn_single_model_results, 'DQN-LE-SINGLE')
+        combined_series = get_results(dqn_combined_model_results, 'DQN-LE-COMBINED')
+
+
     if ppo_emb_exists:
         series += [ppo_log.getSeries(add_avg=True)]
+        print(np.mean(series[-1]['time_avg']))
         series_types += ['ppo_emb']
 
-    # reuse the log for dqn_emb
-    if dqn_emb_exists:
-        series += [dqn_log.getSeries(add_avg=True)]
-        series_types += ['dqn_emb']
-
     if reinforce_emb_exists:
-        series += [reinforce_log.getSeries(add_avg=True)]
+        reinforce_basic_series = None
+        for s in reinforce_serieses:
+            if reinforce_basic_series is None:
+                reinforce_basic_series = s
+            else:
+                reinforce_basic_series += s
+        reinforce_basic_series /= len(reinforce_serieses)
+
+        series += [reinforce_basic_series]
+        print(f'REINFORCE mean time: {np.mean(reinforce_basic_series["energy_sum"])}')
         series_types += ['reinforce_emb']
 
     # perform training/simulation with other approaches
     for router_type in router_types:
         if router_type != "dqn_emb" and router_type != 'ppo_emb' and router_type != 'reinforce_emb':
-            s, _ = train(args, dir_with_models, pretrain_filename, train_filename, router_type, True, False)
+            s, _ = train(train_data_size, router_type, random_seed)
             series += [s.getSeries(add_avg=True)]
             series_types += [router_type]
 
@@ -1060,15 +1091,17 @@ if args.command == "run":
         dfs.append(df)
     dfs = pd.concat(dfs, axis=0)
 
+
     def print_sums(df):
         for tp in router_types:
             x = df.loc[df["router_type"] == tp, "count"].sum()
             txt = _legend_txt_replace.get(tp, tp)
             print(f"  {txt}: {x}")
 
-    def plot_data(data, meaning="time", figsize=(15,5), xlim=None, ylim=None,
-              xlabel="Simulation time", ylabel=None, font_size=14, title=None, save_path=None,
-              draw_collisions=False, context="networks", **kwargs):
+
+    def plot_data(data, meaning="time", figsize=(15, 5), xlim=None, ylim=None,
+                  xlabel="Simulation time", ylabel=None, font_size=14, title=None, save_path=None,
+                  draw_collisions=False, context="networks", **kwargs):
         if "time" not in data.columns:
             datas = split_dataframe(data, preserved_cols=["router_type", "seed"])
             for tag, df in datas:
@@ -1093,7 +1126,7 @@ if args.command == "run":
         handles, labels = ax.get_legend_handles_labels()
         new_labels = list(map(lambda l: _legend_txt_replace[context].get(l, l), labels[:]))
         ax.legend(handles=handles[:], labels=new_labels, fontsize=font_size)
-        ax.tick_params(axis="both", which="both", labelsize=int(font_size*0.75))
+        ax.tick_params(axis="both", which="both", labelsize=int(font_size * 0.75))
         if xlim is not None:
             ax.set_xlim(xlim)
         if ylim is not None:
@@ -1106,8 +1139,12 @@ if args.command == "run":
         if save_path is not None:
             fig.savefig(f"../img/{save_path}", bbox_inches="tight")
 
+
     plot_data(dfs, figsize=(14, 8), font_size=22,
-              time_save_path="time-plot.pdf", energy_save_path="energy-plot.pdf")
+              time_save_path="time-plot.pdf",
+              energy_save_path="energy-plot.pdf",
+              collisions_save_path='collisions-plot.pdf'
+              )
 
 # Compute the expression of the expected delivery cost and evaluate it
 elif args.command == "compute_expected_cost":
@@ -1133,6 +1170,7 @@ elif args.command == "embedding_adversarial_search":
         embedding_packer = EmbeddingPacker(g, sink, sink_embedding, ma.reachable_nodes)
         _, lambdified_objective = ma.get_objective()
 
+
         def get_gradient(x: torch.Tensor) -> Tuple[torch.Tensor, float, str]:
             """
             :param x: parameter vector (the one expected to converge to an adversarial example)
@@ -1148,6 +1186,7 @@ elif args.command == "embedding_adversarial_search":
             aux_info = ", ".join([f"{param}={value.detach().cpu().item():.4f}"
                                   for param, value in zip(ma.params, objective_inputs)])
             return x.grad, objective_value.item(), f"[{aux_info}]"
+
 
         best_embedding = adv.perturb(embedding_packer.initial_vector(), get_gradient)
         _, objective, aux_info = get_gradient(best_embedding)
@@ -1180,7 +1219,7 @@ elif args.command == "q_adversarial_search":
                 # compute
                 # we assume a linear change of parameters
                 reference_q = sa.compute_gradients(current_embedding, sink_embedding,
-                                                    neighbor_embedding).flatten().item()
+                                                   neighbor_embedding).flatten().item()
                 actual_qs = np.linspace(-sa.delta_q_max, sa.delta_q_max,
                                         args.q_adversarial_no_points) + reference_q
                 kappa, lambdified_kappa = sa.get_transformed_cost(ma, objective, args.cost_bound)
@@ -1188,16 +1227,16 @@ elif args.command == "q_adversarial_search":
                 for i, actual_q in enumerate(actual_qs):
                     ps = sa.compute_ps(ma, sink, sink_embeddings, reference_q, actual_q)
                     objective_values[i] = lambdified_objective(*ps)
-                    kappa_values[i]     = lambdified_kappa(*ps)
-                #print(((objective_values > args.cost_bound) != (kappa_values > 0)).sum())
+                    kappa_values[i] = lambdified_kappa(*ps)
+                # print(((objective_values > args.cost_bound) != (kappa_values > 0)).sum())
                 fig, axes = plt.subplots(3, 1, figsize=(10, 10))
                 plt.subplots_adjust(hspace=0.4)
                 caption_starts = *(["Delivery cost (τ)"] * 2), "Transformed delivery cost (κ)"
-                values         = *([objective_values   ] * 2), kappa_values
+                values = *([objective_values] * 2), kappa_values
                 axes[0].set_yscale("log")
                 for ax, caption_start, values in zip(axes, caption_starts, values):
                     label = (f"{caption_start} from {source} to {sink} when making optimization"
-                                f" step with current={node_key}, neighbor={neighbor_key}")
+                             f" step with current={node_key}, neighbor={neighbor_key}")
                     print(f"    Plotting: {caption_start}...")
                     ax.set_title(label)
                     ax.plot(actual_qs, values)
@@ -1209,7 +1248,7 @@ elif args.command == "q_adversarial_search":
                 for i in range(2):
                     axes[i].hlines(args.cost_bound, min(actual_qs), max(actual_qs))
                 axes[2].hlines(0, min(actual_qs), max(actual_qs))
-                plt.savefig(f"../img/{filename_suffix}_{learning_step_index}.pdf", bbox_inches = "tight")
+                plt.savefig(f"../img/{filename_suffix}_{learning_step_index}.pdf", bbox_inches="tight")
                 plt.close()
                 print(f"    Empirically found maximum of τ: {objective_values.max():.6f}")
                 print(f"    Empirically found maximum of κ: {kappa_values.max():.6f}")

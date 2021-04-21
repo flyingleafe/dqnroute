@@ -10,7 +10,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.distributions.categorical import Categorical
-from dqnroute.networks.ppo_actor_critic_networks import PPOActor
+from dqnroute.networks.actor_critic_networks import PPOActor
 
 
 class PackageHistory:
@@ -203,7 +203,8 @@ class Reinforce(LinkStateRouter, RewardAgent):
             PackageHistory.addToHistory(msg.pkg, self, reward, action_log_prob)
 
             if len(PackageHistory.finished_packages) > 128:
-                PackageHistory.learn()
+                # PackageHistory.learn()
+                pass
 
             return []
         else:

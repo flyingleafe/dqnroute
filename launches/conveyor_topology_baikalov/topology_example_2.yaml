@@ -54,7 +54,7 @@ configuration:
     0:
       conveyor: 0
       pos: 5
-      upstream_conv: 1
+      upstream_conv: 2
     1:
       conveyor: 0
       pos: 45

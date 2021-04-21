@@ -47,7 +47,10 @@ class DQNRouter(LinkStateRouter, RewardAgent):
                  optimizer='rmsprop', brain=None, random_init=False, max_act_time=None,
                  additional_inputs=[], softmax_temperature: float = 1.5,
                  probability_smoothing: float = 0.0, load_filename: str = None,
-                 use_single_neural_network: bool = False, **kwargs):
+                 use_single_neural_network: bool = False,
+                 use_reinforce: bool = True,
+                 use_combined_model: bool = False,
+                 **kwargs):
         """
         Parameters added by Igor:
         :param softmax_temperature: larger temperature means larger entropy of routing decisions.
@@ -68,7 +71,10 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         self.min_temp = softmax_temperature
         # added by Igor: probability smoothing (0 means no smoothing):
         self.probability_smoothing = probability_smoothing
-        
+
+        self.use_reinforce = use_reinforce
+        self.use_combined_model = use_combined_model
+
         # changed by Igor: brain loading process
         def load_brain():
             b = brain
@@ -102,7 +108,9 @@ class DQNRouter(LinkStateRouter, RewardAgent):
         if isinstance(msg, RewardMsg):
             action, Q_new, prev_state = self.receiveReward(msg)
             self.memory.add((prev_state, action[1], -Q_new))
-            self._replay()
+
+            if self.use_reinforce:
+                self._replay()
             return []
         else:
             return super().handleMsgFrom(sender, msg)
@@ -257,13 +265,16 @@ class DQNRouterEmb(DQNRouterOO):
         super().__init__(**kwargs)
 
     def _makeBrain(self, additional_inputs=[], **kwargs):
-        # return QNetwork(len(self.nodes), additional_inputs=additional_inputs,
-        #                 embedding_dim=self.embedding.dim, one_out=True, **kwargs)
-        # In order to use DQN without CombinedModel uncomment lines above
-        return CombinedNetwork(
-            len(self.nodes), additional_inputs=additional_inputs,
-            embedding_dim=self.embedding.dim, one_out=True, **kwargs
-        )
+        if not self.use_combined_model:
+            return QNetwork(
+                len(self.nodes), additional_inputs=additional_inputs,
+                embedding_dim=self.embedding.dim, one_out=True, **kwargs
+            )
+        else:
+            return CombinedNetwork(
+                len(self.nodes), additional_inputs=additional_inputs,
+                embedding_dim=self.embedding.dim, one_out=True, **kwargs
+            )
 
     def _nodeRepr(self, node):
         return self.embedding.transform(node).astype(np.float32)

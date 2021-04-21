@@ -1,6 +1,6 @@
 from typing import List, Tuple, Dict, Union
 
-from dqnroute.networks.ppo_actor_critic_networks import PPOActor, PPOCritic
+from dqnroute.networks.actor_critic_networks import PPOActor, PPOCritic
 
 from ..base import *
 from .link_state import *
